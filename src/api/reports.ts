@@ -4,6 +4,7 @@ import { access } from './access.js';
 import { upsertDoc } from './docs.js';
 import { isUuid, isRecord, parseProjectSlug } from '../core/validation.js';
 import { defined } from '../core/defined.js';
+import { AGENT_STEP_STATUS, BUG_STATUS, DEVELOPMENT_STATUS, TEST_RUN_STATUS } from '../core/status.js';
 
 interface OrderRow {
   id: string;
@@ -88,25 +89,25 @@ export async function generateSprintReport(pool: Pool | PoolClient, sprintId: st
   );
   const failures = await pool.query<{ developmentId: string; agentName: string; output: string }>(
     `SELECT DISTINCT ON (r.development_id) r.development_id AS "developmentId", st.agent_name AS "agentName", st.output
-       FROM agent_runs r JOIN agent_run_steps st ON st.run_id = r.id AND st.status = 'failed'
+       FROM agent_runs r JOIN agent_run_steps st ON st.run_id = r.id AND st.status = '${AGENT_STEP_STATUS.failed}'
       WHERE r.development_id = ANY($1::uuid[])
       ORDER BY r.development_id, r.started_at DESC, st.position`,
     [orders.rows.map((order) => order.id)],
   );
   const bugs = await pool.query<{ title: string; severity: string }>(
-    `SELECT title, severity FROM bugs WHERE sprint_id = $1 AND status IN ('open', 'in_progress') ORDER BY created_at`,
+    `SELECT title, severity FROM bugs WHERE sprint_id = $1 AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}') ORDER BY created_at`,
     [sprintId],
   );
   const tests = await pool.query<{ failed: string; total: string }>(
-    `SELECT COUNT(*) FILTER (WHERE status = 'failed') AS failed, COUNT(*) AS total
+    `SELECT COUNT(*) FILTER (WHERE status = '${TEST_RUN_STATUS.failed}') AS failed, COUNT(*) AS total
        FROM test_runs WHERE project_slug = $1 AND started_at >= $2`,
     [info.projectSlug, info.startedAt],
   );
 
-  const done = orders.rows.filter((order) => order.status === 'done');
-  const open = orders.rows.filter((order) => order.status !== 'done');
+  const done = orders.rows.filter((order) => order.status === DEVELOPMENT_STATUS.done);
+  const open = orders.rows.filter((order) => order.status !== DEVELOPMENT_STATUS.done);
   const problems: SprintReport['problems'] = [];
-  for (const order of orders.rows.filter((row) => row.status === 'blocked')) {
+  for (const order of orders.rows.filter((row) => row.status === DEVELOPMENT_STATUS.blocked)) {
     const failure = failures.rows.find((row) => row.developmentId === order.id);
     problems.push({
       type: 'blocked',

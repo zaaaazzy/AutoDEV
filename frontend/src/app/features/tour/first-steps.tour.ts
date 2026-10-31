@@ -1,5 +1,6 @@
 import type { ApiService } from '../../core/api.service.js';
 import type { TourService, TourStep } from './tour.service.js';
+import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../../core/models.js';
 
 const CREATE_BUTTON = '.page-heading .page-create';
 
@@ -8,7 +9,7 @@ export function firstStepsTour(api: ApiService): TourStep[] {
   const startSprint = async (tour: TourService): Promise<void> => {
     const data = tour.store.data();
     // Läuft schon ein Sprint, gibt es nichts zu starten – einfach weiter.
-    if (data.sprints.some((sprint) => sprint.status === 'active')) {
+    if (data.sprints.some((sprint) => sprint.status === SPRINT_STATUS.active)) {
       tour.next();
       return;
     }
@@ -16,7 +17,7 @@ export function firstStepsTour(api: ApiService): TourStep[] {
     const sprint = data.sprints.find(
       (entry) =>
         entry.status === 'planned' &&
-        data.development.some((item) => item.sprintId === entry.id && item.status === 'planned'),
+        data.development.some((item) => item.sprintId === entry.id && item.status === DEVELOPMENT_STATUS.planned),
     );
     if (!sprint) {
       tour.store.notice.set(

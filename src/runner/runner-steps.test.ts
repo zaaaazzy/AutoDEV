@@ -10,9 +10,9 @@ import {
   type RunContext,
   runStep,
   selectWorkflowAgents,
-  shouldRetry,
   stepModel,
 } from './runner-steps.js';
+import { shouldRetry } from './step-invocation.js';
 import { ABANDONED_RUN_MS, MAX_STEP_MS } from './runner-runs.js';
 import { loadWorkflow, MAX_TIMEOUT_MINUTES, type WorkflowRow } from './runner-selection.js';
 import type { WorkflowAgent, WorkItem } from './runner-types.js';

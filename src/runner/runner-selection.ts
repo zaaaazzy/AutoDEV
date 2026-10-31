@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import { isUuid } from '../core/validation.js';
 import { awaitsBugApprovalSql } from '../core/bug-trust.js';
 import type { RunnerOptions, WorkItem, WorkflowAgent } from './runner-types.js';
+import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
 
 /** Höchstes Zeitlimit eines Agent-Schritts (--timeout-minutes); daraus leitet sich die Schwelle für verwaiste Läufe ab. */
 export const MAX_TIMEOUT_MINUTES = 240;
@@ -125,11 +126,11 @@ export async function selectItems(pool: Pool, options: RunnerOptions): Promise<W
     `SELECT ${columns}
        FROM development_items d
        LEFT JOIN sprints s ON s.id = d.sprint_id
-      WHERE d.project_slug = $1 AND d.status = 'planned' AND d.kind <> 'express'
+      WHERE d.project_slug = $1 AND d.status = '${DEVELOPMENT_STATUS.planned}' AND d.kind <> 'express'
         AND NOT ${awaitsBugApprovalSql('d')}
         -- auto_run nur ohne Sprint: Ein geplanter Sprint wartet auf seinen Start, ein abgeschlossener bzw. abgebrochener
         -- hält den Auftrag ohnehin an (sprintPaused) – er drehte sich sonst endlos (detachFromClosedSprints hängt ihn um).
-        AND (s.status = 'active' OR d.agent_id IS NOT NULL OR (d.auto_run AND d.sprint_id IS NULL))
+        AND (s.status = '${SPRINT_STATUS.active}' OR d.agent_id IS NOT NULL OR (d.auto_run AND d.sprint_id IS NULL))
         -- Nutzungslimit des Agent-Kontos bzw. Arbeitsordner nicht sauber: erst nach dem Reset wieder starten. Beides gilt
         -- für das ganze Projekt, nicht nur für den Auftrag, der es bemerkt hat – sonst liefe jeder weitere Auftrag in
         -- dieselbe Wand (ein von Hand gestarteter Agent läuft trotzdem).

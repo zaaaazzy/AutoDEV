@@ -12,6 +12,7 @@ import { gitEnvironment, projectEnvironment, runProjectCommand } from './project
 import type { RunnerOptions } from './runner-types.js';
 import { runTestAgent } from './test-agent.js';
 import { gateExecutor } from './test-sandbox.js';
+import { AGENT_RUN_STATUS, TEST_RUN_STATUS } from '../core/status.js';
 
 /** Ein Komplettlauf mit Playwright dauert; danach gilt er als hängend. */
 const TEST_TIMEOUT_MS = 60 * 60_000;
@@ -129,7 +130,7 @@ export async function processTestRequest(
                      ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
           -- Nicht neben einem laufenden Auftrag: der Agent schreibt sonst gleichzeitig im Projektordner.
           AND NOT EXISTS (SELECT 1 FROM agent_runs r JOIN development_items d ON d.id = r.development_id
-                           WHERE d.project_slug = $1 AND r.status = 'running')
+                           WHERE d.project_slug = $1 AND r.status = '${AGENT_RUN_STATUS.running}')
         RETURNING id, scope`,
       [options.project],
     )
@@ -225,8 +226,8 @@ export async function processTestRequest(
     // Ein schon verknüpfter Lauf darf nicht auf „running“ stehen bleiben.
     await pool
       .query(
-        `UPDATE test_runs SET status = 'failed', completed_at = NOW()
-          WHERE status = 'running' AND id = (SELECT run_id FROM test_requests WHERE id = $1)`,
+        `UPDATE test_runs SET status = '${TEST_RUN_STATUS.failed}', completed_at = NOW()
+          WHERE status = '${TEST_RUN_STATUS.running}' AND id = (SELECT run_id FROM test_requests WHERE id = $1)`,
         [request.id],
       )
       .catch(logged('test-request'));
@@ -241,8 +242,8 @@ export async function processTestRequest(
 /** Nach einem Neustart des Workers: angefangene Testanforderungen und ihre Läufe gelten als abgebrochen. */
 export async function recoverTestRequests(pool: Pool): Promise<void> {
   await pool.query(
-    `UPDATE test_runs SET status = 'failed', completed_at = NOW()
-      WHERE status = 'running' AND id IN (SELECT run_id FROM test_requests WHERE status = 'running')`,
+    `UPDATE test_runs SET status = '${TEST_RUN_STATUS.failed}', completed_at = NOW()
+      WHERE status = '${TEST_RUN_STATUS.running}' AND id IN (SELECT run_id FROM test_requests WHERE status = 'running')`,
   );
   await pool.query(
     `UPDATE test_requests SET status = 'failed', finished_at = NOW(), error = 'Worker wurde neu gestartet.'

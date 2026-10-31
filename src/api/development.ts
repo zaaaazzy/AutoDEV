@@ -47,6 +47,11 @@ import {
   parseProjectSlug,
 } from '../core/validation.js';
 
+/** Status, die ein manueller Einzellauf vorübergehend verlässt und danach wiederherstellt. */
+const RETURNABLE_SQL = [DEVELOPMENT_STATUS.backlog, DEVELOPMENT_STATUS.blocked, DEVELOPMENT_STATUS.done]
+  .map((status) => `'${status}'`)
+  .join(', ');
+
 // Bisherige Importpfade (board, review-routes, Tests) bleiben gültig.
 export { DEV_COLUMNS, retryAutoRunSql, retrySprintSql } from '../db/development-repository.js';
 export { retryComment } from './development-input.js';
@@ -74,9 +79,11 @@ export function developmentUpdateExtras(
     // Assigning a backlog order to a sprint or an agent plans it; removing both returns it to the backlog.
     const assigned = (sprintField ?? agentField)?.value !== null;
     const target = assigned
-      ? "'planned'"
-      : `CASE WHEN ${sprintField ? 'agent_id' : 'sprint_id'} IS NULL THEN 'backlog' ELSE 'planned' END`;
-    extras.push(`status = CASE WHEN status IN ('backlog', 'planned') THEN ${target} ELSE status END`);
+      ? `'${DEVELOPMENT_STATUS.planned}'`
+      : `CASE WHEN ${sprintField ? 'agent_id' : 'sprint_id'} IS NULL THEN '${DEVELOPMENT_STATUS.backlog}' ELSE '${DEVELOPMENT_STATUS.planned}' END`;
+    extras.push(
+      `status = CASE WHEN status IN ('${DEVELOPMENT_STATUS.backlog}', '${DEVELOPMENT_STATUS.planned}') THEN ${target} ELSE status END`,
+    );
   }
   if (sprintField && sprintField.value !== null) {
     // Wieder einem Sprint zugeordnet: nicht mehr „aus dem Sprint entfernt“.
@@ -90,8 +97,8 @@ export function developmentUpdateExtras(
   if (manualStart) {
     // A manual run of one agent restores the previous status after completion, even for done or blocked orders.
     extras.push(
-      "return_status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN COALESCE(return_status, status) ELSE return_status END",
-      "status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN 'planned' ELSE status END",
+      `return_status = CASE WHEN status IN (${RETURNABLE_SQL}) THEN COALESCE(return_status, status) ELSE return_status END`,
+      `status = CASE WHEN status IN (${RETURNABLE_SQL}) THEN '${DEVELOPMENT_STATUS.planned}' ELSE status END`,
     );
   }
   return extras;

@@ -1,6 +1,7 @@
 import { Component, DestroyRef, Injectable, computed, inject, input, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import type { Sprint } from '../../core/models.js';
+import { SPRINT_STATUS } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { visibleInterval } from '../../core/visible-interval.js';
 import type { LiveRun } from './test-run-live.js';
@@ -11,7 +12,7 @@ const POLL_MS = 3_000;
 /** Sprint, bei dem Git noch arbeitet: Sicherung offen/läuft oder Pull Request wartet auf CI bzw. Merge. */
 function waitingOnGit(sprint: Sprint): boolean {
   if (sprint.gitSync === 'pending' || sprint.gitSync === 'running') return true;
-  return sprint.status === 'review' && Boolean(sprint.prUrl) && sprint.ciStatus !== 'failure';
+  return sprint.status === SPRINT_STATUS.review && Boolean(sprint.prUrl) && sprint.ciStatus !== 'failure';
 }
 /** Steht nur ein Push an (noch kein Test), den Sprint-Stand seltener nachladen. */
 const SYNC_RELOAD_MS = 15_000;
@@ -110,7 +111,8 @@ export class WaitStatusComponent {
 
   readonly status = computed(() => {
     const data = this.store.data();
-    const sprint = data.sprints.find(waitingOnGit) ?? data.sprints.find((entry) => entry.status === 'active') ?? null;
+    const sprint =
+      data.sprints.find(waitingOnGit) ?? data.sprints.find((entry) => entry.status === SPRINT_STATUS.active) ?? null;
     return waitStatus(this.testLive.live(), sprint, data.runs);
   });
 

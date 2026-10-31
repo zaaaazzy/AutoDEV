@@ -6,7 +6,6 @@ import { parsePreviewPages, parseVisualSettings, previewUrlError } from '../runn
 import type { Principal } from './roles.js';
 
 /** Spalten der visuellen Prüfung in den Projekt-Einstellungen. */
-export const VISUAL_COLUMNS = `preview_url AS "previewUrl", preview_pages AS "previewPages", visual_settings AS "visualSettings"`;
 
 /** Prüft Vorschau-Adresse, Seiten und Einstellungen; liefert Spalten und Werte oder den Fehler. */
 export function parsePreviewSettings(body: Record<string, unknown>): [string, unknown][] | string {

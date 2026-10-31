@@ -3,7 +3,7 @@ import { fencedBugDescriptionSql, unapprovedBugSql } from '../core/bug-trust.js'
 import { folderAvailable } from '../core/folder-guard.js';
 import { summarizeTestFailure } from '../core/test-results.js';
 import { humanActionFor, setActionTodo } from './action-todo.js';
-import { DEVELOPMENT_STATUS } from '../core/status.js';
+import { AGENT_STEP_STATUS, DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
 import { shortTitle } from '../core/validation.js';
 import type { Pool } from 'pg';
 import { reportAgentBug } from '../db/bugs-repository.js';
@@ -292,8 +292,8 @@ export async function delegateAfterAnalysis(
 export async function resumeAfterEnvironment(pool: Pool, project: string, cwd?: string): Promise<void> {
   if (cwd !== undefined && !folderAvailable(cwd)) return;
   await pool.query(
-    `UPDATE development_items SET status = 'planned', auto_run = TRUE, failure = NULL, action_todo = NULL, retry_count = retry_count + 1, updated_at = NOW()
-      WHERE project_slug = $1 AND status = 'blocked' AND action_todo = ANY($2::text[]) AND retry_count < $3`,
+    `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE, failure = NULL, action_todo = NULL, retry_count = retry_count + 1, updated_at = NOW()
+      WHERE project_slug = $1 AND status = '${DEVELOPMENT_STATUS.blocked}' AND action_todo = ANY($2::text[]) AND retry_count < $3`,
     [project, [ENVIRONMENT_TODO, GIT_FOLDER_TODO], MAX_AUTO_RETRIES],
   );
 }
@@ -307,10 +307,10 @@ export async function resumeAfterEnvironment(pool: Pool, project: string, cwd?: 
 export async function detachFromClosedSprints(pool: Pool, project: string): Promise<number> {
   const result = await pool.query(
     `UPDATE development_items d
-        SET sprint_id = (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = 'active' ORDER BY created_at LIMIT 1),
+        SET sprint_id = (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = '${SPRINT_STATUS.active}' ORDER BY created_at LIMIT 1),
             sprint_rank = NULL, updated_at = NOW()
-      WHERE d.project_slug = $1 AND d.status = 'planned' AND d.auto_run
-        AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.status IN ('completed', 'cancelled'))`,
+      WHERE d.project_slug = $1 AND d.status = '${DEVELOPMENT_STATUS.planned}' AND d.auto_run
+        AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.status IN ('${SPRINT_STATUS.completed}', '${SPRINT_STATUS.cancelled}'))`,
     [project],
   );
   return result.rowCount ?? 0;
@@ -333,8 +333,8 @@ export async function queueBugFix(
     `INSERT INTO development_items (project_slug, sprint_id, title, description, status, priority, kind, bug_id, auto_run)
      SELECT b.project_slug,
             CASE WHEN $2::uuid IS NOT NULL THEN COALESCE(
-              (SELECT s.id FROM sprints s WHERE s.id = $2::uuid AND s.status NOT IN ('completed', 'cancelled')),
-              (SELECT s.id FROM sprints s WHERE s.project_slug = b.project_slug AND s.status = 'active'
+              (SELECT s.id FROM sprints s WHERE s.id = $2::uuid AND s.status NOT IN ('${SPRINT_STATUS.completed}', '${SPRINT_STATUS.cancelled}')),
+              (SELECT s.id FROM sprints s WHERE s.project_slug = b.project_slug AND s.status = '${SPRINT_STATUS.active}'
                 ORDER BY s.created_at LIMIT 1)) END,
             left('Bug: ' || b.title, 180),
             COALESCE($4, 'Behebe den Fehler, der den Auftrag „' || $3 || '“ blockiert. Danach wird der Auftrag automatisch erneut gestartet.') || E'\n\n' ||
@@ -349,8 +349,8 @@ export async function queueBugFix(
 /** Nach erfolgreicher Behebung: den blockierten Ursprungsauftrag erneut einplanen (begrenzte Versuche). */
 export async function resumeBlockedByBug(pool: Pool, bugId: string): Promise<void> {
   await pool.query(
-    `UPDATE development_items d SET status = 'planned', auto_run = TRUE, failure = NULL, action_todo = NULL, retry_count = retry_count + 1, updated_at = NOW()
-      WHERE d.failure_bug_id = $1 AND d.status = 'blocked' AND d.kind <> 'bug' AND d.retry_count < $2
+    `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE, failure = NULL, action_todo = NULL, retry_count = retry_count + 1, updated_at = NOW()
+      WHERE d.failure_bug_id = $1 AND d.status = '${DEVELOPMENT_STATUS.blocked}' AND d.kind <> 'bug' AND d.retry_count < $2
         AND (SELECT auto_bugfix FROM projects WHERE slug = d.project_slug)`,
     [bugId, MAX_AUTO_RETRIES],
   );
@@ -367,9 +367,9 @@ export async function backfillFailures(pool: Pool, project: string): Promise<voi
        FROM development_items d
        LEFT JOIN LATERAL (
          SELECT st.agent_name, st.output, st.run_id FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
-          WHERE r.development_id = d.id AND st.status = 'failed' ORDER BY r.started_at DESC, st.position DESC LIMIT 1
+          WHERE r.development_id = d.id AND st.status = '${AGENT_STEP_STATUS.failed}' ORDER BY r.started_at DESC, st.position DESC LIMIT 1
        ) last ON TRUE
-      WHERE d.project_slug = $1 AND d.status = 'blocked' AND d.failure IS NULL AND d.kind <> 'bug' AND last.agent_name IS NOT NULL
+      WHERE d.project_slug = $1 AND d.status = '${DEVELOPMENT_STATUS.blocked}' AND d.failure IS NULL AND d.kind <> 'bug' AND last.agent_name IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM agent_run_steps c WHERE c.run_id = last.run_id AND c.cancel_requested)`,
     [project],
   );

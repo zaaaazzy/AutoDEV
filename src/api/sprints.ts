@@ -25,6 +25,7 @@ import {
   ONE_ACTIVE_SPRINT_MESSAGE as ONE_ACTIVE_MESSAGE,
   SPRINT_HOLDING_DEVELOPMENT_STATUSES,
 } from '../core/sprint-rules.js';
+import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
 
 const SPRINT_STATUSES = new Set(['planned', 'active', 'completed', 'cancelled']);
 const SPRINT_COLUMNS = `id, project_slug AS "projectSlug", name, goal, status,
@@ -57,15 +58,15 @@ export async function cancelSprint(pool: Pool, sprintId: string): Promise<{ stop
   const stopped = await pool.query(
     `UPDATE agent_run_steps st SET cancel_requested = TRUE
        FROM agent_runs r JOIN development_items d ON d.id = r.development_id
-      WHERE r.id = st.run_id AND d.sprint_id = $1 AND st.status = 'running' AND r.status = 'running'`,
+      WHERE r.id = st.run_id AND d.sprint_id = $1 AND st.status = '${AGENT_STEP_STATUS.running}' AND r.status = '${AGENT_RUN_STATUS.running}'`,
     [sprintId],
   );
   const released = await pool.query(
     `UPDATE development_items SET removed_from_sprint = (SELECT name FROM sprints WHERE id = $1),
             removed_from_sprint_at = NOW(), sprint_id = NULL, agent_id = NULL, auto_run = FALSE,
-            status = CASE WHEN status IN ('planned', 'approval') THEN 'backlog' ELSE status END,
+            status = CASE WHEN status IN ('${DEVELOPMENT_STATUS.planned}', '${DEVELOPMENT_STATUS.approval}') THEN '${DEVELOPMENT_STATUS.backlog}' ELSE status END,
             review_branch = NULL, review_base = NULL, review_since = NULL, review_approved_at = NULL, updated_at = NOW()
-      WHERE sprint_id = $1 AND status NOT IN ('done', 'rejected')`,
+      WHERE sprint_id = $1 AND status NOT IN ('${DEVELOPMENT_STATUS.done}', '${DEVELOPMENT_STATUS.rejected}')`,
     [sprintId],
   );
   // Eine Pause ist mit dem Abbruch erledigt; wieder geplant startet der Sprint sonst pausiert.
@@ -117,7 +118,12 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     const fields = parseFields(request.body, SPRINT_FIELDS);
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
     // Neue Sprints starten immer als geplant: aktiv und abgeschlossen gibt es nur über die Statuswechsel.
-    if (!slug || !fields || !values.get('name') || (values.get('status') ?? 'planned') !== 'planned') {
+    if (
+      !slug ||
+      !fields ||
+      !values.get('name') ||
+      (values.get('status') ?? SPRINT_STATUS.planned) !== SPRINT_STATUS.planned
+    ) {
       response
         .status(400)
         .json(slug ? invalidInput(request.body, SPRINT_FIELDS, ['name']) : { message: 'Ungültiges Projekt.' });
@@ -186,16 +192,16 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
           slug: string;
         }>(
           `SELECT status, project_slug AS slug, (SELECT COUNT(*)::int FROM development_items
-                            WHERE sprint_id = s.id AND status = 'in_progress') AS running,
+                            WHERE sprint_id = s.id AND status = '${DEVELOPMENT_STATUS.inProgress}') AS running,
                   (SELECT COUNT(*)::int FROM development_items
-                    WHERE sprint_id = s.id AND status = 'approval') AS waiting,
+                    WHERE sprint_id = s.id AND status = '${DEVELOPMENT_STATUS.approval}') AS waiting,
                   (SELECT COUNT(*)::int FROM sprints o
-                    WHERE o.project_slug = s.project_slug AND o.id <> s.id AND o.status = 'active') AS others
+                    WHERE o.project_slug = s.project_slug AND o.id <> s.id AND o.status = '${SPRINT_STATUS.active}') AS others
              FROM sprints s WHERE id = $1`,
           [request.params.id],
         );
         from = current.rows[0]?.status;
-        if (from === 'review') {
+        if (from === SPRINT_STATUS.review) {
           response.status(409).json({
             message: 'Der Sprint ist im Review: Merge und Abschluss folgen nach grüner CI im Pull Request.',
           });
@@ -206,9 +212,9 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
           ? null
           : !canChangeSprintStatus(from, target)
             ? `Statuswechsel ${from} → ${target} ist für Sprints nicht erlaubt.`
-            : target === 'completed'
+            : target === SPRINT_STATUS.completed
               ? completeSprintConflict(Number(current.rows[0]?.running), Number(current.rows[0]?.waiting))
-              : target === 'active' && Number(current.rows[0]?.others) > 0
+              : target === SPRINT_STATUS.active && Number(current.rows[0]?.others) > 0
                 ? ONE_ACTIVE_MESSAGE
                 : null;
         if (conflict) {
@@ -218,7 +224,11 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
         // Git-Zustand: Live schalten braucht einen sauberen Projektordner, Starten einen sauberen Agent-Ordner.
         const slug = current.rows[0]?.slug;
         const guarded =
-          target === 'completed' ? 'go_live' : target === 'active' && from !== 'active' ? 'sprint_start' : null;
+          target === SPRINT_STATUS.completed
+            ? 'go_live'
+            : target === SPRINT_STATUS.active && from !== SPRINT_STATUS.active
+              ? 'sprint_start'
+              : null;
         if (slug && guarded && !(await guardGit(pool, slug, guarded, request.body, response))) return;
       }
       // Status nur ändern, wenn er seit der Prüfung gleich geblieben ist (kein TOCTOU mit Worker oder zweitem Klick).
@@ -231,7 +241,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       );
       // Nur beim Übergang ≠ abgeschlossen → abgeschlossen: Name oder Ziel eines alten Sprints zu ändern darf Bericht,
       // Merge und Push nicht erneut auslösen. Das UPDATE ist an den gelesenen Status gebunden, der Wechsel also echt.
-      const completing = target === 'completed' && from !== undefined && from !== 'completed';
+      const completing = target === SPRINT_STATUS.completed && from !== undefined && from !== SPRINT_STATUS.completed;
       let result;
       if (completing) {
         // Status-UPDATE und Abschluss in einer Transaktion: scheitert der Abschluss (z. B. CHECK end_date >= start_date),
@@ -264,7 +274,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
         });
         return;
       }
-      if (target === 'cancelled' && from !== undefined && from !== 'cancelled') {
+      if (target === SPRINT_STATUS.cancelled && from !== undefined && from !== SPRINT_STATUS.cancelled) {
         await cancelSprint(pool, request.params.id);
       }
       response.json({ sprint: result.rows[0] });
@@ -311,7 +321,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     const principal = response.locals.principal as Principal | undefined;
     const result = await pool.query(
       `UPDATE sprints SET paused_at = COALESCE(paused_at, NOW()), paused_by = COALESCE(paused_by, $2)
-        WHERE id = $1 AND status = 'active' RETURNING ${SPRINT_COLUMNS}`,
+        WHERE id = $1 AND status = '${SPRINT_STATUS.active}' RETURNING ${SPRINT_COLUMNS}`,
       [request.params.id, principal?.displayName ?? null],
     );
     if (!result.rows[0]) {
@@ -372,8 +382,8 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     // „Geplant“ ohne Sprint in der Liste (den Sprint-Verweis löscht der Fremdschlüssel). Einzeln gestartete behalten
     // ihren Status (agent_id), sie laufen ohne Sprint.
     await pool.query(
-      `UPDATE development_items SET status = 'backlog', updated_at = NOW()
-        WHERE sprint_id = $1 AND status = 'planned' AND agent_id IS NULL
+      `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.backlog}', updated_at = NOW()
+        WHERE sprint_id = $1 AND status = '${DEVELOPMENT_STATUS.planned}' AND agent_id IS NULL
           AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = $1 AND ${deletable})`,
       [request.params.id],
     );

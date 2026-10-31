@@ -1,6 +1,7 @@
 import type { Bug, BugStatus, Sprint } from '../../core/models.js';
 import type { FormValues } from '../../shared/forms.js';
 import { isAssignableSprintStatus } from '../../../../../src/core/development-transitions.js';
+import { BUG_STATUS } from '../../core/models.js';
 
 /** Reihenfolge überall gleich: aufsteigend nach Schwere. */
 export const SEVERITIES: { value: Bug['severity']; label: string }[] = [
@@ -11,7 +12,7 @@ export const SEVERITIES: { value: Bug['severity']; label: string }[] = [
 ];
 
 /** Diese Status legen den Bug auf den Friedhof; in der Oberfläche gibt es von dort keinen Weg zurück. */
-export const BURYING_STATUSES = new Set<BugStatus>(['fixed', 'wontfix', 'rejected']);
+export const BURYING_STATUSES = new Set<BugStatus>([BUG_STATUS.fixed, BUG_STATUS.wontfix, BUG_STATUS.rejected]);
 
 /** Höchstlänge beim Bearbeiten (DB-Grenze); neue Bugs haben kürzere Titel (API: TITLE_MAX). */
 export const EDIT_TITLE_MAX = 180;

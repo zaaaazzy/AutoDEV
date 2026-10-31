@@ -7,6 +7,7 @@ import {
   hasOtherActiveSprint,
   ONE_ACTIVE_SPRINT_MESSAGE,
 } from '../../../../../src/core/sprint-rules.js';
+import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../../core/models.js';
 
 type SprintRef = { id: string; status: string; gitSync?: string | null };
 type ItemRef = { sprintId?: string | null; status: string };
@@ -51,15 +52,17 @@ export function sprintButtons(
     );
   return {
     edit: plan,
-    start: activatable && sprint.status === 'planned',
-    pause: run && sprint.status === 'active' && !sprint.pausedAt,
-    resume: run && sprint.status === 'active' && !!sprint.pausedAt,
+    start: activatable && sprint.status === SPRINT_STATUS.planned,
+    pause: run && sprint.status === SPRINT_STATUS.active && !sprint.pausedAt,
+    resume: run && sprint.status === SPRINT_STATUS.active && !!sprint.pausedAt,
     live,
-    liveBlocked: live ? completeSprintConflict(mine('in_progress'), mine('approval')) : null,
-    reopen: activatable && sprint.status === 'completed',
+    liveBlocked: live
+      ? completeSprintConflict(mine(DEVELOPMENT_STATUS.inProgress), mine(DEVELOPMENT_STATUS.approval))
+      : null,
+    reopen: activatable && sprint.status === SPRINT_STATUS.completed,
     activateBlocked: activatable && hasOtherActiveSprint(sprint, sprints) ? ONE_ACTIVE_SPRINT_MESSAGE : null,
     cancel: plan && canChangeSprintStatus(sprint.status, 'cancelled'),
-    replan: plan && sprint.status === 'cancelled' && canChangeSprintStatus(sprint.status, 'planned'),
+    replan: plan && sprint.status === SPRINT_STATUS.cancelled && canChangeSprintStatus(sprint.status, 'planned'),
     remove: plan && canDeleteSprint(sprint, items),
   };
 }

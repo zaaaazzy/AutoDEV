@@ -9,6 +9,7 @@ import { NgClass } from '@angular/common';
 import { Component, computed, inject } from '@angular/core';
 import { AgentActivityService } from '../../core/agent-activity.service.js';
 import type { DevelopmentItem } from '../../core/models.js';
+import { BUG_STATUS, SPRINT_STATUS } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import {
   CATEGORIES,
@@ -74,7 +75,7 @@ export class DashboardComponent {
   protected readonly recentRuns = RECENT_RUNS;
 
   protected readonly activeSprint = computed(
-    () => this.data().sprints.find((sprint) => sprint.status === 'active') ?? null,
+    () => this.data().sprints.find((sprint) => sprint.status === SPRINT_STATUS.active) ?? null,
   );
   protected readonly openIdeasCount = computed(
     () => this.data().ideas.filter((idea) => OPEN_IDEA_STATUSES.includes(idea.status)).length,
@@ -129,11 +130,11 @@ export class DashboardComponent {
   protected readonly bugShares = computed<ShareSegment[]>(() =>
     (
       [
-        ['open', 'bad'],
-        ['in_progress', 'active'],
-        ['fixed', 'ok'],
-        ['wontfix', 'neutral'],
-        ['rejected', 'neutral'],
+        [BUG_STATUS.open, 'bad'],
+        [BUG_STATUS.inProgress, 'active'],
+        [BUG_STATUS.fixed, 'ok'],
+        [BUG_STATUS.wontfix, 'neutral'],
+        [BUG_STATUS.rejected, 'neutral'],
       ] as const
     ).map(([status, tone]) => ({
       label: statusLabel(status),
@@ -144,7 +145,9 @@ export class DashboardComponent {
   );
 
   protected readonly severityShares = computed<ShareSegment[]>(() => {
-    const open = this.data().bugs.filter((bug) => bug.status === 'open' || bug.status === 'in_progress');
+    const open = this.data().bugs.filter(
+      (bug) => bug.status === BUG_STATUS.open || bug.status === BUG_STATUS.inProgress,
+    );
     return (
       [
         ['critical', 'bad'],
@@ -158,7 +161,10 @@ export class DashboardComponent {
       tone,
       link: {
         section: 'bugs',
-        filters: { severity: [severityLabel(severity)], status: [statusLabel('open'), statusLabel('in_progress')] },
+        filters: {
+          severity: [severityLabel(severity)],
+          status: [statusLabel(BUG_STATUS.open), statusLabel(BUG_STATUS.inProgress)],
+        },
       },
     }));
   });

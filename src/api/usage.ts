@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { access } from './access.js';
 import { parseProjectSlug } from '../core/validation.js';
 import { realFailureSql } from '../core/interrupted-steps.js';
+import { AGENT_STEP_STATUS, DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
 
 /** Bezeichnungen der Agents außerhalb des Auftrags-Workflows (Tabelle agent_usage). */
 const SYSTEM_ROLES: Record<string, string> = {
@@ -66,7 +67,7 @@ export async function collectUsage(pool: Pool, slug: string): Promise<Record<str
       `SELECT st.agent_name AS agent, COUNT(*) AS count, COUNT(*) FILTER (WHERE ${realFailureSql('st')}) AS failed,
               SUM(st.tokens) AS tokens, SUM(st.duration_ms) AS ms, SUM(st.cost_usd) AS cost
          FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
-        WHERE r.project_slug = $1 AND st.status IN ('passed', 'failed')
+        WHERE r.project_slug = $1 AND st.status IN ('${AGENT_STEP_STATUS.passed}', '${AGENT_STEP_STATUS.failed}')
         GROUP BY st.agent_name`,
       [slug],
     ),
@@ -169,14 +170,14 @@ export async function collectUsage(pool: Pool, slug: string): Promise<Record<str
  */
 export async function completedSprintUsage(pool: Pool, slug: string, limit = 3): Promise<Usage[]> {
   const rows = await pool.query<{ tokens: string | null; ms: string | null; cost: string | null }>(
-    `SELECT SUM(st.tokens) FILTER (WHERE d.status = 'done') AS tokens,
-            SUM(st.duration_ms) FILTER (WHERE d.status = 'done') AS ms,
-            SUM(st.cost_usd) FILTER (WHERE d.status = 'done') AS cost
+    `SELECT SUM(st.tokens) FILTER (WHERE d.status = '${DEVELOPMENT_STATUS.done}') AS tokens,
+            SUM(st.duration_ms) FILTER (WHERE d.status = '${DEVELOPMENT_STATUS.done}') AS ms,
+            SUM(st.cost_usd) FILTER (WHERE d.status = '${DEVELOPMENT_STATUS.done}') AS cost
        FROM sprints s
        LEFT JOIN development_items d ON d.sprint_id = s.id
        LEFT JOIN agent_runs r ON r.development_id = d.id
        LEFT JOIN agent_run_steps st ON st.run_id = r.id
-      WHERE s.project_slug = $1 AND s.status = 'completed'
+      WHERE s.project_slug = $1 AND s.status = '${SPRINT_STATUS.completed}'
       GROUP BY s.id
       ORDER BY COALESCE(s.end_date, s.created_at::date) DESC, s.created_at DESC
       LIMIT $2`,
@@ -224,7 +225,7 @@ export async function routingSavings(pool: Pool, slug: string): Promise<Record<s
       `SELECT COALESCE(st.model, 'unbekannt') AS model, COUNT(*) AS count, COALESCE(SUM(st.tokens), 0) AS tokens,
               COALESCE(SUM(st.cost_usd), 0) AS cost, COUNT(*) FILTER (WHERE st.routing_rule IS NOT NULL) AS routed
          FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
-        WHERE r.project_slug = $1 AND st.status IN ('passed', 'failed')
+        WHERE r.project_slug = $1 AND st.status IN ('${AGENT_STEP_STATUS.passed}', '${AGENT_STEP_STATUS.failed}')
         GROUP BY 1 ORDER BY SUM(st.tokens) DESC NULLS LAST LIMIT 20`,
       [slug],
     ),

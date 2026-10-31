@@ -27,6 +27,7 @@ import { generateSprintReport } from './reports.js';
 import { guardGit } from './git-state.js';
 import { completedSprintUsage, costOfTokens, tokenPriceUsd } from './usage.js';
 import { defined } from '../core/defined.js';
+import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
 
 /** Modus der Sprintplanung je Projekt: manuell (Standard), vorschlagen, Autopilot. */
 export const SPRINT_MODES = ['manual', 'suggest', 'autopilot'] as const;
@@ -107,20 +108,21 @@ async function loadPlanningInput(pool: Pool, project: string): Promise<PlanningI
       `SELECT d.id, d.title, d.description, d.status, d.priority, d.kind, d.benefit, d.cost,
               d.effort_hours AS "effortHours", d.token_estimate AS "tokenEstimate",
               d.estimate_source AS "estimateSource", d.follow_up_of AS "followUpOf",
-              (d.retry_count > 0 OR d.removed_from_sprint_at IS NOT NULL OR d.status = 'blocked') AS troubled,
+              (d.retry_count > 0 OR d.removed_from_sprint_at IS NOT NULL OR d.status = '${DEVELOPMENT_STATUS.blocked}') AS troubled,
               d.action_todo AS "actionTodo"
          FROM development_items d LEFT JOIN sprints s ON s.id = d.sprint_id
-        WHERE d.project_slug = $1 AND d.status IN ('backlog', 'planned', 'blocked') AND d.kind <> 'express'
-          AND (d.sprint_id IS NULL OR s.status = 'completed')
+        WHERE d.project_slug = $1 AND d.status IN ('${DEVELOPMENT_STATUS.backlog}', '${DEVELOPMENT_STATUS.planned}', '${DEVELOPMENT_STATUS.blocked}') AND d.kind <> 'express'
+          AND (d.sprint_id IS NULL OR s.status = '${SPRINT_STATUS.completed}')
         ORDER BY d.created_at, d.id`,
       [project],
     )
   ).rows;
   const done = new Set(
     (
-      await pool.query<{ id: string }>(`SELECT id FROM development_items WHERE project_slug = $1 AND status = 'done'`, [
-        project,
-      ])
+      await pool.query<{ id: string }>(
+        `SELECT id FROM development_items WHERE project_slug = $1 AND status = '${DEVELOPMENT_STATUS.done}'`,
+        [project],
+      )
     ).rows.map((row) => row.id),
   );
   // Schätzungen auf gemessene Agent-Stunden und Tokens umrechnen; die Ist-Werte der letzten 3 Sprints nur zur Anzeige.
@@ -152,7 +154,7 @@ async function loadPlanningInput(pool: Pool, project: string): Promise<PlanningI
     followUpOf: row.followUpOf,
     troubled: row.troubled,
     // Nur „Aktion notwendig“ wartet auf einen Menschen und wandert fest mit; andere Blockierte werden normal bewertet.
-    carryOver: row.status === 'blocked' && !!row.actionTodo,
+    carryOver: row.status === DEVELOPMENT_STATUS.blocked && !!row.actionTodo,
     files: affectedFiles(row.description ?? ''),
   }));
   return {
@@ -210,7 +212,7 @@ export async function autopilotGuard(pool: Pool, project: string, now = new Date
   const last = (
     await pool.query<{ id: string; name: string; sync: string | null; message: string | null }>(
       `SELECT id, name, git_sync AS sync, git_message AS message FROM sprints
-        WHERE project_slug = $1 AND status = 'completed'
+        WHERE project_slug = $1 AND status = '${SPRINT_STATUS.completed}'
         ORDER BY COALESCE(end_date, created_at::date) DESC, created_at DESC LIMIT 1`,
       [project],
     )
@@ -237,7 +239,7 @@ export async function autopilotGuard(pool: Pool, project: string, now = new Date
   // PR-Modus: Der nächste Sprint startet erst, wenn der Pull Request gemergt ist (sonst fehlt der Stand in main).
   const review = (
     await pool.query<{ name: string }>(
-      `SELECT name FROM sprints WHERE project_slug = $1 AND status = 'review' ORDER BY updated_at LIMIT 1`,
+      `SELECT name FROM sprints WHERE project_slug = $1 AND status = '${SPRINT_STATUS.review}' ORDER BY updated_at LIMIT 1`,
       [project],
     )
   ).rows[0];
@@ -340,16 +342,16 @@ export async function applyProposal(
     await client.query(
       `UPDATE development_items d
           SET sprint_id = $2, sprint_rank = picked.rank,
-              status = CASE WHEN d.status IN ('backlog', 'blocked') THEN 'planned' ELSE d.status END,
+              status = CASE WHEN d.status IN ('${DEVELOPMENT_STATUS.backlog}', '${DEVELOPMENT_STATUS.blocked}') THEN 'planned' ELSE d.status END,
               auto_run = $4,
-              agent_id = CASE WHEN d.status = 'blocked' THEN NULL ELSE d.agent_id END,
-              failure = CASE WHEN d.status = 'blocked' THEN NULL ELSE d.failure END,
-              action_todo = CASE WHEN d.status = 'blocked' THEN NULL ELSE d.action_todo END,
-              retry_after = CASE WHEN d.status = 'blocked' THEN NULL ELSE d.retry_after END,
-              retry_count = d.retry_count + CASE WHEN d.status = 'blocked' THEN 1 ELSE 0 END,
-              analysis_status = CASE WHEN d.status <> 'blocked' OR d.analysis_status IN ('requested', 'running')
+              agent_id = CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN NULL ELSE d.agent_id END,
+              failure = CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN NULL ELSE d.failure END,
+              action_todo = CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN NULL ELSE d.action_todo END,
+              retry_after = CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN NULL ELSE d.retry_after END,
+              retry_count = d.retry_count + CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN 1 ELSE 0 END,
+              analysis_status = CASE WHEN d.status <> '${DEVELOPMENT_STATUS.blocked}' OR d.analysis_status IN ('requested', 'running')
                                      THEN d.analysis_status ELSE NULL END,
-              budget_since = CASE WHEN d.status = 'blocked' THEN NOW() ELSE d.budget_since END,
+              budget_since = CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN NOW() ELSE d.budget_since END,
               removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()
          FROM unnest($1::uuid[]) WITH ORDINALITY AS picked(id, rank)
         WHERE d.id = picked.id AND d.project_slug = $3`,
@@ -377,7 +379,7 @@ export async function completeSprint(pool: Pool, sprintId: string): Promise<bool
   try {
     await client.query('BEGIN');
     const claimed = await client.query(
-      `UPDATE sprints SET status = 'completed' WHERE id = $1 AND status = 'active' AND paused_at IS NULL RETURNING id`,
+      `UPDATE sprints SET status = '${SPRINT_STATUS.completed}' WHERE id = $1 AND status = '${SPRINT_STATUS.active}' AND paused_at IS NULL RETURNING id`,
       [sprintId],
     );
     if (!claimed.rows[0]) {
@@ -399,7 +401,7 @@ export async function completeSprint(pool: Pool, sprintId: string): Promise<bool
 export async function completeSprintIn(client: PoolClient, sprintId: string): Promise<void> {
   await client.query(
     // Ein vorzeitig gestarteter Sprint hat ein Startdatum in der Zukunft: das Ende nie davor legen (CHECK end >= start).
-    `UPDATE sprints SET status = 'completed', end_date = COALESCE(end_date, GREATEST(start_date, CURRENT_DATE))
+    `UPDATE sprints SET status = '${SPRINT_STATUS.completed}', end_date = COALESCE(end_date, GREATEST(start_date, CURRENT_DATE))
       WHERE id = $1`,
     [sprintId],
   );

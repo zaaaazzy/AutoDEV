@@ -1,18 +1,19 @@
 import type { DevelopmentItem, DevelopmentStatus, Sprint } from '../core/models.js';
+import { DEVELOPMENT_STATUS } from '../core/models.js';
 
 export const DEVELOPMENT_STATUSES: DevelopmentStatus[] = [
-  'backlog',
-  'planned',
-  'in_progress',
-  'blocked',
-  'approval',
-  'done',
-  'rejected',
+  DEVELOPMENT_STATUS.backlog,
+  DEVELOPMENT_STATUS.planned,
+  DEVELOPMENT_STATUS.inProgress,
+  DEVELOPMENT_STATUS.blocked,
+  DEVELOPMENT_STATUS.approval,
+  DEVELOPMENT_STATUS.done,
+  DEVELOPMENT_STATUS.rejected,
 ];
 
 /** Abgeschlossen: erledigt oder abgelehnt (verstösst gegen die Projektregeln) – zählt nicht mehr als offen. */
 export function isFinished(status: string): boolean {
-  return status === 'done' || status === 'rejected';
+  return status === DEVELOPMENT_STATUS.done || status === DEVELOPMENT_STATUS.rejected;
 }
 
 /** „Sprint 1“ statt „Sprint Sprint 1“, wenn der Name schon mit „Sprint“ beginnt. */

@@ -4,6 +4,7 @@ import { gitHelpers, previousSprintTag, sprintTag } from './git-sync.js';
 import { recordDeploy } from './production-events.js';
 import { scanLogs } from './production-monitor.js';
 import { agentEnvironment } from './runner-prompts.js';
+import { SPRINT_STATUS } from '../core/status.js';
 
 const DEPLOY_TIMEOUT_MS = 20 * 60_000;
 /** Ein Deploy, der länger als so lange als laufend markiert ist, gilt als abgebrochen (z. B. Worker-Neustart). */
@@ -20,7 +21,7 @@ export interface DeployOptions {
 export async function completedSprintTags(pool: Pick<Pool, 'query'>, project: string): Promise<string[]> {
   const rows = (
     await pool.query<{ id: string; name: string }>(
-      `SELECT id, name FROM sprints WHERE project_slug = $1 AND status = 'completed'
+      `SELECT id, name FROM sprints WHERE project_slug = $1 AND status = '${SPRINT_STATUS.completed}'
         ORDER BY COALESCE(git_synced_at, updated_at), created_at`,
       [project],
     )

@@ -12,6 +12,7 @@ import { restrictedSystemCommand } from './system-agents.js';
 import type { Pool } from 'pg';
 import { loadProjectContext } from '../core/project-context.js';
 import { DEFAULT_OLLAMA_URL, patientFetch, requestOllamaChat, resolveModel } from './ollama-client.js';
+import { DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
 
 export interface Estimate {
   effortHours: number | null;
@@ -93,7 +94,7 @@ export async function loadActualReference(
                  FROM development_items d
                  JOIN agent_runs r ON r.development_id = d.id
                  JOIN agent_run_steps st ON st.run_id = r.id
-                WHERE d.project_slug = $1 AND d.status = 'done' AND d.category IS NOT DISTINCT FROM $2
+                WHERE d.project_slug = $1 AND d.status = '${DEVELOPMENT_STATUS.done}' AND d.category IS NOT DISTINCT FROM $2
                 GROUP BY d.id
                HAVING SUM(st.tokens) > 0 OR SUM(st.duration_ms) > 0) done`,
       [project, category],
@@ -205,7 +206,7 @@ export async function estimateNewIdeas(
   const ideas = (
     await pool.query<{ id: string; title: string; description: string; category: string | null }>(
       `SELECT id, title, description, category FROM ideation_items
-        WHERE project_slug = $1 AND status IN ('idea', 'considering', 'review', 'requested') AND agent_note IS NULL
+        WHERE project_slug = $1 AND status IN ('${IDEATION_STATUS.idea}', '${IDEATION_STATUS.considering}', '${IDEATION_STATUS.review}', '${IDEATION_STATUS.requested}') AND agent_note IS NULL
           AND effort_hours IS NULL AND token_estimate IS NULL AND benefit IS NULL AND cost IS NULL
         ORDER BY created_at LIMIT 5`,
       [project],
