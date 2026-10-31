@@ -128,7 +128,8 @@ Dafür braucht es eine laufende App mit Datenbank, zum Beispiel `npm run seed:de
 
 ## Offen
 
-- **Tests nicht bestätigt:** `npm run typecheck`, `npm run test:unit` und `npm run format:check` sind bei der Dokumentation nicht gelaufen. Die Aussagen in diesem Handbuch stammen aus dem Code, nicht aus einem Testlauf.
+- **Tests:** Der Entwickler ließ Typecheck, Lint, Format und `npm run test:unit` laufen; alles grün bis auf `src/core/git-guard.test.ts` (Umgebung, nicht dieser Auftrag). Die Dokumentation hat sie nicht erneut ausgeführt.
+- **Gleiche Schwelle wie die Laufwarnung:** Stopp und Warnung „Schätzung überschritten“ (Sprint 30) nutzen dieselbe Prüfung, beide schlagen bei mehr als dem Dreifachen an.
 - **Printscreens fehlen** (siehe oben).
 - **Oberfläche nicht im Browser geprüft:** Die Beschreibung der Schaltflächen und Texte stammt aus dem Code.
 - **Sichtbarkeit von „Erneut versuchen“:** Ob die Schaltfläche in der Karte „Aktion notwendig“ für jede Rolle erscheint, ist im Frontend nicht geprüft. Die API verlangt in jedem Fall die Berechtigung „Ausführen“ (`access({ role: 'run' })`).

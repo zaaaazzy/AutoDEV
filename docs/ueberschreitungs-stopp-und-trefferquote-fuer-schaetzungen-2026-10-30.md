@@ -33,18 +33,20 @@ Auftrag 099e001e-45ef-4005-ad93-980165a79487 (Feature). Anlass: Abweichungen der
 - **Nach der Freigabe** zählt der Verbrauch ab `budget_since` neu; sonst würde der Auftrag sofort wieder blockieren. Wer die Schätzung nicht erhöht, blockiert nach dem Dreifachen des neuen Verbrauchs erneut.
 - Die Budget-Prüfung (Tag, Sprint, Auftrag, Rolle) blieb unverändert und wird zuerst ausgewertet.
 - Keine rückwirkende Neuschätzung, kein Lernverfahren über den Median hinaus, keine neue Seite.
-- Der Entwickler konnte weder Tests noch Typecheck ausführen (`node_modules` außerhalb des Arbeitsbereichs). Die Dokumentation hat sie ebenfalls nicht ausgeführt.
+- Die Tests liefen bei der Neuumsetzung im Arbeitscontainer (siehe Sprint-Tabelle); die Dokumentation selbst hat sie nicht erneut ausgeführt.
 
 ## Sprint
 
 | Auftrag | Zustand | Details |
 |---|---|---|
-| 099e001e Überschreitungs-Stopp und Trefferquote | Umsetzung abgeschlossen (Entwickler, bestanden); Dokumentation hier | Tester gescheitert, weil die Umgebung nicht lief (nicht wegen Testfehlern); Reviewer steht aus; Tests nie ausgeführt |
+| 099e001e Überschreitungs-Stopp und Trefferquote | Neu umgesetzt im Arbeitscontainer (Entwickler, bestanden), mit `sprint/sprint-30` zusammengeführt; Dokumentation hier und in `docs/auftraege/ueberschreitungs-stopp-und-trefferquote-2026-10-31.md` | Typecheck, Lint, Format und `npm run test:unit` grün bis auf `src/core/git-guard.test.ts` (ungültiges `/workspace/.git` im Container, nicht dieser Auftrag); Reviewer steht aus |
+
+> **Stand 31.10.2026:** Der Stand aus Sprint 29 wurde neu umgesetzt und mit Sprint 30 zusammengeführt. Stopp und Laufwarnung nutzen dieselbe Schwelle (`exceedsEstimate`, `src/core/estimate-overrun.ts`); die Art von Ideen kommt mit Migration 27. Die Beschreibung oben gilt weiter, Einzelheiten zum Merge stehen in der Auftragsdoku vom 31.10.2026. Frühere Hinweise zu nicht ausgeführten Tests sind überholt.
 
 ## Anfrage/TODO
 
-- **Tester-Lauf wiederholen:** Er scheiterte nur an der Umgebung, nicht an Testfehlern. Zuerst: `tsc: not found` bei `npm run typecheck` (Exit 127, Sandbox-Image „aideation-agent“) und `npx tsx` mit EACCES auf `/home/agent/.npm`. Im letzten Versuch stoppte das monatliche Ausgabenlimit der Organisation den Lauf (Limit durch die Administration anheben). Es gibt also noch kein Ergebnis zu Typen oder Tests. Die Tests sollen über `npm test` bzw. `npm run …` laufen.
-- `npm run typecheck`, `npm run test:unit` und `npm run format:check` ausführen (Test-Gate). Einzelne Tests nur über `npm test`/`npm run …`, nicht mit `npx tsx` und ohne `--experimental-test-coverage`.
+- Tests nur über `npm test`/`npm run …` starten, nicht mit `npx tsx` und ohne `--experimental-test-coverage`.
+- `src/core/git-guard.test.ts` schlägt im Container fehl (ungültiges `.git`); in einer Umgebung mit gültigem Repository gegenprüfen.
 - Oberfläche prüfen: Spalte „Trefferquote“ und Faktoranzeige in der Statistik, Art-Auswahl in der Idee, „Aktion notwendig“-Karte mit Freigabe nur mit passender Berechtigung (`auth.can()` wie API-Regel).
 - Oberflächentests (Tabellen, Dashboard) auf geänderte Texte prüfen.
 
