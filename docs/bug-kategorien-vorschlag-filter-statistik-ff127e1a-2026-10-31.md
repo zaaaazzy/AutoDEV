@@ -34,15 +34,16 @@ Jeder Bug kann eine feste Bug-Kategorie aus acht Werten tragen (`security`, `git
 - Offene Entscheidung für den Auftraggeber: `bug_category` bleibt neben `category` (Annahme). Ein Ersetzen würde den Vererbungstrigger ändern.
 
 ### Teststand
-Die Tests sind geschrieben. Ein grüner Lauf von Typprüfung, Unit-Tests, Frontend-Specs und Oberflächentest wurde vom Dokumentierer nicht ausgeführt und ist hier nicht belegt; das bleibt Sache des Testers (zuerst ohne Abdeckungs-Flags: `npx --no-install tsx --test …`).
+Der Tester-Schritt (after_task) ist **fehlgeschlagen**: Im gemeldeten Lauf (u. a. `src/runner/autofix.test.ts`, 95 Tests) bestanden 93, 2 schlugen fehl. Aus dem Auszug ist nicht erkennbar, welche beiden Tests es sind. Der Dokumentierer konnte sie hier nicht erneut ausführen (Befehle brauchten eine Freigabe), also ist die Ursache nicht geklärt und kein grüner Lauf belegt. Der Entwickler muss die fehlgeschlagenen Tests aus dem Testprotokoll ermitteln und beheben (Aufruf ohne Abdeckungs-Flags: `npx --no-install tsx --test <Datei>`). Danach sind Typprüfung, Unit-Tests, Frontend-Specs und `e2e/full-ui.check.ts` erneut zu prüfen.
 
 ## Sprint
 
 | Auftrag | Zustand | Details |
 |---|---|---|
-| ff127e1a Bug-Kategorien mit Vorschlag, Filter und Statistik | umgesetzt, Entwickler-Schritt bestanden, wartet auf Tester | Migration 26, Klassifikator, Altbestandslauf, Bestätigen, Filter, Tabelle Kategorie × Sprint, Retrospektive-Eingabe |
+| ff127e1a Bug-Kategorien mit Vorschlag, Filter und Statistik | umgesetzt, Tester-Lauf mit 2 fehlgeschlagenen Tests, Nachbesserung offen | Migration 26, Klassifikator, Altbestandslauf, Bestätigen, Filter, Tabelle Kategorie × Sprint, Retrospektive-Eingabe |
 
 ## Anfrage/TODO
-- Tester: Tests der genannten Dateien und den Oberflächentest ausführen; prüfen, dass die Summe der Tabelle Kategorie × Sprint der Zahl aller Bugs entspricht.
+- Entwickler: die 2 fehlgeschlagenen Tests aus dem Tester-Lauf finden und beheben.
+- Tester: danach Tests der genannten Dateien und den Oberflächentest ausführen; prüfen, dass die Summe der Tabelle Kategorie × Sprint der Zahl aller Bugs entspricht.
 - Auftraggeber: Annahme `bug_category` neben `category` bestätigen.
 - Nach dem Deployment: Worker neu starten, danach bei Bedarf „Altbestand kategorisieren“ (die 61 Bestandsbugs) ausführen und die Vorschläge prüfen.
