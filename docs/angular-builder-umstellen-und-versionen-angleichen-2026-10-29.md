@@ -54,6 +54,9 @@ Offen ist nur noch cdk. `package.json:44` und der Lockfile-Eintrag stehen auf `2
 
 git geht im Container weiterhin nicht (`gitfile does not point to a valid repository`), deshalb gibt es keinen Commit. Es wurden keine Tests ausgeführt: `tsx`/`npm` sind gesperrt, und `node` darf nur `--version`/`--check`.
 
+### Dokumentationslauf nach dem Entwickler (31.10.2026)
+Stand im Arbeitsordner geprüft: `package-lock.json` enthält weder `build-angular` noch `webpack` (0 Treffer), `engines` ist gesetzt, `@angular/cdk` steht in `package.json:44` weiter fest auf `20.2.14`. Geändert wurden zuletzt `.github/dependabot.yml`, `docs/ci.md`, beide Doku-Dateien zum Auftrag, `package.json`, `package-lock.json` und `scripts/angular-builder.test.ts` (Tests für Builder, `engines`, Startskripte und cdk-Version). Offen ist nur die cdk-Version: Die beiden cdk-Tests in `scripts/angular-builder.test.ts` scheitern, solange es bei `20.2.14` bleibt. Wahrscheinlich gibt es kein cdk 20.3.x; dann `npm install -D @angular/cdk@^20.2.14` und die Regex in Zeile 48 und 57 auf `^\^?20\.` lockern (der Entwickler nennt diese Form). Das geht nur auf dem Host mit npm. Danach `npm ci`, `npm run build:ui`, `npm run test:unit`, `npm audit`, `npm audit --omit=dev`, Build-Warnungen (NG8113, NG8107, 1.06 MB) mit dem früheren Stand vergleichen, `dist/prune-lock.mjs` nicht committen. Die Bugs mit „spend limit“ sind keine Codefehler. Es wurden keine Tests ausgeführt.
+
 ## Tests
 Laut Entwickler: `npm run build:ui` und `typecheck` fehlerfrei, `lint` 0 Fehler (812 Warnungen, schon vorher vorhanden), `test:unit` 1822 bestanden. `ng serve` mit Proxy startet („Local: http://localhost:4299/“); die Seite wurde nicht abgerufen (`curl` gesperrt). Für diese Dokumentation wurden die Tests nicht erneut ausgeführt.
 
