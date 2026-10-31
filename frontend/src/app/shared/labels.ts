@@ -1,4 +1,4 @@
-import type { DevelopmentStatus } from '../core/models.js';
+import type { DevelopmentItem, DevelopmentStatus, Sprint } from '../core/models.js';
 
 export const DEVELOPMENT_STATUSES: DevelopmentStatus[] = [
   'backlog',
@@ -66,6 +66,16 @@ export function priorityLabel(priority: string): string {
 
 export function severityLabel(severity: string): string {
   return SEVERITY_LABELS[severity] ?? severity;
+}
+
+/** Ampeltext der CI eines Sprint-Pull-Requests. */
+export function ciLabel(status: Sprint['ciStatus'] | undefined): string {
+  return status === 'success' ? 'grün' : status === 'failure' ? 'rot' : status === 'pending' ? 'läuft' : 'unbekannt';
+}
+
+/** Angezeigter Auftragstitel: Bei Bugs ersetzt der Käfer das Präfix „Bug:“. */
+export function orderTitle(item: Pick<DevelopmentItem, 'kind' | 'title'>): string {
+  return item.kind === 'bug' ? item.title.replace(/^Bug:\s*/i, '') : item.title;
 }
 
 export const CATEGORIES = ['frontend', 'backend', 'fullstack', 'infrastructure', 'docs', 'security'] as const;

@@ -181,22 +181,24 @@ export function resumePrompt(question: string, answer: string, references: strin
     .join('\n\n');
 }
 
+type ClaimedChat = {
+  id: string;
+  content: string;
+  agentId: string | null;
+  references: ChatReference[];
+  ideaCommentId: string | null;
+  replyTo: string | null;
+  origin: string;
+  taskRunId: string | null;
+};
+
 export async function processChat(
   pool: Pool,
   options: Pick<RunnerOptions, 'project' | 'cwd' | 'timeoutMs'>,
   execute: CommandExecutor = runCommand,
 ): Promise<boolean> {
   const claimed = (
-    await pool.query<{
-      id: string;
-      content: string;
-      agentId: string | null;
-      references: ChatReference[];
-      ideaCommentId: string | null;
-      replyTo: string | null;
-      origin: string;
-      taskRunId: string | null;
-    }>(
+    await pool.query<ClaimedChat>(
       `UPDATE chat_messages SET status = 'processing', updated_at = clock_timestamp()
       WHERE id = (SELECT id FROM chat_messages WHERE project_slug = $1 AND role = 'user' AND status = 'pending'
                    ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
@@ -206,6 +208,27 @@ export async function processChat(
     )
   ).rows[0];
   if (!claimed) return false;
+  // Wirft die Bearbeitung (z. B. Datenbank kurz weg), bliebe die Nachricht bis zum Worker-Neustart auf „processing“
+  // und würde nie beantwortet.
+  try {
+    return await answerChat(pool, options, execute, claimed);
+  } catch (error) {
+    await pool
+      .query(
+        `UPDATE chat_messages SET status = 'failed', updated_at = clock_timestamp() WHERE id = $1 AND status = 'processing'`,
+        [claimed.id],
+      )
+      .catch(logged('chat'));
+    throw error;
+  }
+}
+
+async function answerChat(
+  pool: Pool,
+  options: Pick<RunnerOptions, 'project' | 'cwd' | 'timeoutMs'>,
+  execute: CommandExecutor,
+  claimed: ClaimedChat,
+): Promise<boolean> {
   // Lauf einer Agent-Aufgabe (Routine oder Klick): Protokoll starten. Routinen arbeiten ohne Chat-Verlauf und Rückfragen.
   const run = await startTaskRun(pool, claimed.taskRunId).catch(logged('chat', null));
   const routine = claimed.origin === ROUTINE_ORIGIN;
@@ -235,7 +258,11 @@ export async function processChat(
   const startedAt = Date.now();
   const folderAtStart = folderAvailable(options.cwd);
   // Ordner belegt (Auftrag, Testlauf, anderer Worker) → nur lesend; sonst hält der Chat ihn bis zum Ende der Antwort.
-  const { readOnly, releaseTree } = await claimChatTree(options.cwd);
+  // Scheitert die Belegung, stoppt sonst niemand die Fortschrittsanzeige (stop() steht erst am Agent-Lauf).
+  const { readOnly, releaseTree } = await claimChatTree(options.cwd).catch((error: unknown) => {
+    progress.stop();
+    throw error;
+  });
   const resume = openQuestion?.sessionId
     ? {
         sessionId: openQuestion.sessionId,

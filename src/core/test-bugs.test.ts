@@ -3,7 +3,9 @@ import { test } from 'node:test';
 import { failureTail, fullTestCommand, useLatestMain } from '../runner/test-request.js';
 import { parseScope } from '../api/test-requests.js';
 import { requiredRole } from '../api/route-table.test.js';
-import { caseBugs, stepBug } from './test-bugs.js';
+import type { Pool } from 'pg';
+import { categoryFromBug } from './bug-category.js';
+import { caseBugs, fileBugs, stepBug } from './test-bugs.js';
 import type { TestCaseResult } from './test-results.js';
 
 const base: TestCaseResult = {
@@ -33,6 +35,37 @@ test('Testbefunde: je fehlgeschlagenem Test ein Bug mit Gerät, Befund und Link 
   assert.ok(caseBugs([{ ...base, title: 'x'.repeat(300) }], 'r')[0]!.title.length <= 180);
 });
 
+test('Testbefunde: Kategorie aus der Testdatei (src/ → backend, frontend/ → frontend)', () => {
+  const unit = caseBugs([{ ...base, category: 'unit', device: null, file: 'src/core/test-bugs.test.ts' }], 'r')[0]!;
+  assert.deepEqual(unit.paths, ['src/core/test-bugs.test.ts']);
+  assert.equal(categoryFromBug(unit), 'backend');
+  const ui = caseBugs([{ ...base, file: 'frontend/src/app/features/bugs/bugs.check.ts' }], 'r')[0]!;
+  assert.equal(categoryFromBug(ui), 'frontend');
+  // Ohne Pfad (nur Dateiname) entscheidet nicht die Regel, sondern später das Modell.
+  assert.equal(categoryFromBug(caseBugs([base], 'r')[0]!), null);
+});
+
+test('Testbefunde: fileBugs schreibt die Kategorie aus den Pfaden in den INSERT', async () => {
+  const inserts: unknown[][] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[]) => {
+      assert.match(sql, /INSERT INTO bugs \(project_slug, title, description, severity, source, category\)/);
+      inserts.push(values);
+      return { rowCount: 1, rows: [{ id: `bug-${inserts.length}` }] };
+    },
+  } as unknown as Pool;
+  const drafts = [
+    ...caseBugs([{ ...base, category: 'unit', device: null, file: 'src/core/a.test.ts' }], 'r'),
+    ...caseBugs([{ ...base, file: 'frontend/src/app/b.spec.ts' }], 'r'),
+    stepBug('npm run lint', 'deploy/backup.sh: Zeile 3 fehlerhaft', 'r'),
+  ];
+  assert.equal(await fileBugs(pool, 'shop', drafts), 3);
+  assert.deepEqual(
+    inserts.map((values) => values[4]),
+    ['backend', 'frontend', 'infrastructure'],
+  );
+});
+
 test('Testbefunde: fehlgeschlagener Schritt ohne Einzeltests wird ein Bug mit Ausgabe-Ende', () => {
   const bug = stepBug('npm run lint', 'Zeile 1\nFehler am Ende', 'run-2');
   assert.equal(bug.title, 'Test fehlgeschlagen: npm run lint');
@@ -41,7 +74,7 @@ test('Testbefunde: fehlgeschlagener Schritt ohne Einzeltests wird ein Bug mit Au
 });
 
 test('Kompletter Test: Befehl mit Projekt, Anfrage und Bugs; Umfang wird geprüft; Rolle „Agents ausführen“', () => {
-  assert.deepEqual(fullTestCommand('dev-log', { id: 'a1', scope: 'full' }), [
+  assert.deepEqual(fullTestCommand('dev-log', { id: 'a1', scope: 'full', evidenceId: null }), [
     'npm',
     'run',
     'test:full',
@@ -52,7 +85,7 @@ test('Kompletter Test: Befehl mit Projekt, Anfrage und Bugs; Umfang wird geprüf
     'a1',
     '--bugs',
   ]);
-  assert.equal(fullTestCommand('dev-log', { id: 'a1', scope: 'ui' }).at(-1), '--nur-oberflaeche');
+  assert.equal(fullTestCommand('dev-log', { id: 'a1', scope: 'ui', evidenceId: null }).at(-1), '--nur-oberflaeche');
   assert.equal(parseScope({}), 'full');
   assert.equal(parseScope({ scope: 'ui' }), 'ui');
   assert.equal(parseScope({ scope: 'alles' }), null);

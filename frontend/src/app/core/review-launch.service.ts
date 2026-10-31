@@ -2,9 +2,11 @@ import { DestroyRef, Injectable, inject, signal } from '@angular/core';
 import { ApiService } from './api.service.js';
 import { errorMessage } from './errors.js';
 import type { ReviewSlot, SprintCommit } from './models.js';
+import { sharedPoll } from './shared-poll.js';
 import { visibleInterval } from './visible-interval.js';
 
 const PENDING_REFRESH_MS = 2_000;
+const SLOTS_REFRESH_MS = 5_000;
 
 /**
  * Review-Container starten (Sprint-Ansicht und Sprint-Popover in der Kopfzeile teilen diesen Zustand):
@@ -26,9 +28,16 @@ export class ReviewLaunchService {
   /** Im Klick reservierter Tab (sonst blockiert der Popup-Blocker das Öffnen nach der Antwort). */
   private tab: Window | null = null;
   private stopTimer: (() => void) | null = null;
+  /** Ein Abruf der Container für alle angemeldeten Sprint-Reviews, egal wie viele Sprints aufgeklappt sind. */
+  private readonly slotsPoll = sharedPoll(() => void this.loadSlots().catch(() => undefined), SLOTS_REFRESH_MS);
 
   constructor() {
     inject(DestroyRef).onDestroy(() => this.stopPolling());
+  }
+
+  /** Meldet eine Anzeige der Container an (gemeinsamer Poll); die zurückgegebene Funktion meldet sie ab. */
+  watchSlots(): () => void {
+    return this.slotsPoll.subscribe();
   }
 
   async loadSlots(): Promise<void> {

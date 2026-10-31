@@ -28,6 +28,7 @@ import {
   type TestCategory,
 } from '../src/core/test-results.js';
 import { caseBugs, fileBugs, stepBug } from '../src/core/test-bugs.js';
+import { waitForBugCategories } from '../src/agent/bug-classifier.js';
 import { adminDatabaseUrl, localDatabaseUrl, readEnvValues } from '../src/core/local-database.js';
 import { connectExistingDatabase, readDatabaseConfig } from '../src/db/database.js';
 import {
@@ -40,6 +41,7 @@ import {
   updateTestRunStepProgress,
 } from '../src/db/test-runs.js';
 import { stepProgress } from '../src/core/test-progress.js';
+import { defined } from '../src/core/defined.js';
 
 const ROOT = join(import.meta.dirname, '..');
 const argument = (name: string) => {
@@ -275,6 +277,8 @@ class Recorder {
   async close(passed: boolean, report: string): Promise<string> {
     await saveTestReport(this.pool, this.runId, report);
     await finishTestRun(this.pool, this.runId, passed);
+    // Kategorien neuer Bugs (lokales Modell im Hintergrund) kurz abwarten; was dann noch fehlt, bleibt leer.
+    await waitForBugCategories(60_000);
     await this.pool.end();
     return this.runId;
   }
@@ -405,7 +409,7 @@ async function main(): Promise<void> {
   // und brauchen beide nur die gebaute Oberfläche aus dem Schritt davor.
   const PARALLEL = new Set(['E2E-Tests', 'Oberflächentest']);
   for (let position = 0; position < steps.length; position++) {
-    const step = steps[position]!;
+    const step = defined(steps[position]);
     const next = steps[position + 1];
     if (next && PARALLEL.has(step.name) && PARALLEL.has(next.name)) {
       results.push(

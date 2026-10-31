@@ -1,6 +1,7 @@
 /** Einordnung der Aufträge eines Sprints für die Liste auf der Sprint-Seite (Gruppen wie die Status-Etiketten). */
 
 import { isAssignableSprintStatus } from '../../../../../src/core/development-transitions.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 /**
  * Umsortieren, Herausnehmen und Hineinnehmen nur in geplanten oder aktiven Sprints (dieselbe Regel wie der Server);
@@ -50,7 +51,7 @@ export function phaseRank(phase: SprintPhase): number {
 }
 
 export function phaseLabel(phase: SprintPhase): string {
-  return SPRINT_PHASES[phaseRank(phase)]!.label;
+  return defined(SPRINT_PHASES[phaseRank(phase)]).label;
 }
 
 /** Wie die Agents abarbeiten: nach Sprint-Rang, ohne Rang nach Priorität. */

@@ -1,4 +1,5 @@
 import { createHmac, randomBytes } from 'node:crypto';
+import { defined } from '../core/defined.js';
 
 /** Zeitbasierte Einmal-Codes (RFC 6238, SHA-1, 6 Stellen, 30 Sekunden) für Authenticator-Apps. */
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -47,7 +48,7 @@ export function hotp(secret: string, counter: number): string {
   const buffer = Buffer.alloc(8);
   buffer.writeBigUInt64BE(BigInt(counter));
   const digest = createHmac('sha1', base32Decode(secret)).update(buffer).digest();
-  const offset = digest[digest.length - 1]! & 15;
+  const offset = defined(digest[digest.length - 1]) & 15;
   const code = (digest.readUInt32BE(offset) & 0x7fffffff) % 10 ** DIGITS;
   return code.toString().padStart(DIGITS, '0');
 }

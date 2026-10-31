@@ -27,8 +27,8 @@ export class ApiService {
     return this.request<T>(path, 'PUT', body);
   }
 
-  delete(path: string, body?: unknown): Promise<void> {
-    return this.request<void>(path, 'DELETE', body);
+  delete<T = void>(path: string, body?: unknown): Promise<T> {
+    return this.request<T>(path, 'DELETE', body);
   }
 
   upload<T>(path: string, file: File): Promise<T> {

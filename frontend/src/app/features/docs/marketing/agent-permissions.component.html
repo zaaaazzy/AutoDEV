@@ -135,11 +135,12 @@
     </p>
     <p>
       <strong>Grenze – die Docker-Sandbox:</strong> Diese Regeln verhindern Fehlgriffe, sind aber selbst keine Sandbox.
-      Die Grenze zum Rechner ist die Docker-Sandbox (<code>DEV_LOG_AGENT_SANDBOX</code>, Standard <code>docker</code>):
-      Jeder Agent-Schritt und jeder Projekttest läuft in einem eigenen Container. Lesende Rollen sehen den Workspace nur
-      lesend. Nach aussen gibt es nur Anthropic-API, npm-Registry und Ollama, kein LAN und keine AIdeation-Datenbank.
-      Die Regeln hier sind die zweite Linie. Nur im Notfallmodus <code>off</code> (Warnung im Worker-Badge) laufen Tests
-      und npm-Skripte mit den Rechten des Workers auf dem Host.
+      Die Grenze zum Rechner ist die Docker-Sandbox (<code>DEV_LOG_AGENT_SANDBOX</code>, Standard
+      <code>workbench</code>): Schreibende Agent-Schritte und Projekttests laufen im Arbeitscontainer des Projekts,
+      lesende Rollen in einem kurzlebigen Container, der den Workspace nur lesend sieht. Nach aussen gibt es nur
+      Anthropic-API, npm-Registry, Docker Hub und Ollama, kein LAN und keine AIdeation-Datenbank. Die Regeln hier sind
+      die zweite Linie. Nur im Notfallmodus <code>off</code> (Warnung im Worker-Badge) laufen Tests und npm-Skripte mit
+      den Rechten des Workers auf dem Host.
     </p>
     <p>
       <strong>Eigene Befehle:</strong> Ist <code>DEV_LOG_AGENT_COMMAND</code> oder ein eigener Agent-Befehl gesetzt,

@@ -1,5 +1,5 @@
 import { Component, computed, effect, inject, OnDestroy, signal, untracked } from '@angular/core';
-import { type GraphEdge, layoutGraph, PALETTE } from './git-graph.js';
+import { edgePath, type GraphEdge, laneColor } from './git-graph.js';
 import { GitGraphStore } from './git-graph.store.js';
 
 const ROW = 34;
@@ -59,7 +59,7 @@ export class GitGraphBackdropComponent implements OnDestroy {
   private readonly source = inject(GitGraphStore);
   protected readonly sides = ['left', 'right'] as const;
   protected readonly row = ROW;
-  protected readonly layout = computed(() => layoutGraph(this.source.graph()?.commits ?? []));
+  protected readonly layout = this.source.layout;
   protected readonly width = computed(() => Math.min(this.layout().lanes, MAX_LANES) * LANE + LANE);
   protected readonly viewBox = computed(() => `0 0 ${this.width()} ${this.layout().rows.length * ROW}`);
   /** Commits, die seit dem letzten Abruf dazugekommen sind. */
@@ -96,17 +96,9 @@ export class GitGraphBackdropComponent implements OnDestroy {
     return Math.min(lane, MAX_LANES - 1) * LANE + LANE;
   }
 
-  protected color(index: number): string {
-    return PALETTE[index % PALETTE.length]!;
-  }
+  protected readonly color = laneColor;
 
   protected path(edge: GraphEdge): string {
-    const x1 = this.x(edge.from);
-    const x2 = this.x(edge.to);
-    const y1 = edge.fromY * ROW;
-    const y2 = edge.toY * ROW;
-    if (x1 === x2) return `M${x1} ${y1}V${y2}`;
-    const mid = (y1 + y2) / 2;
-    return `M${x1} ${y1}C${x1} ${mid} ${x2} ${mid} ${x2} ${y2}`;
+    return edgePath(edge, (lane) => this.x(lane), ROW);
   }
 }

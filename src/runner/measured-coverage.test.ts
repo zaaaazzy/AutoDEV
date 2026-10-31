@@ -9,6 +9,7 @@ import {
   splitArgs,
   testRunnerOf,
 } from './measured-coverage.js';
+import type { CoverageArea } from './coverage.js';
 
 test('reads the node test runner coverage summary', () => {
   const output = `# tests 64\n# pass 63\n# fail 1\n# file | line % | branch % | funcs % | uncovered lines\n# all files                    |  84.02 |    82.64 |   91.78 |\n`;
@@ -22,58 +23,86 @@ test('reads the node test runner coverage summary', () => {
   assert.equal(parseNodeCoverage('# tests 3'), null);
 });
 
-test('splits script arguments and names areas', () => {
+test('splits script arguments and names areas with the fixed list', () => {
   assert.deepEqual(splitArgs(` "src/**/*.test.ts" --x 'a b'`), ['src/**/*.test.ts', '--x', 'a b']);
-  assert.equal(areaName('mainty-backend'), 'Backend');
-  assert.equal(areaName('@mainty/contracts'), 'Contracts');
-  assert.equal(areaName('tools'), 'tools');
-  assert.equal(areaName('builder'), 'builder', '„ui“ nur als ganzer Namensteil');
-  assert.equal(areaName('rapid'), 'rapid', '„api“ nur als ganzer Namensteil');
-  assert.equal(areaName('@shop/api'), 'Backend');
-  assert.equal(areaName('shop-ui'), 'Frontend');
+  assert.equal(areaName('mainty-backend'), 'backend');
+  assert.equal(areaName('@shop/api'), 'backend');
+  assert.equal(areaName('shop-ui'), 'frontend');
+  assert.equal(areaName('web-clients'), 'frontend');
+  assert.equal(areaName('tools'), 'scripts');
+  assert.equal(areaName('e2e'), 'e2e');
+  assert.equal(areaName('@mainty/contracts'), 'contracts');
+  assert.equal(areaName('dev-log'), 'gesamt');
+  assert.equal(areaName(null), 'gesamt', 'Messung im Projektordner = gesamt');
+  // Kein passender Bereich: null statt eines neuen Namens.
+  assert.equal(areaName('builder'), null, '„ui“ nur als ganzer Namensteil');
+  assert.equal(areaName('rapid'), null, '„api“ nur als ganzer Namensteil');
+  assert.equal(areaName('order-service'), null, '„auftrag“ ist kein Workspace-Bereich');
+});
+
+const area = (overrides: Partial<CoverageArea> = {}): CoverageArea => ({
+  area: 'backend',
+  unit: 64,
+  component: 0,
+  integration: 0,
+  e2e: 0,
+  passed: 64,
+  failed: 0,
+  lines: 84,
+  statements: null,
+  branches: 82,
+  functions: 91,
+  ...overrides,
 });
 
 test('measured percentages fill the tester report', () => {
-  const measured = [
-    {
-      area: 'Backend',
-      unit: 64,
-      component: 0,
-      integration: 0,
-      e2e: 0,
-      passed: 64,
-      failed: 0,
-      lines: 84,
-      statements: null,
-      branches: 82,
-      functions: 91,
-    },
-  ];
   const reported = {
     summary: 'Tester',
-    areas: [
-      {
-        area: 'backend',
-        unit: 0,
-        component: 0,
-        integration: 0,
-        e2e: 0,
-        passed: 69,
-        failed: 0,
-        lines: null,
-        statements: null,
-        branches: null,
-        functions: null,
-      },
-    ],
+    areas: [area({ unit: 3, passed: 69, lines: 10, branches: 5, functions: null })],
   };
-  const merged = mergeCoverage(reported, measured)!;
-  assert.equal(merged.areas.length, 1);
-  assert.equal(merged.areas[0]!.lines, 84);
-  assert.equal(merged.areas[0]!.passed, 69);
-  assert.equal(merged.areas[0]!.unit, 64);
-  assert.match(merged.summary, /Gemessen von AIdeation/);
-  assert.equal(mergeCoverage(null, []), null);
+  const merged = mergeCoverage(reported, [area()]);
+  assert.deepEqual(merged.errors, []);
+  assert.equal(merged.report?.areas.length, 1);
+  assert.equal(merged.report?.areas[0]!.lines, 84);
+  assert.equal(merged.report?.areas[0]!.branches, 82);
+  assert.equal(merged.report?.areas[0]!.passed, 69);
+  assert.equal(merged.report?.areas[0]!.unit, 3);
+  assert.equal(reported.areas[0]!.lines, 10, 'Bericht des Testers wird nicht verändert');
+  assert.match(merged.report?.summary ?? '', /Gemessen von AIdeation/);
+  assert.deepEqual(mergeCoverage(null, []), { report: null, errors: [] });
+});
+
+test('mergeCoverage: ungültige Messung (0 Tests, kein Zweigwert) wird verworfen, die gültige bleibt', () => {
+  const merged = mergeCoverage(null, [
+    area({ area: 'gesamt' }),
+    area({ area: 'frontend', unit: 0, passed: 0 }),
+    area({ area: 'scripts', branches: Number.NaN }),
+  ]);
+  assert.deepEqual(
+    merged.report?.areas.map((entry) => entry.area),
+    ['gesamt'],
+  );
+  assert.equal(merged.errors.length, 2);
+  assert.match(merged.errors[0]!, /frontend: 0 Testfälle/);
+  assert.match(merged.errors[1]!, /scripts: Zweigwert/);
+  // Nur ungültige Messungen: kein Bericht.
+  assert.equal(mergeCoverage(null, [area({ unit: 0, passed: 0 })]).report, null);
+});
+
+test('mergeCoverage vergleicht feste Bereiche: Workspace-Messung ergänzt den gleichnamigen Bereich des Testers', () => {
+  const reported = { summary: 'Tester', areas: [area({ area: 'frontend', lines: 10, branches: 5 })] };
+  const merged = mergeCoverage(reported, [
+    area({ area: areaName('shop-web')!, lines: 80 }),
+    area({ area: areaName('dev-log')!, lines: 70 }),
+  ]);
+  assert.deepEqual(merged.errors, []);
+  assert.deepEqual(
+    merged.report?.areas.map((entry) => [entry.area, entry.lines]),
+    [
+      ['frontend', 80],
+      ['gesamt', 70],
+    ],
+  );
 });
 
 test('findet den Test-Runner auch hinter „&&“ und über „npm run“', () => {
@@ -173,6 +202,7 @@ test('misst die Abdeckung auch für Testbefehle je Auftrag (npx tsx --test <Date
     assert.ok(calls[0]!.env?.PATH);
     assert.equal(areas[0]?.lines, 75);
     assert.equal(areas[0]?.passed, 4);
+    assert.equal(areas[0]?.area, 'gesamt', 'feste Bereichsnamen, nicht der Paketname');
   } finally {
     if (previous === undefined) delete process.env.DEV_LOG_SECRET_KEY;
     else process.env.DEV_LOG_SECRET_KEY = previous;

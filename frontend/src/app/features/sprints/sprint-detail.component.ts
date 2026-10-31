@@ -7,6 +7,7 @@ import { AuthService } from '../../core/auth.service.js';
 import type { DevelopmentItem, Sprint, SprintReport } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { USD_PER_MILLION_TOKENS } from '../../shared/format.js';
+import { ciLabel } from '../../shared/labels.js';
 import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
 import { NavIconComponent } from '../../shared/nav-icon.component.js';
 import {
@@ -20,9 +21,11 @@ import {
 } from '../../shared/pipes.js';
 import { exclusive, sprintButtons } from './sprint-actions.js';
 import { SprintOrdersComponent } from './sprint-orders.component.js';
+import { sprintReviewable } from './review-launch.js';
 import { orderSprint } from './sprint-phases.js';
 import { SprintReviewComponent } from './sprint-review.component.js';
 import { GitAlertComponent } from '../../shared/git-alert.component.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 /** Ein Sprint im Detail: Hinweise zum Go, Aufträge, Ziel, Bericht, Kennzahlen, Git-Stand und Aktionen. */
 @Component({
@@ -57,6 +60,7 @@ export class SprintDetailComponent {
   protected readonly usdRate = USD_PER_MILLION_TOKENS;
   readonly sprintInput = input.required<Sprint>({ alias: 'sprint' });
   protected readonly editingId = signal<string | null>(null);
+  protected readonly reviewable = sprintReviewable;
 
   /** Sichtbare Knöpfe nach denselben Regeln wie der Server (src/core/sprint-rules.ts) und nach Rolle. */
   protected readonly buttons = computed(() =>
@@ -64,53 +68,61 @@ export class SprintDetailComponent {
   );
   private readonly can = (role: 'plan' | 'run'): boolean => this.auth.can(role);
 
-  protected reportFor(sprintId: string): SprintReport | undefined {
-    return this.store.data().reports.find((report) => report.sprintId === sprintId);
-  }
+  // Kennzahlen als computed aus dem Input und den Store-Daten (beide werden ersetzt, nie verändert): nur bei
+  // einer Änderung neu berechnet, nicht bei jeder Änderungsprüfung.
+  protected readonly report = computed<SprintReport | undefined>(() =>
+    this.store.data().reports.find((report) => report.sprintId === this.sprintInput().id),
+  );
 
-  protected sprintItems(sprintId: string): DevelopmentItem[] {
+  protected readonly sprintItems = computed<DevelopmentItem[]>(() => {
+    const sprintId = this.sprintInput().id;
     return orderSprint(this.store.data().development.filter((item) => item.sprintId === sprintId));
-  }
+  });
 
-  protected sprintProgress(sprintId: string): string {
-    const orders = this.sprintItems(sprintId);
+  protected readonly sprintProgress = computed(() => {
+    const orders = this.sprintItems();
     const done = orders.filter((item) => item.status === 'done').length;
     return `${done} / ${orders.length} Aufträge erledigt`;
-  }
+  });
 
-  protected sprintEstimate(sprintId: string): number | null {
-    const efforts = this.sprintItems(sprintId).flatMap((item) =>
+  protected readonly sprintEstimate = computed<number | null>(() => {
+    const efforts = this.sprintItems().flatMap((item) =>
       typeof item.effortHours === 'number' ? [item.effortHours] : [],
     );
     return efforts.length ? efforts.reduce((sum, hours) => sum + hours, 0) : null;
-  }
+  });
 
-  protected sprintTokensEstimate(sprintId: string): number | null {
-    const tokens = this.sprintItems(sprintId).flatMap((item) =>
+  protected readonly sprintTokensEstimate = computed<number | null>(() => {
+    const tokens = this.sprintItems().flatMap((item) =>
       item.tokenEstimate === null || item.tokenEstimate === undefined ? [] : [Number(item.tokenEstimate)],
     );
     return tokens.length ? tokens.reduce((sum, value) => sum + value, 0) : null;
-  }
+  });
 
-  protected sprintTokensSpent(sprintId: string): number | null {
-    const ids = new Set(this.sprintItems(sprintId).map((item) => item.id));
-    const total = this.store
+  /** Schritte aller Agent-Läufe zu den Aufträgen des Sprints. */
+  private readonly sprintSteps = computed(() => {
+    const ids = new Set(this.sprintItems().map((item) => item.id));
+    return this.store
       .data()
       .agentRuns.filter((run) => run.developmentId && ids.has(run.developmentId))
-      .flatMap((run) => run.steps)
-      .reduce((sum, step) => sum + Number(step.tokens ?? 0), 0);
-    return total || null;
-  }
+      .flatMap((run) => run.steps);
+  });
 
-  protected sprintSpent(sprintId: string): number | null {
-    const ids = new Set(this.sprintItems(sprintId).map((item) => item.id));
-    const total = this.store
-      .data()
-      .agentRuns.filter((run) => run.developmentId && ids.has(run.developmentId))
-      .flatMap((run) => run.steps)
-      .reduce((sum, step) => sum + (step.durationMs ?? 0), 0);
-    return total || null;
-  }
+  protected readonly sprintTokensSpent = computed<number | null>(
+    () => this.sprintSteps().reduce((sum, step) => sum + Number(step.tokens ?? 0), 0) || null,
+  );
+
+  protected readonly sprintSpent = computed<number | null>(
+    () => this.sprintSteps().reduce((sum, step) => sum + (step.durationMs ?? 0), 0) || null,
+  );
+
+  protected readonly ciLabel = computed(() => ciLabel(this.sprintInput().ciStatus));
+
+  protected readonly gitNodes = computed<GitNode[]>(() => {
+    const sprint = this.sprintInput();
+    const orders = this.sprintItems().map((item): GitNode => ({ kind: 'step', text: item.title }));
+    return [branchNode(sprint), ...orders, commitNode(sprint)];
+  });
 
   protected async saveSprint(id: string, values: Partial<Sprint>): Promise<void> {
     await this.updateSprint(id, values);
@@ -216,27 +228,13 @@ export class SprintDetailComponent {
 
   /** Pull Request des Sprints (PR-Modus); nur echte GitHub-PR-Links werden verlinkt. */
   protected pullRequest(sprint: Sprint): { url: string; number: string } | null {
-    const match = /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)$/.exec(sprint.prUrl ?? '');
-    return match ? { url: sprint.prUrl!, number: match[1]! } : null;
-  }
-
-  protected ciLabel(sprint: Sprint): string {
-    return sprint.ciStatus === 'success'
-      ? 'grün'
-      : sprint.ciStatus === 'failure'
-        ? 'rot'
-        : sprint.ciStatus === 'pending'
-          ? 'läuft'
-          : 'unbekannt';
+    const url = sprint.prUrl ?? '';
+    const match = /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)$/.exec(url);
+    return match ? { url, number: defined(match[1]) } : null;
   }
 
   protected gitBusy(sprint: Sprint): boolean {
     return sprint.gitSync === 'pending' || sprint.gitSync === 'running';
-  }
-
-  protected gitNodes(sprint: Sprint): GitNode[] {
-    const orders = this.sprintItems(sprint.id).map((item): GitNode => ({ kind: 'step', text: item.title }));
-    return [branchNode(sprint), ...orders, commitNode(sprint)];
   }
 
   protected async pauseSprint(id: string): Promise<void> {

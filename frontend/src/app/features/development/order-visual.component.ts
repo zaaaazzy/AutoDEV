@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common';
 import { Component, DestroyRef, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
@@ -10,12 +11,15 @@ import {
   defaultSlot,
   showsOrder,
   type SlotTone,
+  slotErrorHint,
+  slotErrorLog,
   slotLoadedText,
   slotOptionText,
   slotStatusText,
   slotTone,
   spawnLabel,
   VISUAL_REVIEW_WHY,
+  visualStatus,
 } from './visual-review.js';
 
 export interface VisualPage {
@@ -52,13 +56,14 @@ const SLOTS_REFRESH_MS = 15_000;
 const SLOTS_STARTING_MS = 3_000;
 
 /**
- * Optische Abnahme eines Auftrags: in einer der Umgebungen (Review-Container) starten und ansehen, geänderte Dateien
- * mit Link ins Repository, Vorher/Nachher/Diff je Seite und zuletzt „Optisch freigeben“.
+ * Optische Abnahme eines Auftrags: oben eine Statuszeile (Zustand und was zu tun ist), darunter die Schritte – in einer
+ * der Umgebungen (Review-Container) starten und ansehen, geänderte Dateien mit Link ins Repository, Vorher/Nachher/Diff
+ * je Seite und zuletzt „Optisch freigeben“. Ist der Auftrag schon freigegeben, sind die Schritte eingeklappt.
  */
 @Component({
   selector: 'app-order-visual',
   standalone: true,
-  imports: [DateTimePipe, ChangedFilesComponent],
+  imports: [DateTimePipe, ChangedFilesComponent, NgTemplateOutlet],
   templateUrl: './order-visual.component.html',
 })
 export class OrderVisualComponent {
@@ -99,6 +104,17 @@ export class OrderVisualComponent {
   protected readonly fileRef = computed(() => this.ownSlot()?.commit ?? this.order().reviewBranch ?? null);
   protected readonly canSpawn = computed(
     () => this.auth.can('run') && this.order().status !== 'in_progress' && !!this.chosenSlot()?.enabled,
+  );
+  /** Neu starten in der eigenen, fehlerhaften Umgebung: wie Laden, nur ohne Rücksicht auf die Auswahl im Dropdown. */
+  protected readonly canRestart = computed(() => this.auth.can('run') && this.order().status !== 'in_progress');
+  /** Statuszeile: Zustand der Abnahme und der nächste Schritt. */
+  protected readonly status = computed(() =>
+    visualStatus({
+      approved: !!this.approval().approvedAt,
+      orderStatus: this.order().status,
+      own: this.ownSlot(),
+      hasSlots: !this.slotsLoaded() || this.slots().length > 0,
+    }),
   );
   private stopTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
@@ -184,7 +200,13 @@ export class OrderVisualComponent {
     }
   }
 
-  /** Umgebung beenden (wird wieder frei). */
+  /** Eigene, fehlerhafte Umgebung mit diesem Auftrag neu starten. */
+  protected restart(slot: ReviewSlot): Promise<void> {
+    this.picked.set(slot.slot);
+    return this.spawn();
+  }
+
+  /** Umgebung beenden bzw. eine fehlerhafte aufräumen (wird wieder frei). */
   protected async stop(slot: ReviewSlot): Promise<void> {
     await this.api.post(`/api/review-slots/${slot.slot}/stop`).catch(() => undefined);
     await this.loadSlots();
@@ -195,6 +217,12 @@ export class OrderVisualComponent {
   }
   protected statusText(slot: ReviewSlot): string {
     return slotStatusText(slot);
+  }
+  protected slotHint(slot: ReviewSlot): string {
+    return slotErrorHint(slot, this.isOwn(slot));
+  }
+  protected slotLog(slot: ReviewSlot): string {
+    return slotErrorLog(slot);
   }
   protected loadedText(slot: ReviewSlot): string {
     return slotLoadedText(slot);
@@ -225,7 +253,7 @@ export class OrderVisualComponent {
   }
 
   /** Speichert Person und Zeitpunkt der optischen Freigabe am Auftrag (oder nimmt sie zurück). */
-  protected approve(approved: boolean): Promise<void> {
+  protected approve(approved: boolean): Promise<boolean> {
     return this.store.perform(
       async () => {
         const result = await this.api.post<{ approval: VisualApproval }>(`${this.path()}/approve`, { approved });

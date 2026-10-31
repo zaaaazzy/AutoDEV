@@ -63,7 +63,7 @@ export function composeEnvironment(source: NodeJS.ProcessEnv = process.env): Nod
   return Object.fromEntries(Object.entries(source).filter(([key]) => !/^(DEV_LOG|COMPOSE)_/i.test(key)));
 }
 
-export type RestartStatus = 'requested' | 'building' | 'restarting' | 'done' | 'failed';
+export type RestartStatus = 'requested' | 'building' | 'restarting' | 'done' | 'failed' | 'cancelled';
 
 export interface RestartState {
   status: RestartStatus;
@@ -79,6 +79,8 @@ export interface RestartState {
   log?: string | null;
   /** Kommentar aus der Bestätigung (z. B. warum neu gestartet wird). */
   comment?: string | null;
+  /** Wer den wartenden Neustart abgebrochen hat (Status „cancelled“). */
+  cancelledBy?: string | null;
 }
 
 export const OPEN_STATUSES: readonly RestartStatus[] = ['requested', 'building', 'restarting'];
@@ -139,6 +141,39 @@ async function writeRestart(
   );
   if (state.status === 'done' || state.status === 'failed') await notify(pool, state).catch(() => undefined);
   return state;
+}
+
+/**
+ * Nur solange der Worker noch wartet („requested“) lässt sich ein Neustart abbrechen. Der Wechsel passiert als
+ * Vergleich-und-Tausch auf dem gespeicherten JSON: Hat der Worker die Anforderung inzwischen übernommen (claimRestart),
+ * greift der Abbruch nicht mehr, und die Antwort nennt den tatsächlichen Stand.
+ */
+export async function cancelRestart(
+  pool: Queryable,
+  cancelledBy: string | null,
+  now = new Date(),
+): Promise<{ state: RestartState | null; cancelled: boolean }> {
+  const current = await readRestart(pool);
+  if (!current || current.status !== 'requested') return { state: current, cancelled: false };
+  const next: RestartState = {
+    ...current,
+    status: 'cancelled',
+    finishedAt: now.toISOString(),
+    cancelledBy,
+    message: `Abgebrochen${cancelledBy ? ` von ${cancelledBy}` : ''}, bevor der Worker gebaut hat. AIdeation läuft unverändert weiter.`,
+  };
+  const swapped = await swapRestart(pool, current, next);
+  return swapped ? { state: next, cancelled: true } : { state: await readRestart(pool), cancelled: false };
+}
+
+/** Schreibt `next` nur, wenn in der Datenbank noch genau `expected` steht; sonst false (jemand war schneller). */
+async function swapRestart(pool: Queryable, expected: RestartState, next: RestartState): Promise<boolean> {
+  const result = await pool.query('UPDATE app_settings SET value = $2 WHERE key = $1 AND value = $3 RETURNING value', [
+    RESTART_KEY,
+    JSON.stringify(next),
+    JSON.stringify(expected),
+  ]);
+  return result.rows.length > 0;
 }
 
 /** „restarting“ seit mehr als RESTARTING_STALE_MS: Der Worker hat sich beendet, ist aber nicht wieder gestartet. */
@@ -458,12 +493,15 @@ export async function processRestart(
     }
     restartCommand = [...RESTART_COMMAND, ...services];
   }
-  const building = await writeRestart(pool, {
+  const building: RestartState = {
     ...current,
     status: 'building',
     startedAt: now().toISOString(),
     message: `${pulled} Baut die Container neu: ${restartCommand.join(' ')}`,
-  });
+  };
+  // Übernehmen nur, wenn die Anforderung noch unverändert wartet: Ein Abbruch (cancelRestart) während der Git-Prüfung
+  // gewinnt sonst nicht und würde vom Neubau überschrieben.
+  if (!(await swapRestart(pool, current, building))) return 'idle';
   // Vor dem Neubau: node_modules des Workers auf den Stand des Lockfiles bringen. Scheitert das, geht nichts live
   // und der Worker beendet sich nicht – sonst stürzte er nach dem Neustart in einer Schleife ab.
   const readText = options.readText ?? readTextFile;
@@ -529,7 +567,7 @@ export async function processRestart(
     );
     return 'failed';
   }
-  // Image der Agent-Sandbox (DEV_LOG_AGENT_SANDBOX=docker) mitbauen. Scheitert das, startet AIdeation trotzdem neu:
+  // Image der Agent-Sandbox (Modi docker und workbench) mitbauen. Scheitert das, startet AIdeation trotzdem neu:
   // Ein Lauf mit eingeschalteter Sandbox meldet das fehlende bzw. alte Image dann selbst (fail-closed).
   await writeRestart(pool, {
     ...building,

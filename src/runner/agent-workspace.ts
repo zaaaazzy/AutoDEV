@@ -7,11 +7,13 @@ import {
   readdirSync,
   readlinkSync,
   realpathSync,
+  rmdirSync,
   rmSync,
   symlinkSync,
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { type CommandExecutor, runCommand } from '../core/command.js';
+import { sandboxMode, usesSandbox } from '../core/sandbox.js';
 import { gitEnvironment } from './project-command.js';
 
 /**
@@ -110,10 +112,15 @@ export function linkDependencies(folder: string, workspace: string): void {
     const target = join(workspace, directory, 'node_modules');
     if (!existsSync(source) || !existsSync(join(workspace, directory))) continue;
     try {
-      lstatSync(target);
+      const stat = lstatSync(target);
+      // Leerer Ordner: Die Docker-Sandbox hat den Link ersetzt (replaceLinkedModules). Nur im Notfallmodus ohne
+      // Sandbox wieder verlinken – sonst ist der Ordner Einhängepunkt des node_modules-Volumes laufender Container.
+      if (usesSandbox(sandboxMode(null)) || !stat.isDirectory() || readdirSync(target).length) continue;
+      rmdirSync(target);
     } catch {
-      symlinkSync(source, target, DIRECTORY_LINK);
+      // Fehlt noch: verlinken.
     }
+    symlinkSync(source, target, DIRECTORY_LINK);
   }
 }
 

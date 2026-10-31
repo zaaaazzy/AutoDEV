@@ -32,9 +32,23 @@ async function loadMessages(pool: Pool, slug: string): Promise<unknown[]> {
 
 /** Wie oft ein offener Chat-Stream Sitzung und Projektfreigabe erneut prüft. */
 const STREAM_RECHECK_MS = 15_000;
+/** Abfrage-Takt eines offenen Chat-Streams (jede Abfrage liest bis zu 100 Nachrichten). */
+export const STREAM_POLL_MS = 3_000;
+/**
+ * Höchstzahl gleichzeitiger Streams je Sitzung (bzw. Benutzer ohne Sitzung). Weitere Tabs erhalten 429 und laden
+ * den Verlauf über ihr Ersatz-Polling.
+ */
+export const MAX_STREAMS_PER_SESSION = 3;
 
-export function registerChatRoutes(app: Router, pool: Pool, options: { recheckMs?: number } = {}): void {
+export function registerChatRoutes(
+  app: Router,
+  pool: Pool,
+  options: { recheckMs?: number; pollMs?: number; maxStreamsPerSession?: number } = {},
+): void {
   const recheckMs = options.recheckMs ?? STREAM_RECHECK_MS;
+  const pollMs = options.pollMs ?? STREAM_POLL_MS;
+  const maxStreams = options.maxStreamsPerSession ?? MAX_STREAMS_PER_SESSION;
+  const openStreams = new Map<string, number>();
   app.get('/projects/:slug/chat', access({ tenant: 'project' }), async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
@@ -69,6 +83,22 @@ export function registerChatRoutes(app: Router, pool: Pool, options: { recheckMs
   app.get('/projects/:slug/chat/stream', access({ tenant: 'project' }), (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
+    // Sitzung aus dem Login (Basic Auth und Betrieb ohne Login haben keine, die später enden könnte).
+    const token = response.locals.sessionToken as string | undefined;
+    const principal = response.locals.principal as Principal | undefined;
+    const key = token
+      ? `session:${token}`
+      : principal
+        ? `user:${principal.id ?? principal.username}`
+        : `ip:${request.ip ?? ''}`;
+    const open = openStreams.get(key) ?? 0;
+    if (open >= maxStreams) {
+      return void response
+        .status(429)
+        .json({ message: 'Zu viele offene Chat-Verbindungen – bitte andere Tabs schliessen.' });
+    }
+    openStreams.set(key, open + 1);
+    let stopped = false;
     response.set({
       'Content-Type': 'text/event-stream',
       // no-transform: Proxys (z. B. Caddy mit „encode gzip“) dürfen den Stream nicht komprimieren und damit puffern.
@@ -79,23 +109,18 @@ export function registerChatRoutes(app: Router, pool: Pool, options: { recheckMs
     response.flushHeaders();
     let last = '';
     let busy = false;
-    // Sitzung aus dem Login (Basic Auth und Betrieb ohne Login haben keine, die später enden könnte).
-    const token = response.locals.sessionToken as string | undefined;
     let checkedAt = Date.now();
     const push = async (): Promise<void> => {
-      if (busy) return;
+      if (busy || stopped) return;
       busy = true;
       try {
         // Logout, Deaktivierung oder entzogene Projektfreigabe beenden den Stream.
         if (token && Date.now() - checkedAt >= recheckMs) {
           checkedAt = Date.now();
-          if (!(await sessionStillAllowed(pool, token, slug))) {
-            clearInterval(timer);
-            response.end();
-            return;
-          }
+          if (!(await sessionStillAllowed(pool, token, slug))) return stop();
         }
         const messages = await loadMessages(pool, slug);
+        if (stopped) return;
         const snapshot = JSON.stringify(messages);
         if (snapshot !== last) {
           last = snapshot;
@@ -104,15 +129,26 @@ export function registerChatRoutes(app: Router, pool: Pool, options: { recheckMs
           response.write(': ping\n\n');
         }
       } catch {
-        clearInterval(timer);
-        response.end();
+        stop();
       } finally {
         busy = false;
       }
     };
+    const timer = setInterval(() => void push(), pollMs);
+    // Einziger Ausstieg: Timer weg, Platz freigeben, Antwort schliessen (mehrfach aufrufbar).
+    const stop = (): void => {
+      if (stopped) return;
+      stopped = true;
+      clearInterval(timer);
+      const left = (openStreams.get(key) ?? 1) - 1;
+      if (left > 0) openStreams.set(key, left);
+      else openStreams.delete(key);
+      if (!response.writableEnded) response.end();
+    };
+    request.on('close', stop);
+    response.on('close', stop);
+    response.on('error', stop);
     void push();
-    const timer = setInterval(() => void push(), 1000);
-    request.on('close', () => clearInterval(timer));
   });
 
   // Per @ ansprechbare System-Agents (dynamisch, je nach Recht des Benutzers).

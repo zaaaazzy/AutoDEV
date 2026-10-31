@@ -13,6 +13,10 @@ COPY src/core/cron.ts ./src/core/cron.ts
 COPY src/core/development-transitions.ts ./src/core/development-transitions.ts
 # Sprint-Regeln (Statuswechsel, Löschen, Abschluss) – dieselben wie in PATCH/DELETE /sprints/:id.
 COPY src/core/sprint-rules.ts ./src/core/sprint-rules.ts
+# Gemeinsame Typen (Status, Budget, Modell-Routing) und defined() – siehe CLAUDE.md, „Gemeinsame Typen“.
+COPY src/core/status.ts ./src/core/status.ts
+COPY src/core/shared-types.ts ./src/core/shared-types.ts
+COPY src/core/defined.ts ./src/core/defined.ts
 RUN npm run build:ui
 
 # Ohne root schon im Master-Prozess: PID-Datei und Zwischenablagen unter /tmp, damit läuft der Container auch mit

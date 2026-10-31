@@ -5,6 +5,7 @@ import { isRecord, parseProjectSlug } from '../core/validation.js';
 import { asCommand } from '../agent/system-agents.js';
 import { DEFAULT_RULES, loadRouting, parseRules, ruleLabel, type RoutingRule } from '../agent/model-routing.js';
 import { localDay } from '../core/time-zone.js';
+import { withTransaction } from '../db/transaction.js';
 import {
   BUDGET_PERIODS,
   BUDGET_ROLES,
@@ -60,6 +61,14 @@ const limitNumber = (value: unknown, max: number): number | null | 'invalid' => 
   return Number.isFinite(number) && number > 0 && number <= max ? number : 'invalid';
 };
 
+/** Kostenlimit in USD: auf Cent gerundet wie die Spalte (NUMERIC(10, 2)); unter 0,01 wäre gespeichert 0. */
+const costNumber = (value: unknown): number | null | 'invalid' | 'too-small' => {
+  const number = limitNumber(value, MAX_COST);
+  if (number === null || number === 'invalid') return number;
+  const rounded = Math.round(number * 100) / 100;
+  return rounded < 0.01 ? 'too-small' : rounded;
+};
+
 export interface BudgetInput {
   limits?: Partial<Record<BudgetPeriod, { maxTokens: number | null; maxCostUsd: number | null }>>;
   display?: Display;
@@ -81,9 +90,10 @@ export function parseBudgetInput(body: unknown): BudgetInput | string {
       if (raw === undefined) continue;
       const entry = isRecord(raw) ? raw : {};
       const maxTokens = limitNumber(entry.maxTokens, MAX_TOKENS);
-      const maxCostUsd = limitNumber(entry.maxCostUsd, MAX_COST);
+      const maxCostUsd = costNumber(entry.maxCostUsd);
       if (maxTokens === 'invalid' || maxCostUsd === 'invalid')
         return 'Limits: leer lassen (unbegrenzt) oder eine positive Zahl angeben.';
+      if (maxCostUsd === 'too-small') return 'Kostenlimit: mindestens 0,01 USD (oder leer lassen für unbegrenzt).';
       input.limits[period] = { maxTokens: maxTokens === null ? null : Math.round(maxTokens), maxCostUsd };
     }
   }
@@ -119,40 +129,48 @@ export function parseBudgetInput(body: unknown): BudgetInput | string {
   return input;
 }
 
-/** Speichert Limits, Währung und Routing; leere Limits entfernen den Zeitraum (= keine Prüfung). */
+/**
+ * Speichert Limits, Währung und Routing in einer Transaktion; leere Limits entfernen den Zeitraum (= keine Prüfung).
+ * Scheitert ein Schritt, bleibt nichts halb gespeichert.
+ */
 export async function saveBudget(pool: Pool, project: string, input: BudgetInput): Promise<void> {
-  for (const [period, limit] of Object.entries(input.limits ?? {}) as [BudgetPeriod, BudgetLimit][]) {
-    if (limit.maxTokens === null && limit.maxCostUsd === null)
-      await pool.query(`DELETE FROM budgets WHERE project_slug = $1 AND period = $2`, [project, period]);
-    else
-      await pool.query(
-        `INSERT INTO budgets (project_slug, period, max_tokens, max_cost_usd) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (project_slug, period) DO UPDATE SET max_tokens = EXCLUDED.max_tokens, max_cost_usd = EXCLUDED.max_cost_usd`,
-        [project, period, limit.maxTokens, limit.maxCostUsd],
-      );
-  }
-  if (input.display) {
-    const upsert = `INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
-    await pool.query(upsert, [CURRENCY_KEY, input.display.currency]);
-    await pool.query(upsert, [RATE_KEY, String(input.display.chfPerUsd)]);
-  }
-  if (input.rules !== undefined) {
-    await pool.query(`DELETE FROM routing_rules WHERE project_slug = $1`, [project]);
-    for (const [position, rule] of (input.rules ?? []).entries()) {
-      await pool.query(
-        `INSERT INTO routing_rules (project_slug, position, condition, tier) VALUES ($1, $2, $3::jsonb, $4)`,
-        [project, position, JSON.stringify(rule.condition), rule.tier],
-      );
+  await withTransaction(pool, async (client) => {
+    for (const [period, limit] of Object.entries(input.limits ?? {}) as [BudgetPeriod, BudgetLimit][]) {
+      if (limit.maxTokens === null && limit.maxCostUsd === null)
+        await client.query(`DELETE FROM budgets WHERE project_slug = $1 AND period = $2`, [project, period]);
+      else
+        await client.query(
+          `INSERT INTO budgets (project_slug, period, max_tokens, max_cost_usd) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (project_slug, period) DO UPDATE SET max_tokens = EXCLUDED.max_tokens, max_cost_usd = EXCLUDED.max_cost_usd`,
+          [project, period, limit.maxTokens, limit.maxCostUsd],
+        );
     }
-    await pool.query(`UPDATE projects SET routing_customized = $2 WHERE slug = $1`, [project, input.rules !== null]);
-  }
-  if (input.localModel !== undefined)
-    await pool.query(`UPDATE projects SET routing_local_model = $2 WHERE slug = $1`, [project, input.localModel]);
-  if (input.strongCommand !== undefined)
-    await pool.query(`UPDATE projects SET routing_strong_command = $2::jsonb WHERE slug = $1`, [
-      project,
-      input.strongCommand === null ? null : JSON.stringify(input.strongCommand),
-    ]);
+    if (input.display) {
+      const upsert = `INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+      await client.query(upsert, [CURRENCY_KEY, input.display.currency]);
+      await client.query(upsert, [RATE_KEY, String(input.display.chfPerUsd)]);
+    }
+    if (input.rules !== undefined) {
+      await client.query(`DELETE FROM routing_rules WHERE project_slug = $1`, [project]);
+      for (const [position, rule] of (input.rules ?? []).entries()) {
+        await client.query(
+          `INSERT INTO routing_rules (project_slug, position, condition, tier) VALUES ($1, $2, $3::jsonb, $4)`,
+          [project, position, JSON.stringify(rule.condition), rule.tier],
+        );
+      }
+      await client.query(`UPDATE projects SET routing_customized = $2 WHERE slug = $1`, [
+        project,
+        input.rules !== null,
+      ]);
+    }
+    if (input.localModel !== undefined)
+      await client.query(`UPDATE projects SET routing_local_model = $2 WHERE slug = $1`, [project, input.localModel]);
+    if (input.strongCommand !== undefined)
+      await client.query(`UPDATE projects SET routing_strong_command = $2::jsonb WHERE slug = $1`, [
+        project,
+        input.strongCommand === null ? null : JSON.stringify(input.strongCommand),
+      ]);
+  });
 }
 
 const withLabels = (rules: RoutingRule[]) => rules.map((rule) => ({ ...rule, label: ruleLabel(rule) }));

@@ -10,7 +10,9 @@ import { isAdmin } from './tenancy.js';
 import { readProjectText } from '../core/project-paths.js';
 import { INVALID, invalidInput, isUuid, parseFields, parseProjectSlug, parseTitle } from '../core/validation.js';
 
-const MAX_API_CONTENT = 30_000;
+/** Höchstlänge eines Dokuments (Zeichen), das über die API gespeichert oder als Revision eingereicht wird. */
+export const MAX_DOC_CONTENT = 30_000;
+const MAX_API_CONTENT = MAX_DOC_CONTENT;
 const MAX_STORED_CONTENT = 200_000;
 const DOC_COLUMNS = `id, project_slug AS "projectSlug", kind, title, content, development_id AS "developmentId",
   sprint_id AS "sprintId", created_at AS "createdAt", updated_at AS "updatedAt"`;

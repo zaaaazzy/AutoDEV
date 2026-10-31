@@ -5,6 +5,7 @@ import { logged } from '../core/log.js';
 import { type CommandExecutor, redactOutput } from '../core/command.js';
 import { AGENT_STEP_STATUS } from '../core/status.js';
 import type { ProjectRouting } from '../agent/model-routing.js';
+import { type Calibration, loadCalibration } from '../core/estimate-calibration.js';
 import { type BudgetState, checkBudget } from './budget.js';
 import { changedFiles, type ChangedFile, type OrderBranch } from './git-sync.js';
 import type { BuiltinAgent, StepSummary, WorkflowAgent, WorkItem, WorkItemOptions } from './runner-types.js';
@@ -39,6 +40,8 @@ export interface RunContext {
   routing?: ProjectRouting | null;
   /** Kalibrierte Schätzung des Auftrags in Agent-Stunden fürs Routing (einmal je Lauf berechnet). */
   routedHours?: number | null;
+  /** Kalibrierung des Projekts (einmal je Lauf geladen): Routing und Überschreitungsprüfung. */
+  calibration?: Calibration;
   /** Zuletzt ermittelte geänderte Dateien des Auftrags (für den Abschnitt „Geänderte Dateien“). */
   changedFiles?: string[];
   /** Grund, warum der Lauf angehalten wurde (z. B. Budget), für die Push-Nachricht. */
@@ -58,6 +61,12 @@ export async function budgetGate(ctx: RunContext, role?: string | null): Promise
   });
   ctx.budgetPercent = check.percent;
   return check.exceeded;
+}
+
+/** Kalibrierung des Projekts, einmal je Lauf geladen (Fehler gehen an den Aufrufer, nichts wird zwischengespeichert). */
+export async function orderCalibration(ctx: RunContext): Promise<Calibration> {
+  ctx.calibration ??= await loadCalibration(ctx.pool, ctx.item.projectSlug);
+  return ctx.calibration;
 }
 
 /** Pause, bis ein Auftrag nach einer gescheiterten Budgetprüfung wieder startet (kein sofortiger Neustart). */

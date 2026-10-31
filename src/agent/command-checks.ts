@@ -3,6 +3,7 @@ import { existsSync, lstatSync, readdirSync } from 'node:fs';
 import { isAbsolute, join, resolve, sep } from 'node:path';
 import { checkProjectPath, inside, protectedPath, realPath } from './path-policy.js';
 import { parseShell, renderWords, type ShellWord } from './shell-parse.js';
+import { defined } from '../core/defined.js';
 
 /** Ein Befehl als Text oder – im Wächter – schon zerlegt (Wörter eines einfachen Befehls). */
 type CommandInput = string | readonly ShellWord[];
@@ -242,7 +243,7 @@ function protectedEntryInside(directory: string, root: string): string | null | 
   const pending = [directory];
   let seen = 0;
   while (pending.length) {
-    const current = pending.pop()!;
+    const current = defined(pending.pop());
     for (const entry of readdirSync(current, { withFileTypes: true })) {
       if (++seen > GIT_FILE_SCAN_LIMIT) return null;
       const path = join(current, entry.name);
@@ -581,7 +582,7 @@ export function customRuleProblem(rule: string): string | null {
   if (web) return null;
   const match = rule.match(/^Bash\((.+?)(:\*)?\)$/);
   if (!match) return `„${rule}“: erlaubt sind Bash(befehl:*), Bash(befehl) oder WebFetch(domain:localhost).`;
-  const command = match[1]!.trim();
+  const command = defined(match[1]).trim();
   if (!SAFE_PREFIX.test(command))
     return `„${rule}“: keine Shell-Sonderzeichen (; & | $ \` > < * ? Klammern, Anführungszeichen).`;
   if (command.length > 120) return `„${rule}“: Befehl zu lang.`;
@@ -593,7 +594,7 @@ export function customRuleProblem(rule: string): string | null {
   )
     return `„${rule}“: Zugriff auf Geheimnisse, AIdeation selbst oder übergeordnete Ordner ist gesperrt.`;
   // Allowlist statt Sperrliste: timeout, nice, find, awk, sed, tee, cp, ln … starten Programme oder schreiben Dateien.
-  if (!CUSTOM_RULE_PROGRAMS.has(command.split(' ')[0]!))
+  if (!CUSTOM_RULE_PROGRAMS.has(defined(command.split(' ')[0])))
     return `„${rule}“: dieses Programm ist für eigene Regeln nicht freigegeben (erlaubt: ${[...CUSTOM_RULE_PROGRAMS].join(', ')}).`;
   return null;
 }

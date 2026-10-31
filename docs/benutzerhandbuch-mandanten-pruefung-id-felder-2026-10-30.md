@@ -49,7 +49,7 @@ Ein Agent soll an einen Agenten aus einem anderen Projekt übergeben werden.
 2. Die Anfrage wird mit 400 abgelehnt. Die Antwort enthält eine Meldung zum falschen Projekt.
 3. Der Agent in „Alpha“ bleibt unverändert, auch sein Übergabe-Agent.
 
-Die Meldung lautet in diesem Fall: „Der Empfänger gehört nicht zu diesem Projekt.“ (`src/api/agents.ts`, Zeilen 300 und 425).
+Die Meldung lautet in diesem Fall: „Der Empfänger gehört nicht zu diesem Projekt.“ (`src/api/agents.ts`, beim Anlegen und beim Ändern eines Agenten).
 
 ## Für Entwickler: neues ID-Feld hinzufügen
 
@@ -59,7 +59,7 @@ Die Meldung lautet in diesem Fall: „Der Empfänger gehört nicht zu diesem Pro
 
 Fehlt Schritt 2, scheitert der Vollständigkeitstest.
 
-Ausgenommen sind Pfadparameter, die keinen Datensatz bezeichnen (`role` bei Budget-Rollen, `slot` bei Review-Containern). Sie stehen in `TENANT_ID_EXEMPT` mit Begründung.
+Ausgenommen sind Felder, die keinen Datensatz eines Projekts bezeichnen (`role` bei Budget-Rollen, `slot` bei Review-Containern, `provider` beim Fortsetzen eines Agent-Anbieters), und die projektübergreifenden Sammelaktionen für Ideen (`ids` in `/ideation/bulk/reject` und `/ideation/bulk/priority`), die selbst nach den freigegebenen Projekten filtern. Sie stehen in `TENANT_ID_EXEMPT` mit Begründung.
 
 ## Printscreens
 
@@ -68,12 +68,15 @@ Keine. Die Änderung liegt auf der Serverseite. In der Oberfläche ändert sich 
 Prüfen lässt sich das Verhalten so:
 
 1. Im Projekt „Alpha“ einen Agenten mit einer ID aus „Beta“ anlegen oder ändern. Die Antwort muss 400 sein, die Liste der Agenten darf sich nicht ändern.
-2. Einen Sprint-Vorschlag mit einer fremden Auftrags-ID bestätigen (`POST /projects/:slug/sprints/proposal/apply`). Die Prüfung läuft dort über `applyProposal` und nicht über `assertInProject`. Dass die Antwort 400 ist und kein Auftrag in den Sprint wechselt, ist im Quelltext nicht bestätigt und muss beim Testlauf belegt werden.
+2. Einen Sprint-Vorschlag mit einer fremden Auftrags-ID bestätigen (`POST /projects/:slug/sprints/proposal/apply`). Die Prüfung läuft dort über `applyProposal` und nicht über `assertInProject`. Die Antwort ist 400, und kein Auftrag wechselt in den Sprint (belegt durch `src/api/tenant-ids.test.ts`, Testlauf vom 31.10.2026).
+
+## Stand der Prüfung
+
+- `npm run typecheck` und `npm run test:unit` liefen am 31.10.2026 im Arbeitscontainer mit PostgreSQL. Der Mandanten-Test war grün: alle 31 Einträge in `TENANT_ID_FIELDS`, je mit fremder und eigener ID. Einzelheiten stehen in `docs/mandanten-pruefung-id-felder-allowlist-2026-10-30.md`.
+- Der Vollständigkeitstest hat bestätigt, dass `TENANT_ID_FIELDS` alle Routen mit ID-Feld enthält. `bugs.ts` prüft `sprintId` mit einer eigenen Abfrage (Projekt und Sprintstatus zusammen), nicht mit `assertInProject`; das Verhalten ist gleich und getestet.
 
 ## Offen
 
-- **Tests nicht ausgeführt.** `npm run typecheck` und der Testlauf (`npm run test:unit` mit `DEV_LOG_TEST_REQUIRE_DATABASE=1`) stehen noch aus. Die Angaben in diesem Kapitel stammen aus dem Quelltext und der Entwickler-Dokumentation `docs/mandanten-pruefung-id-felder-allowlist-2026-10-30.md`.
-- **Abdeckung im Code noch nicht vollständig belegt.** Der Vollständigkeitstest soll das zeigen. Bis dahin gilt die Liste in `TENANT_ID_FIELDS` als Absicht, nicht als geprüfter Stand. `bugs.ts` prüft `sprintId` mit einer eigenen Abfrage (`project_slug`, Zeile 261), nicht mit `assertInProject`. Die Sprint-Vorschläge (`proposal/apply`, `proposal/comment`) sollen beim Testlauf besonders geprüft werden.
 - **Meldungstexte nicht vereinheitlicht.** Der Wortlaut bei der Ablehnung unterscheidet sich je Route. Die Oberfläche zeigt die Meldung nicht zwingend an.
 - **Gespeicherte fremde Verweise werden nicht bereinigt.** Eine Prüfung wirkt nur auf neue Anfragen.
 - **Query-Parameter sind nicht erfasst.**

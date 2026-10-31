@@ -13,7 +13,9 @@ import { isSection, projectFromHash, sectionFromHash, targetFromHash, type Secti
 import { fetchProjectData, keepFailedSections, runningOrdersChanged, runStepFinished } from './project-loader.js';
 import { isFinished } from '../shared/labels.js';
 import { orderAttention } from '../shared/order-attention.js';
+import { sameIds } from './focus-once.js';
 import { visibleInterval } from './visible-interval.js';
+import { defined } from '../../../../src/core/defined.js';
 
 const WORKER_REFRESH_MS = 10_000;
 const LIVE_RUNS_REFRESH_MS = 3_000;
@@ -79,8 +81,13 @@ export class ProjectStore {
     () => this.data().development.filter((item) => !isFinished(item.status)).length,
   );
   /** Aufträge mit Handlungsbedarf (Seite „Aktionen“, Menü-Bubble). */
-  readonly attention = computed(() => orderAttention(this.data().development, this.data().acceptance));
-  readonly attentionIds = computed(() => new Set(this.attention().map((entry) => entry.item.id)));
+  readonly attention = computed(() =>
+    orderAttention(this.data().development, this.data().acceptance, this.data().evidence),
+  );
+  /** Bleibt dasselbe Objekt, solange sich die Menge nicht ändert: Effekte daran laufen nicht bei jedem Poll neu. */
+  readonly attentionIds = computed(() => new Set(this.attention().map((entry) => entry.item.id)), {
+    equal: sameIds,
+  });
   readonly openBugCount = computed(
     () => this.data().bugs.filter((bug) => bug.status === 'open' || bug.status === 'in_progress').length,
   );
@@ -160,7 +167,7 @@ export class ProjectStore {
         this.data.set(emptyProjectData());
         return;
       }
-      const slug = projects.some((project) => project.slug === selectedSlug) ? selectedSlug : projects[0]!.slug;
+      const slug = projects.some((project) => project.slug === selectedSlug) ? selectedSlug : defined(projects[0]).slug;
       await this.loadProject(slug);
     } catch (error) {
       this.notice.set(errorMessage(error, 'Projekte konnten nicht geladen werden.'));
@@ -215,20 +222,27 @@ export class ProjectStore {
     }));
   }
 
-  async perform(action: () => Promise<unknown>, success: string, refresh = true): Promise<void> {
+  /**
+   * Fehler landen in der Meldung oben; das Ergebnis sagt, ob die Aktion geklappt hat.
+   * success als Funktion: Meldung aus dem Ergebnis der Aktion (wird erst danach gebildet).
+   */
+  async perform(action: () => Promise<unknown>, success: string | (() => string), refresh = true): Promise<boolean> {
     this.busy.set(true);
     this.notice.set('');
     try {
       this.applyItem(await action());
       // Im Hintergrund nachladen: Die Seite bleibt stehen, aufgeklappte Zeilen und Dialoge bleiben offen.
       if (refresh && this.activeProject()) await this.loadProject(this.activeProject(), true);
-      this.notice.set(success);
+      const message = typeof success === 'function' ? success() : success;
+      this.notice.set(message);
       setTimeout(() => {
-        if (this.notice() === success) this.notice.set('');
+        if (this.notice() === message) this.notice.set('');
       }, NOTICE_MS);
+      return true;
     } catch (error) {
       // Steht die Meldung schon am Formularfeld, nicht zusätzlich oben anzeigen.
       if (!(error instanceof FieldError && error.shown)) this.notice.set(errorMessage(error, 'Aktion fehlgeschlagen.'));
+      return false;
     } finally {
       this.busy.set(false);
     }

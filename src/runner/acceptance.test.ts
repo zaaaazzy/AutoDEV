@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { acceptanceProblems, extractCriteria, manualChecks, parseAcceptance, stripAcceptance } from './acceptance.js';
+import {
+  acceptanceProblems,
+  extractCriteria,
+  manualChecks,
+  parseAcceptance,
+  stripAcceptance,
+  waiveUnmeasuredCoverage,
+} from './acceptance.js';
 
 const ORDER = `## Ziel
 Login-Seite modernisieren.
@@ -94,4 +101,29 @@ test('Abnahme: ein ausgelassener DoD-Punkt bleibt „nicht geprüft“; die Anwe
     { nr: 3, met: false, manual: true, note: 'Freigabe in der Vorschau' },
   ];
   assert.deepEqual(acceptanceProblems({ criteria, done: reported }, ['A'], done), []);
+});
+
+const UNMEASURED = 'Abdeckung nicht gemessen (Wächter blockiert den Befehl)';
+const tested = {
+  criteria: [{ nr: 1, met: true, note: 'Test a' }],
+  done: [{ nr: 3, met: false, note: UNMEASURED }],
+};
+
+test('waiveUnmeasuredCoverage: nur mit gültiger Messung durch AIdeation gilt der Abdeckungspunkt als erfüllt', () => {
+  const measured = waiveUnmeasuredCoverage(tested, 1, true);
+  assert.deepEqual(measured.waived, [3]);
+  assert.equal(measured.result.done[0]?.met, true);
+  // Ohne gültigen Bericht (keine Messung, ungültiger Block verworfen) bleibt der Punkt offen.
+  const missing = waiveUnmeasuredCoverage(tested, 1, false);
+  assert.deepEqual(missing.waived, []);
+  assert.equal(missing.result.done[0]?.met, false);
+});
+
+test('waiveUnmeasuredCoverage: ein Hinweis auf null-Werte allein ist kein Ausnahmefall mehr', () => {
+  const result = waiveUnmeasuredCoverage(
+    { criteria: tested.criteria, done: [{ nr: 3, met: false, note: 'Abdeckung als null gemeldet' }] },
+    1,
+    true,
+  );
+  assert.deepEqual(result.waived, []);
 });

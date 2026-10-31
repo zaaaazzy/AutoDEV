@@ -1,6 +1,7 @@
 import type { Router, NextFunction, Request, Response } from 'express';
 import type { Pool } from 'pg';
 import { access } from './access.js';
+import { MAX_DOC_CONTENT } from './docs.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 import { hasRole, type Principal } from './roles.js';
 
@@ -39,7 +40,7 @@ export function registerDocRevisionRoutes(app: Router, pool: Pool): void {
       const body = (request.body ?? {}) as Record<string, unknown>;
       const title = typeof body.title === 'string' ? body.title.trim() : '';
       const content = typeof body.content === 'string' ? body.content : '';
-      if (!title || title.length > 180 || content.length > 30_000) {
+      if (!title || title.length > 180 || content.length > MAX_DOC_CONTENT) {
         response.status(400).json({ message: 'Titel (max. 180 Zeichen) und Inhalt (max. 30 000 Zeichen) prüfen.' });
         return;
       }

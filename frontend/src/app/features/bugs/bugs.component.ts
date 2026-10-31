@@ -6,6 +6,7 @@ import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import { ConfirmService } from '../../core/confirm.service.js';
 import type { Bug, BugStatus, Sprint } from '../../core/models.js';
+import { FocusOnce } from '../../core/focus-once.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { errorMessage } from '../../core/errors.js';
 import { assertImageSizes } from '../../shared/image-upload.js';
@@ -98,7 +99,8 @@ export class BugsComponent {
       value: (bug) => severityLabel(bug.severity),
       sortValue: (bug) => SEVERITY_RANK.indexOf(bug.severity),
     },
-    categoryColumn<Bug>((bug) => bug.category),
+    // Kategoriefilter mit allen Kategorien und „Ohne Kategorie“; Zurücksetzen und Chips über die DataTable.
+    categoryColumn<Bug>((bug) => bug.category, true),
     { id: 'source', header: 'Quelle', value: (bug) => BUG_SOURCE_LABEL[bug.source] ?? 'Manuell' },
     {
       id: 'sprint',
@@ -150,6 +152,7 @@ export class BugsComponent {
     return [
       group('Gefunden von', 'Wer', stats.finders, 'Noch keine Bugs.'),
       group('Wo', 'Seite / Bereich', stats.places, 'Noch keine Zuordnung.'),
+      group('Nach Kategorie', 'Kategorie', stats.categories, 'Noch keine Bugs.'),
       group('In welchen Tests', 'Test', stats.tests, 'In den Berichten wird kein Test genannt.'),
     ];
   }
@@ -163,9 +166,11 @@ export class BugsComponent {
 
   constructor() {
     // Link auf einen Bug (#bugs/<id>, z. B. aus einem Bericht): Zeile aufklappen und hinscrollen.
+    // Einmal je Link: Ein Nachladen im Hintergrund klappt die Zeile nicht wieder auf und scrollt nicht zurück.
+    const focus = new FocusOnce();
     effect(() => {
       const id = this.store.focusId();
-      if (!id || !this.data().bugs.some((bug) => bug.id === id)) return;
+      if (!focus.take(id, !!id && this.data().bugs.some((bug) => bug.id === id))) return;
       untracked(() => {
         this.openBug.set(id);
         globalThis.setTimeout(

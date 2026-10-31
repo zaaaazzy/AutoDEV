@@ -49,6 +49,30 @@ test('TAP: Tests der obersten Ebene mit Status, Dauer und Fehlermeldung', () => 
   assert.ok(cases.every((testCase) => testCase.category === 'unit'));
 });
 
+test('TAP: Testdatei aus location, relativ zum Arbeitsordner; Untertests zählen nicht', () => {
+  const output = [
+    '# Subtest: speichert',
+    '    not ok 1 - Untertest',
+    '      ---',
+    "      location: '/srv/app/src/api/other.test.ts:9:3'",
+    '      ...',
+    'not ok 1 - speichert',
+    '  ---',
+    '  duration_ms: 3',
+    "  location: '/srv/app/src/core/bugs.test.ts:12:1'",
+    '  ...',
+    'not ok 2 - fremd',
+    '  ---',
+    "  location: 'file:///anderswo/frontend/src/x.spec.ts:1:1'",
+    '  ...',
+    'ok 3 - ohne Ort',
+  ].join('\n');
+  assert.deepEqual(
+    parseTapCases(output, '/srv/app').map((testCase) => testCase.file),
+    ['src/core/bugs.test.ts', '/anderswo/frontend/src/x.spec.ts', null],
+  );
+});
+
 test('Playwright: je Gerät ein Eintrag, Befunde gekürzt, Screenshots und Video übernommen', () => {
   const cases = parsePlaywrightCases(
     {

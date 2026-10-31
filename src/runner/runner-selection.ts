@@ -64,33 +64,47 @@ export function parseRunnerOptions(args: string[], cwd = process.env.INIT_CWD ??
   };
 }
 
+/** Zeile aus workflow_steps bzw. agents samt Aktiv-Status (Schritt pausiert, Agent deaktiviert). */
+export type WorkflowRow = WorkflowAgent & { enabled: boolean; agentEnabled?: boolean };
+
+/**
+ * Einzige Regel für den Ablauf eines Projekts: Hat es Workflow-Schritte, gelten nur diese (Phase, Position,
+ * Anweisung, pausiert); ein deaktivierter Agent läuft in keinem seiner Schritte. Ohne Schritte (ältere Projekte)
+ * gelten Phase, Position und Aktiv-Status am Agent. Die Agent-Routen schreiben deshalb in die Schritte mit.
+ */
+export function workflowFromRows(steps: WorkflowRow[], agents: WorkflowRow[]): WorkflowAgent[] {
+  const strip = (row: WorkflowRow): WorkflowAgent => {
+    const agent: Partial<WorkflowRow> = { ...row };
+    delete agent.enabled;
+    delete agent.agentEnabled;
+    return agent as WorkflowAgent;
+  };
+  if (steps.length) return steps.filter((step) => step.enabled && step.agentEnabled !== false).map(strip);
+  return agents.filter((agent) => agent.enabled).map(strip);
+}
+
 export async function loadWorkflow(pool: Pool, projectSlug: string): Promise<WorkflowAgent[]> {
   // Workflow-Schritte (Agents → Workflow): derselbe Agent darf mehrfach vorkommen, je mit eigener Anweisung.
-  const steps = await pool.query<WorkflowAgent>(
+  const steps = await pool.query<WorkflowRow>(
     `SELECT a.id, a.name, a.role, s.phase, s.position, a.instructions, a.command,
             a.allowed_commands AS "allowedCommands", a.file_scope AS "fileScope", a.handoff_to AS "handoffTo",
-            s.id AS "stepId", s.instructions AS "stepInstructions"
+            s.id AS "stepId", s.instructions AS "stepInstructions", s.enabled, a.enabled AS "agentEnabled"
        FROM workflow_steps s JOIN agents a ON a.id = s.agent_id
-      WHERE s.project_slug = $1 AND s.enabled AND a.enabled
+      WHERE s.project_slug = $1
       ORDER BY ${PHASE_SQL_ORDER.replace('CASE phase', 'CASE s.phase')}, s.position, s.created_at`,
     [projectSlug],
   );
-  const configured = (
-    await pool.query<{ exists: boolean }>('SELECT EXISTS (SELECT 1 FROM workflow_steps WHERE project_slug = $1)', [
-      projectSlug,
-    ])
-  ).rows[0]?.exists;
-  if (configured) return steps.rows;
+  if (steps.rows.length) return workflowFromRows(steps.rows, []);
   // Ältere Projekte ohne Schritte: Phase und Position am Agent.
-  const result = await pool.query<WorkflowAgent>(
+  const result = await pool.query<WorkflowRow>(
     `SELECT id, name, role, phase, position, instructions, command, allowed_commands AS "allowedCommands",
-            file_scope AS "fileScope", handoff_to AS "handoffTo"
+            file_scope AS "fileScope", handoff_to AS "handoffTo", enabled
        FROM agents
-      WHERE project_slug = $1 AND enabled
+      WHERE project_slug = $1
       ORDER BY ${PHASE_SQL_ORDER}, position, created_at`,
     [projectSlug],
   );
-  return result.rows;
+  return workflowFromRows([], result.rows);
 }
 
 /**
@@ -98,7 +112,7 @@ export async function loadWorkflow(pool: Pool, projectSlug: string): Promise<Wor
  * fremden Quellen (Betrieb, GitHub) ohne Freigabe durch einen Menschen werden nie gewählt, auch nicht gezielt (--item).
  */
 export async function selectItems(pool: Pool, options: RunnerOptions): Promise<WorkItem[]> {
-  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", (SELECT source FROM bugs WHERE id = d.bug_id) AS "bugSource", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId", d.risks, d.category, d.effort_hours AS "effortHours", d.estimate_source AS "estimateSource", d.retry_count AS "retryCount"`;
+  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", (SELECT source FROM bugs WHERE id = d.bug_id) AS "bugSource", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId", d.risks, d.category, d.effort_hours AS "effortHours", d.token_estimate::float8 AS "tokenEstimate", d.estimate_source AS "estimateSource", d.retry_count AS "retryCount"`;
   if (options.itemId) {
     const result = await pool.query<WorkItem>(
       `SELECT ${columns} FROM development_items d
@@ -131,13 +145,26 @@ export async function selectItems(pool: Pool, options: RunnerOptions): Promise<W
   return result.rows;
 }
 
+/**
+ * JSON aus einer Umgebungsvariable; ungültig → Warnung und null. Ein Tippfehler darf keinen Auftrag mitten im Start
+ * werfen lassen (der Auftrag stünde sonst bis zum Neustart auf „In Arbeit“).
+ */
+function envJson(name: string, raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    console.warn(`[runner] ${name} ist kein gültiges JSON – Wert wird ignoriert.`);
+    return null;
+  }
+}
+
 export function defaultAgentCommand(environment: NodeJS.ProcessEnv = process.env): string[] | null {
   const raw = environment.DEV_LOG_AGENT_COMMAND?.trim();
   if (!raw) {
     return null;
   }
   if (raw.startsWith('[')) {
-    const parsed: unknown = JSON.parse(raw);
+    const parsed = envJson('DEV_LOG_AGENT_COMMAND', raw);
     return Array.isArray(parsed) && parsed.every((part) => typeof part === 'string') && parsed.length
       ? (parsed as string[])
       : null;
@@ -167,7 +194,7 @@ export async function loadTestCommands(
   const raw = environment.DEV_LOG_TEST_COMMANDS?.trim();
   return (
     parseTestCommands(stored) ??
-    (raw ? parseTestCommands(JSON.parse(raw)) : null) ?? [
+    (raw ? parseTestCommands(envJson('DEV_LOG_TEST_COMMANDS', raw)) : null) ?? [
       ['npm', 'run', 'build'],
       ['npm', 'test'],
     ]

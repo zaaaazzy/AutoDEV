@@ -9,6 +9,10 @@ import type { Pool } from 'pg';
 import { reportAgentBug } from '../api/bugs.js';
 import { UNTRUSTED_START } from './hoster.js';
 
+import { USAGE_LIMIT } from '../core/provider-limits.js';
+
+export { usageLimitReset } from '../core/provider-limits.js';
+
 const MAX_AUTO_RETRIES = 2;
 
 interface FailedItem {
@@ -19,15 +23,6 @@ interface FailedItem {
   bugId?: string | null;
   sprintId?: string | null;
 }
-
-/**
- * Nutzungslimit des Agent-Kontos (Claude-CLI): „You've hit your session limit · resets 12:40am (Europe/Zurich)“,
- * auch mit zwei Wörtern („monthly spend limit“).
- */
-const USAGE_LIMIT = /hit your (?:[\w-]+ ){1,2}limit/i;
-const LIMIT_RESET =
-  /resets?\s+(?:(?:on\s+)?([A-Z][a-z]{2})\s+(\d{1,2}),?\s+)?(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i;
-const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
 /**
  * Fehler des Agents selbst (Zeitlimit, Schleife, Modell nicht erreichbar, Befehl fehlt …) sind keine Fehler im Code.
@@ -51,30 +46,6 @@ const AGENT_FAILURE_PATTERNS = [
   /Unterbrochen: Der Worker wurde beendet/,
   USAGE_LIMIT,
 ];
-
-/**
- * Nutzungslimit des Agent-Kontos erreicht: kein Fehler im Code und nichts, was eine Wiederholung in Minuten löst.
- * Liefert den Zeitpunkt, ab dem der Auftrag wieder starten darf (Reset laut Meldung plus kleine Reserve, in der
- * Zeitzone des Workers); ohne lesbare Zeit eine Stunde später. Null, wenn die Ausgabe kein Limit meldet.
- */
-export function usageLimitReset(output: string, now = new Date()): Date | null {
-  const tail = output.slice(-3000);
-  if (!USAGE_LIMIT.test(tail)) return null;
-  const match = tail.match(LIMIT_RESET);
-  if (!match) return new Date(now.getTime() + 60 * 60_000);
-  const [, month, day, hour, minute, meridiem] = match;
-  const hours = (Number(hour) % 12) + (meridiem!.toLowerCase() === 'pm' ? 12 : 0);
-  const reset = new Date(now);
-  reset.setHours(hours, Number(minute ?? 0), 0, 0);
-  const monthIndex = month ? MONTHS.indexOf(month.toLowerCase()) : -1;
-  if (monthIndex >= 0 && day) {
-    reset.setMonth(monthIndex, Number(day));
-    if (reset.getTime() <= now.getTime()) reset.setFullYear(reset.getFullYear() + 1);
-  } else if (reset.getTime() <= now.getTime()) {
-    reset.setDate(reset.getDate() + 1);
-  }
-  return new Date(reset.getTime() + 3 * 60_000);
-}
 
 /**
  * Vorübergehende Fehler: Modell oder Dienst kurz nicht erreichbar, überlastet, Verbindung abgebrochen, Zeitlimit.
@@ -124,6 +95,25 @@ export const ENVIRONMENT_TODO =
  */
 export const GIT_FOLDER_TODO = 'Arbeitsordner aufräumen (Git)';
 
+/**
+ * Arbeitscontainer bzw. Sandbox kaputt (npm-Cache gehört root, Abhängigkeiten nicht installierbar, Befehl fehlt im
+ * Image, Container unter dem Lauf erneuert): kein Fehler im Auftrag. Jeder weitere Auftrag des Projekts liefe in dieselbe
+ * Wand – Bug-Berichte, Problemanalysen und Wiederholungen kosten dann nur Tokens.
+ */
+const SANDBOX_PATTERNS = [
+  /^(?:Sandbox|Arbeitscontainer): /m,
+  /Your cache folder contains root-owned files/,
+  /npm error Log files were not written due to an error writing to the directory/,
+  /Error response from daemon: (?:No such (?:exec instance|container)|Container \S+ is not running)/i,
+];
+export const SANDBOX_TODO =
+  'Arbeitscontainer bzw. Sandbox defekt – reparieren, dann den Auftrag erneut starten (kein Fehler im Code)';
+
+export function isSandboxFailure(output: string): boolean {
+  const tail = output.slice(-3000);
+  return SANDBOX_PATTERNS.some((pattern) => pattern.test(tail));
+}
+
 /** Ein Agent hat wegen einer Projektregel (Do's and Don'ts) abgelehnt: „@@REGEL: <Regel>“. */
 export function ruleRefusal(output: string): string | null {
   return output.match(/^\s*@@REGEL:\s*(.+)$/m)?.[1]?.trim() || null;
@@ -158,12 +148,16 @@ export function failureDetail(output: string): string | null {
 export async function registerFailure(pool: Pool, item: FailedItem, agentName: string, output: string): Promise<void> {
   const tail = output.trim().slice(-3000) || 'Keine Ausgabe vorhanden.';
   const detail = failureDetail(output) ?? tail;
-  // Umgebung (Laufwerk weg) und Projektregeln sind keine Code-Fehler: kein Bug-Auftrag, sondern „Aktion notwendig“.
+  // Umgebung (Laufwerk weg, Arbeitscontainer defekt) und Projektregeln sind keine Code-Fehler: kein Bug-Auftrag und
+  // keine Problemanalyse, sondern „Aktion notwendig“.
   const rule = ruleRefusal(output);
-  if (rule || isEnvironmentFailure(tail)) {
+  const sandbox = !rule && isSandboxFailure(tail);
+  if (rule || sandbox || isEnvironmentFailure(tail)) {
     const todo = rule
       ? `Projektregel verhindert den Auftrag: ${rule} – Auftrag anpassen oder verwerfen`
-      : ENVIRONMENT_TODO;
+      : sandbox
+        ? SANDBOX_TODO
+        : ENVIRONMENT_TODO;
     // Verstoss gegen eine Projektregel: Status „abgelehnt“ (ein Bug-Auftrag lehnt per Trigger auch den Bug ab).
     await pool.query(
       `UPDATE development_items SET failure = $2, auto_run = FALSE${rule ? `, status = '${DEVELOPMENT_STATUS.rejected}'` : ''} WHERE id = $1`,

@@ -1,6 +1,7 @@
 // Projekttests in der Docker-Sandbox (Tester-Schritt, Test-Gate beim Live schalten, Komplettlauf test:full,
-// Abdeckungsmessung): Der Host führt keinen Projektcode mehr aus. Braucht das Projekt Dienste (z. B. Datenbank),
-// startet der Worker sie per Compose und hängt den Testcontainer nur an das Netzwerk dieses Compose-Projekts.
+// Abdeckungsmessung): Der Host führt keinen Projektcode mehr aus. Im Modus workbench laufen die Tests im
+// Arbeitscontainer (Dienste aus .aideation/workbench.json). Im Modus docker startet der Worker benötigte Dienste
+// (z. B. Datenbank) per Compose und hängt den Testcontainer nur an das Netzwerk dieses Compose-Projekts.
 import { existsSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import type { Pool } from 'pg';
@@ -13,6 +14,7 @@ import {
   sandboxExecutor,
   sandboxMode,
   sandboxOffWarning,
+  type SandboxMode,
   usesSandbox,
 } from '../core/sandbox.js';
 import { composeViolation } from '../agent/compose-check.js';
@@ -94,7 +96,7 @@ const failing =
   async (): Promise<CommandResult> => ({ exitCode: 1, durationMs: 0, output: `${message}\n` });
 
 /**
- * Executor für Projekttests im Container. Ohne Testdienste: das interne Agent-Netzwerk (npm nur über den
+ * Executor für Projekttests im Container. Modus workbench: der Arbeitscontainer des Projekts. Sonst ohne Testdienste: das interne Agent-Netzwerk (npm nur über den
  * Egress-Proxy). Mit Testdiensten: Compose startet sie (geprüft wie services.up), der Testcontainer hängt nur im
  * Netzwerk des Compose-Projekts. Scheitert das, scheitern die Tests mit Meldung – nichts läuft auf dem Host.
  */
@@ -103,9 +105,12 @@ export async function projectTestExecutor(options: {
   cwd: string;
   runId: string;
   docker?: CommandExecutor;
+  mode?: SandboxMode;
 }): Promise<CommandExecutor> {
   const docker = options.docker ?? runCommand;
   const sandbox = { runId: options.runId, project: options.project, docker };
+  // Arbeitscontainer: Testdienste stehen in .aideation/workbench.json, Docker gibt es im Stapel selbst.
+  if (options.mode === 'workbench') return sandboxExecutor(options.cwd, { ...sandbox, mode: 'workbench' });
   const file = existsSync(options.cwd) ? composeFile(options.cwd) : null;
   if (!file) return sandboxExecutor(options.cwd, { ...sandbox, network: SANDBOX_NETWORK });
   // Wie bei services.up: das Compose-Projekt der Agent-Kopie (<projekt>-agent), nie das der Live-Container.
@@ -155,6 +160,7 @@ export async function gateExecutor(
   host: CommandExecutor,
   runId: string,
 ): Promise<CommandExecutor> {
-  if (!usesSandbox(sandboxMode(await projectSandbox(pool, project)))) return host;
-  return projectTestExecutor({ project, cwd, runId, docker: host });
+  const mode = sandboxMode(await projectSandbox(pool, project));
+  if (!usesSandbox(mode)) return host;
+  return projectTestExecutor({ project, cwd, runId, docker: host, mode });
 }

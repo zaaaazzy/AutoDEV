@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { type GitCommit, layoutGraph } from './git-graph.js';
+import { edgePath, type GitCommit, laneColor, layoutGraph, PALETTE } from './git-graph.js';
 
 const commit = (hash: string, ...parents: string[]): GitCommit => ({
   hash,
@@ -60,4 +60,20 @@ test('Git-Graph: freie Spuren werden wiederverwendet', () => {
   const commits = [commit('x', 'a'), commit('y', 'b'), commit('b'), commit('a')];
   assert.deepEqual(lanes(commits), ['x:0', 'y:1', 'b:1', 'a:0']);
   assert.equal(layoutGraph([]).lanes, 0);
+});
+
+test('Git-Graph: Kante als gerade Linie in derselben Spur, sonst als Kurve', () => {
+  const x = (lane: number) => lane * 10 + 5;
+  assert.equal(edgePath({ from: 1, fromY: 0, to: 1, toY: 1, color: 0 }, x, 30), 'M15 0V30');
+  assert.equal(edgePath({ from: 0, fromY: 0.5, to: 2, toY: 1, color: 0 }, x, 30), 'M5 15C5 22.5 25 22.5 25 30');
+  // Begrenzte Spuren (gleiche x-Position) bleiben gerade.
+  assert.equal(
+    edgePath({ from: 9, fromY: 0, to: 12, toY: 1, color: 0 }, () => 7, 20),
+    'M7 0V20',
+  );
+});
+
+test('Git-Graph: Spurfarben wiederholen sich', () => {
+  assert.equal(laneColor(0), PALETTE[0]);
+  assert.equal(laneColor(PALETTE.length + 1), PALETTE[1]);
 });

@@ -32,6 +32,7 @@ import { PageSearchService } from '../../core/page-search.service.js';
 import { filterFacets, matchesSelection } from './filter.js';
 import { clampPage, countText, PAGE_SIZE, pageCount, pageItems, pageRange } from './pagination.js';
 import { selectionState, toggleAll } from './selection.js';
+import { compareSortValues } from './sort.js';
 
 export interface DataColumn<T> {
   id: string;
@@ -45,6 +46,8 @@ export interface DataColumn<T> {
   /** Feste Werte des Auswahlfilters (mit „Alle“ davor), auch wenn gerade keine Zeile sie hat. */
   options?: readonly string[];
   sortable?: boolean;
+  /** Zeilen ohne Sortierwert (null, undefined, leer) in beiden Richtungen ans Ende stellen. */
+  emptyLast?: boolean;
   /** CSS-Klasse für Kopf und Zellen, z. B. `title-cell`. */
   className?: string;
   /** Wert als farbiges Etikett darstellen; liefert die CSS-Klasse des Etiketts. */
@@ -167,10 +170,8 @@ export class DataTableComponent<T> {
       enableColumnFilter: column.filter !== false,
       sortingFn: (left, right) => {
         const rank = column.sortValue ?? column.value;
-        const a = rank(left.original) ?? '';
-        const b = rank(right.original) ?? '';
-        if (typeof a === 'number' && typeof b === 'number') return a - b;
-        return String(a).localeCompare(String(b), 'de', { numeric: true, sensitivity: 'base' });
+        const desc = this.effectiveSorting().find((entry) => entry.id === column.id)?.desc;
+        return compareSortValues(rank(left.original), rank(right.original), { desc, emptyLast: column.emptyLast });
       },
       filterFn:
         column.filter === 'text'

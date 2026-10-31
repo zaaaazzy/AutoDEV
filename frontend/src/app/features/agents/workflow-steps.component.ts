@@ -19,6 +19,7 @@ import {
 } from './agent-options.js';
 import type { PermissionGroupInfo } from './permission-picker.component.js';
 import { applyOrders, moveStep, stepsInPhase, type PhaseOrder } from './workflow-order.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 /**
  * Workflow als aufklappbare Karte: für jeden Zeitpunkt (Sprintstart, vor/während/nach dem Auftrag, abgelehnt,
@@ -340,10 +341,11 @@ export class WorkflowStepsComponent {
     this.settingsFor.set(this.settingsFor() === id ? null : id);
   }
 
-  /** Änderung ausführen, Meldung zeigen und den Workflow neu laden. */
-  private async change(action: () => Promise<unknown>, message: string): Promise<void> {
-    await this.store.perform(action, message, false);
+  /** Änderung ausführen, Meldung zeigen und den Workflow neu laden; false, wenn die Änderung scheiterte. */
+  private async change(action: () => Promise<unknown>, message: string): Promise<boolean> {
+    const done = await this.store.perform(action, message, false);
     await this.load();
+    return done;
   }
 
   protected async addStep(phase: AgentPhase, agentId: string, editInstructions = true): Promise<void> {
@@ -351,6 +353,8 @@ export class WorkflowStepsComponent {
     await this.change(async () => {
       created = (await this.api.post<{ step: WorkflowStep }>(`${this.path()}/steps`, { phase, agentId })).step;
     }, 'Agent zum Workflow hinzugefügt.');
+    // Gescheitert: Auswahl offen lassen, damit es ohne erneutes Suchen noch einmal geht.
+    if (!created) return;
     this.adding.set(null);
     // Gleich die Anweisung für diesen Einsatz anbieten.
     if (created && editInstructions) this.startInstructions(created);
@@ -361,8 +365,10 @@ export class WorkflowStepsComponent {
     if (!name.trim()) return;
     const preset = MODEL_PRESETS.find((item) => item.id === model);
     let agentId: string | null = null;
+    let step: WorkflowStep | null = null;
     await this.store.perform(async () => {
-      const result = await this.api.post<{ agent: Agent }>(
+      // Der Server setzt den neuen Agent bei vorhandenen Schritten selbst ans Ende der Phase.
+      const result = await this.api.post<{ agent: Agent; step?: WorkflowStep | null }>(
         `${this.api.projectPath(this.store.activeProject())}/agents`,
         {
           name: name.trim(),
@@ -374,8 +380,13 @@ export class WorkflowStepsComponent {
         },
       );
       agentId = result.agent.id;
+      step = result.step ?? null;
     }, `Agent „${name.trim()}“ angelegt.`);
-    if (agentId) await this.addStep(phase, agentId);
+    if (step) {
+      await this.load();
+      this.adding.set(null);
+      this.startInstructions(step);
+    } else if (agentId) await this.addStep(phase, agentId);
   }
 
   protected startInstructions(step: WorkflowStep): void {
@@ -384,11 +395,12 @@ export class WorkflowStepsComponent {
   }
 
   protected async saveInstructions(step: WorkflowStep): Promise<void> {
-    await this.change(
+    const saved = await this.change(
       () => this.api.patch(`/api/workflow-steps/${encodeURIComponent(step.id)}`, { instructions: this.draft }),
       'Anweisung gespeichert.',
     );
-    this.editingStep.set(null);
+    // Gescheitert: Editor offen lassen, sonst ist der Entwurf weg (startInstructions lädt den Serverstand).
+    if (saved) this.editingStep.set(null);
   }
 
   protected async toggleEnabled(step: WorkflowStep): Promise<void> {
@@ -403,7 +415,7 @@ export class WorkflowStepsComponent {
     const index = ids.indexOf(step.id);
     const target = index + direction;
     if (index < 0 || target < 0 || target >= ids.length) return;
-    [ids[index], ids[target]] = [ids[target]!, ids[index]!];
+    [ids[index], ids[target]] = [defined(ids[target]), defined(ids[index])];
     await this.change(
       () => this.api.post(`${this.path()}/order`, { phase: step.phase, ids }),
       'Reihenfolge gespeichert.',

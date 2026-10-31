@@ -1,0 +1,78 @@
+# CI-Spiegel vor dem Pull Request lokal ausführen
+
+Auftrag dca86e51.
+
+## Ziel
+
+Im PR-Modus (`issues+pr`) führt der Worker vor dem Push des Sprint-Branches die Prüfschritte aus `.github/workflows/ci.yml` lokal aus. Ein roter Schritt verhindert Push, Pull Request und Merge und legt einen Bug an.
+
+## Umsetzung
+
+- **Neues Modul `src/runner/git-sync/ci-mirror.ts`**
+  - `mirroredSteps(workflow)`: einfacher Zeilenparser (keine YAML-Bibliothek) für `run: npm run …`-Zeilen. Übernommen werden nur `lint`, `format:check`, `typecheck` und `test:unit`, in der Reihenfolge der Datei, jeder Schritt einmal. `npm ci`, Docker, Playwright, `test:e2e` und `build:ui` werden nicht gespiegelt. Die Datei wird bei jedem Lauf neu gelesen, die Liste steht nicht im Code.
+  - `runCiMirror(execute, cwd, log)`: führt die Schritte über `runProjectCommand` (gefilterte Umgebung, ohne AIdeation-Zugänge) aus und hält beim ersten roten Schritt an. Fehlt die Datei oder enthält sie keinen spiegelbaren Schritt, vermerkt der Log „CI-Spiegel übersprungen“.
+  - Fehlende Datenbank: Ist `test:unit` rot und zeigt die Ausgabe eine fehlende Datenbank (`keine PostgreSQL-Datenbank`, `DEV_LOG_TEST_REQUIRE_DATABASE`, `ECONNREFUSED …:543x`), gilt der Schritt als „nicht prüfbar“. Der Log vermerkt das, kein Bug, der Pull Request wird geöffnet.
+  - `reportCiMirrorFailure(pool, project, sprintName, failure)`: legt einen Bug „CI-Spiegel rot vor Pull Request von „<Sprintname>““ an (höchstens 180 Zeichen, Priorität `high`, Quelle `github`). Im Text stehen `Fehlgeschlagener Schritt: \`npm run …\`` und der mit `ciLogExcerpt` gekürzte (60 Zeilen / 3000 Zeichen), maskierte Log-Auszug. Pro Sprint und Schritt gibt es nur einen offenen Bug (`INSERT … WHERE NOT EXISTS`).
+- **`src/runner/git-sync/sprint-sync.ts`**: Der Spiegel (`mirror`) wird in `pushSprint` vor dem Push eingehängt, beim Sprint-Abschluss und bei der Nachbesserung im Review. Er läuft zusätzlich zum Test-Gate. Bei Rot wirft er einen Fehler „Push abgelehnt: CI-Spiegel rot bei …“, die Git-Sicherung steht auf „gescheitert“.
+- **`src/runner/git-sync/ci.ts`**: kleine Anpassung für die Wiederverwendung (`ciLogExcerpt`, `maskSecrets`, `gateFailureSummary`, `TEST_TIMEOUT_MS`).
+- **Tests**: `src/runner/git-sync/ci-mirror.test.ts` (neu) und Ergänzungen in `src/runner/git-sync.test.ts`.
+- **Doku**: `docs/ci.md` (Abschnitt „CI-Spiegel vor dem Pull Request“), `docs/workflows.md`, `docs/benutzerhandbuch-live-schalten-pr-modus.md`, `docs/benutzerhandbuch-ci-spiegel-vor-pull-request.md`.
+
+## Ablauf
+
+```mermaid
+flowchart TD
+  A["Sprint abgeschlossen oder im Review"] --> B["Test-Gate wie bisher"]
+  B --> C{"PR-Modus?"}
+  C -- nein --> D["bisheriger Ablauf"]
+  C -- ja --> E["CI-Spiegel: Schritte aus ci.yml"]
+  E --> F{"Schritt grün?"}
+  F -- ja --> G["Push und Pull Request"]
+  F -- nein --> H["Bug mit Schritt und Log-Auszug"]
+  H --> I["kein Push, kein Pull Request"]
+```
+
+## Tests und Prüfung
+
+- Testdateien decken ab: vier Schritte in Dateireihenfolge, `npm ci`/Docker/E2E nicht gespiegelt, roter Schritt ohne `push`/`createPullRequest`, genau ein Bug mit Schrittnamen, kein zweiter Bug beim zweiten roten Lauf, Log-Auszug ohne Zugangsdaten und höchstens 3000 Zeichen, „nicht prüfbar“ ohne Datenbank (PR wird geöffnet), grüner Ablauf (Push, dann Pull Request).
+- **Entwickler (Arbeitscontainer):** `npm run lint`, `format:check`, `typecheck` und `test:unit` liefen grün (1857 Tests, 0 fehlgeschlagen). Das ist die Angabe des Entwicklers; die Dokumentation hat nichts davon erneut ausgeführt. Die Dateiliste ist nicht per Diff gegen main geprüft, weil `.git` im Container auf einen Host-Pfad zeigt.
+- **Tester-Lauf nicht belegt:** Er scheiterte an der Umgebung des Images „aideation-agent“ (`tsc: not found`, Exit-Code 127; `npx` mit EACCES auf `/home/agent/.npm/_cacache`). Die Akzeptanzkriterien sind damit durch den Tester nicht bestätigt. Der Wächter sperrt `npx` und direkte `node_modules/.bin/tsx`-Aufrufe; `npm run …` funktioniert.
+
+## Geänderte Dateien
+
+- `src/runner/git-sync/ci-mirror.ts` (neu)
+- `src/runner/git-sync/ci-mirror.test.ts` (neu)
+- `src/runner/git-sync/ci.ts`
+- `src/runner/git-sync/sprint-sync.ts`
+- `src/runner/git-sync.test.ts`
+- `eslint.config.mjs` (gitignorierte Testausgaben `test-results/` ausgeschlossen)
+- `package-lock.json` (laut Dateiliste geändert; vom Entwickler nicht bewusst angefasst, vor dem Merge prüfen)
+- `docs/ci.md`
+- `docs/workflows.md`
+- `docs/benutzerhandbuch-live-schalten-pr-modus.md`
+- `docs/benutzerhandbuch-ci-spiegel-vor-pull-request.md`
+
+## Worauf zu achten ist
+
+- **Nur PR-Modus.** Ohne PR-Modus (reine Sprint-Sicherung) läuft der Spiegel nicht; ein Test deckt das ab. Offene Frage an den Auftraggeber, ob das so bleiben soll.
+- **Sicherheit:** Befehle laufen nur über `runProjectCommand` (gefilterte Umgebung). Log-Auszüge gehen immer durch `maskSecrets` und `ciLogExcerpt`.
+- **Bug-Quelle `github`:** vorhanden in `bugs_source_check`, keine Schema- oder Migrationsänderung. Der Titel unterscheidet sich von „CI rot im Pull Request von …“, die Bereinigung in `migrations.ts` erfasst ihn nicht.
+- **Offen:** Ein Bug „CI-Spiegel rot vor Pull Request von …“ wird nach erfolgreichem Merge nicht automatisch geschlossen. Falls gewünscht, in `pollSprintReviews` analog zu `ciBugTitle` ergänzen.
+- **Laufzeit:** Die vier Schritte (vor allem die Tests) verlängern die Sprint-Sicherung im PR-Modus.
+- **Datenbank-Erkennung ist musterbasiert** (`NO_DATABASE`) und gilt nur für `test:unit`. Ändern sich die Meldungen der Test-Datenbank, muss das Muster nachgezogen werden. Enthält die Ausgabe den Datenbank-Hinweis, gilt der ganze Schritt als „nicht prüfbar“, auch wenn daneben andere Tests rot sind. Diese prüft dann die echte CI.
+- **Bestehender PR-Modus-Test** (`git-sync.test.ts`, ab Zeile 444): Dort legt `ensureCiWorkflow` eine `ci.yml` mit `run: true` an. Ohne `npm run`-Schritt überspringt der Spiegel, der Ablauf bleibt wie bisher.
+- Der Spiegel ist eine Vorprüfung. Die echte CI bleibt maßgeblich; `waitForCi` und der Merge sind unverändert.
+
+## Sprint
+
+| Auftrag | Zustand | Details |
+| --- | --- | --- |
+| dca86e51 CI-Spiegel vor dem Pull Request lokal ausführen | umgesetzt, Entwickler-Prüfung grün, Tester-Abnahme offen | Neuer Versuch im Arbeitscontainer: Entwickler meldet lint, format:check, typecheck und test:unit grün (1857 Tests). Der Tester-Lauf scheiterte erneut an der Image-Umgebung. Frühere Versuche: Erneuter Versuch am 30.10.2026: Die Umgebung ist weiter kaputt. `node_modules` und `.git` im Worktree verweisen auf den Host-Pfad `/Volumes/DroneShots/Coding/AIdeation/source/…`, den es im Container nicht gibt (`tsc: not found`, `git` meldet „not a git repository“). Der Code wurde statisch geprüft und nicht geändert. Zweiter erneuter Versuch (30.10.2026, nach dem Hinweis „Agent-Image und Worktree-Verlinkung reparieren“): Die Verlinkung ist weiter kaputt (`node_modules` → `/Volumes/…/source/node_modules`, `.git` → `/Volumes/…/.git/worktrees/DevLog-agents`, beides fehlt im Container). Node 22 ist da, `tsx`, `tsc` und `pg` fehlen. Der Code wurde nochmals statisch geprüft (Einbindung in `pushSprint`, Exporte aus `ci.ts`, Tests) und nicht geändert. Dritter Versuch (30.10.2026): Der Tester-Lauf auf die 10 geänderten Dateien scheiterte erneut an der Umgebung (`tsc: not found`, Exit-Code 127 im Image „aideation-agent“; `npx` scheitert mit EACCES auf `/home/agent/.npm/_cacache`). Die Akzeptanzkriterien gelten damit als nicht belegt, das manuelle Kriterium (Freigabe in der Vorschau) steht aus. Die Dokumentation wurde nicht geändert. |
+
+## Anfrage / TODO
+
+- Agent-Image „aideation-agent“ reparieren (`tsc` fehlt, npm-Cache `/home/agent/.npm` gehört root), damit der Tester `npm run typecheck` und die Tests des Auftrags ausführen kann.
+- `package-lock.json` auf unbeabsichtigte Änderung prüfen.
+- Freigabe in der Vorschau durch einen Menschen (manuelles Kriterium) steht aus.
+- Entscheidung: Spiegel auch ohne PR-Modus?
+- Entscheidung: Spiegel-Bug nach Merge automatisch schließen?

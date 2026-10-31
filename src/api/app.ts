@@ -16,6 +16,7 @@ import { registerTestRequestRoutes } from './test-requests.js';
 import { registerGitStateRoutes } from './git-state.js';
 import { registerDevelopmentRoutes } from './development.js';
 import { registerDocRoutes } from './docs.js';
+import { jsonErrors, notFound } from './error-handler.js';
 import { registerCoverageRoutes } from './coverage.js';
 import { registerSetupRoutes } from './setup.js';
 import { registerAcceptanceRoutes } from './acceptance.js';
@@ -42,12 +43,12 @@ import { registerTestRunRoutes } from './test-runs.js';
 import { registerTimelineRoutes } from './timeline.js';
 import { registerQualityRoutes } from './quality.js';
 import { registerWorkerRoutes } from './worker.js';
-
-export type { DevLogAuth } from './auth.js';
+import { registerProviderLimitRoutes } from './provider-limits.js';
 
 const UI_DIRECTORY = join(import.meta.dirname, '..', '..', 'dist', 'ui', 'browser');
 
-export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
+/** `uiDirectory` nur für Tests: Unit-Tests laufen ohne gebaute Oberfläche (`dist/ui`). */
+export function createDevLogApp(pool: Pool, auth: DevLogAuth | null, uiDirectory = UI_DIRECTORY): Express {
   const app = express();
   // Vor dem ersten app.use setzen: Express legt seinen Router beim ersten Zugriff mit diesen Einstellungen an.
   // Sonst träfe /API/... dieselben Routen wie /api/... (Express vergleicht standardmäßig ohne Groß-/Kleinschreibung).
@@ -73,15 +74,18 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   // weil das Snippet von der Origin der betreuten Anwendung sendet und eigene Grenzen (16 KB) gelten.
   registerIngestRoutes(app, pool);
   app.use(sameOriginWrites);
-  app.use(express.json({ limit: '32kb' }));
+  // Ein Dokument darf MAX_DOC_CONTENT (30 000) Zeichen haben; in JSON kostet ein Zeichen bis zu 6 Byte
+  // (Umlaute 2, \uXXXX-Escapes 6). 256 KB lassen dafür samt Titel und Notiz Platz.
+  app.use(express.json({ limit: '256kb' }));
 
   app.use('/api', createApiRouter(pool, auth));
-  app.use(express.static(UI_DIRECTORY, { index: false }));
+  app.use(express.static(uiDirectory, { index: false }));
   app.get('/', async (_request, response) => {
-    response.sendFile(join(UI_DIRECTORY, 'index.html'));
+    response.sendFile(join(uiDirectory, 'index.html'));
   });
 
-  app.get('*splat', (_request, response) => response.status(404).json({ message: 'Nicht gefunden.' }));
+  app.use(notFound);
+  app.use(jsonErrors);
   return app;
 }
 
@@ -146,6 +150,7 @@ export function createApiRouter(pool: Pool, auth: DevLogAuth | null): Router {
   registerSystemRestartRoutes(api, pool);
   registerScheduledJobRoutes(api, pool);
   registerWorkerRoutes(api, pool);
+  registerProviderLimitRoutes(api, pool);
   registerPushRoutes(api, pool);
   registerUserRoutes(api, pool, auth);
   registerDocRevisionRoutes(api, pool);

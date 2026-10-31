@@ -13,9 +13,8 @@ const MAX_LOOP_WARNINGS = 1;
 import { BACKUP_DIRECTORY, executeTool, type ToolContext } from './ollama-tools.js';
 import type { ChatMessage, ToolCall } from './ollama-types.js';
 
-export { DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL } from './ollama-client.js';
 export { resolveContext, resolveModel } from './ollama-client.js';
-export { composeViolation, isAllowedCommand, isAssistantServiceCommand } from './tool-permissions.js';
+export { composeViolation } from './tool-permissions.js';
 export { BACKUP_DIRECTORY, executeTool, type ToolContext } from './ollama-tools.js';
 
 export interface OllamaAgentOptions {

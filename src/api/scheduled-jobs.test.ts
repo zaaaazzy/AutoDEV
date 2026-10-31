@@ -64,6 +64,7 @@ test('Wartungs-Jobs: Administratoren lesen Jobs samt erlaubten Job-Arten', async
     assert.equal(body.jobs.length, 1);
     assert.deepEqual(body.kinds.sort(), [
       'backup_check',
+      'bug_categories',
       'close_old_sprints',
       'push_alert',
       'restore_probe',

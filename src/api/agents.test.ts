@@ -176,7 +176,11 @@ test('POST /projects/:slug/agents/order: Agents eines fremden Projekts werden mi
   const own = setup();
   const ownHandler = own.handlers.get('POST /projects/:slug/agents/order');
   assert.equal(await call(ownHandler, agentsUser, { slug: 'demo' }, order([AGENT_ID, OWN_AGENT])), 204);
-  assert.equal(writes(own.queries).length, 1);
+  // Reihenfolge der Agents und ihrer Workflow-Schritte (eine Quelle für den Worker).
+  assert.deepEqual(
+    writes(own.queries).map((query) => /^\s*UPDATE (\w+)/.exec(query.sql)?.[1]),
+    ['agents', 'workflow_steps'],
+  );
 });
 
 test('POST /projects/:slug/agents: Rolle agents darf weder command noch eine Rolle setzen', async () => {

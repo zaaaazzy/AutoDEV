@@ -44,13 +44,13 @@
   margin-left: auto;
   padding: 0 7px;
   border-radius: 999px;
-  background: #eef1ec;
+  background: var(--surface-hover-alt);
   color: var(--muted);
   font-size: 0.72rem;
   font-variant-numeric: tabular-nums;
 }
 .permission-count.on {
-  background: #e2efe7;
+  background: var(--success-soft);
   color: var(--green);
   font-weight: 600;
 }
@@ -200,7 +200,7 @@
   cursor: pointer;
 }
 .workflow-add-existing button:hover {
-  background: #eef6f1;
+  background: var(--success-surface);
 }
 .workflow-live {
   flex: none;
@@ -303,8 +303,8 @@
   height: 26px;
   place-items: center;
   border-radius: 50%;
-  background: #eef3ef;
-  color: #2f6b4f;
+  background: var(--surface-cool);
+  color: var(--success-deep);
   font-weight: 700;
 }
 .workflow-phase-title {
@@ -344,13 +344,13 @@
     border-color 0.15s;
 }
 .workflow-phase.drop-active .workflow-steps {
-  border-left-color: #2f6b4f;
+  border-left-color: var(--success-deep);
   border-radius: 0 10px 10px 0;
   background: rgb(238 243 239 / 50%);
 }
 .workflow-phase.drop-active .workflow-phase-number {
-  background: #2f6b4f;
-  color: #fff;
+  background: var(--success-deep);
+  color: var(--surface);
 }
 .workflow-step {
   position: relative;
@@ -369,7 +369,7 @@
   left: 0;
   height: 3px;
   border-radius: 2px;
-  background: #2f6b4f;
+  background: var(--success-deep);
   content: '';
   pointer-events: none;
 }
@@ -380,7 +380,7 @@
   bottom: -6px;
 }
 .workflow-empty.drop-here {
-  border: 2px dashed #2f6b4f;
+  border: 2px dashed var(--success-deep);
   border-radius: 10px;
   padding: 6px 10px;
 }
@@ -426,7 +426,7 @@
   font-size: 13px;
 }
 .workflow-step-actions .danger {
-  color: #a33d26;
+  color: var(--error-text-deep);
 }
 .workflow-step-edit,
 .workflow-step-settings {
@@ -445,7 +445,7 @@
   display: grid;
   gap: 10px;
   padding: 12px;
-  border: 1px dashed #a9c2b1;
+  border: 1px dashed var(--success-border);
   border-radius: 10px;
   background: #f7faf8;
 }

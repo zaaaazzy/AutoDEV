@@ -7,8 +7,8 @@
   margin-right: 6px;
   place-items: center;
   border-radius: 6px;
-  background: #fbe9e6;
-  color: #b4472f;
+  background: var(--error-soft-alt);
+  color: var(--error-text-strong);
   vertical-align: -4px;
 }
 .bug-mark svg {
@@ -100,7 +100,7 @@
   height: 4px;
   margin-top: 4px;
   border-radius: 2px;
-  background: #eef0ec;
+  background: var(--surface-hover);
   overflow: hidden;
 }
 .bug-stats-bar .open {
@@ -111,13 +111,13 @@
 }
 .production-ok {
   background: #e3f3ea;
-  color: #1f6e49;
+  color: var(--success-text);
   white-space: nowrap;
 }
 .regression-badge,
 .production-bad {
-  background: #fbeeea;
-  color: #a8322b;
+  background: var(--error-soft);
+  color: var(--error-text-dark);
 }
 
 /* Zustand des Log-Scans in den Einstellungen: Bezeichnung über dem Wert, Probleme rot */
@@ -132,7 +132,7 @@
   overflow-wrap: anywhere;
 }
 .production-scan dd.problem {
-  color: #a8322b;
+  color: var(--error-text-dark);
 }
 .production-history-head {
   display: flex;
@@ -161,7 +161,7 @@
 .production-bar > span {
   width: 100%;
   border-radius: 3px 3px 0 0;
-  background: #2f7de1;
+  background: var(--info-bright);
 }
 .production-bar:hover > span,
 .production-bar:focus-visible > span {
@@ -177,7 +177,7 @@
   width: max-content;
   padding: 5px 8px;
   border-radius: 6px;
-  background: #26312a;
+  background: var(--ink-deep);
   color: var(--surface);
   font-size: 12px;
   transform: translateX(-50%);
@@ -258,7 +258,7 @@
   margin: 10px 0;
   padding: 10px;
   border-radius: 8px;
-  background: #faf1da;
+  background: var(--notice-soft);
 }
 .production-token code {
   overflow-wrap: anywhere;

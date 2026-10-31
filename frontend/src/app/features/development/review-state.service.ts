@@ -1,8 +1,10 @@
 import { Injectable, effect, inject, signal, untracked } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
-import type { ReviewState } from '../../core/models.js';
+import type { DevelopmentItem, ReviewState } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { visibleInterval } from '../../core/visible-interval.js';
+import { OrderService } from './order.service.js';
+import { launchOrderReview } from './review-box.js';
 
 const REVIEW_REFRESH_MS = 5000;
 
@@ -14,6 +16,7 @@ const REVIEW_REFRESH_MS = 5000;
 export class ReviewStateService {
   private readonly api = inject(ApiService);
   private readonly store = inject(ProjectStore);
+  private readonly orders = inject(OrderService);
   readonly state = signal<ReviewState | null>(null);
   private subscribers = 0;
   private stopTimer: (() => void) | null = null;
@@ -49,6 +52,19 @@ export class ReviewStateService {
         this.stopTimer = null;
       }
     };
+  }
+
+  /** Review-Container für den Auftrag starten (Freigabe- und Abnahme-Box), danach den Stand nachladen. */
+  launch(item: DevelopmentItem): Promise<void> {
+    return launchOrderReview(
+      {
+        activeProject: () => this.store.activeProject(),
+        isActive: (slug) => this.store.isActive(slug),
+        showReview: (order) => this.orders.showReview(order),
+        refresh: () => this.refresh(),
+      },
+      item,
+    );
   }
 
   async refresh(): Promise<void> {

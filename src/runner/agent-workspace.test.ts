@@ -4,7 +4,7 @@ import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { agentWorkspacePath, resolveAgentWorkspace } from './agent-workspace.js';
+import { agentWorkspacePath, linkDependencies, resolveAgentWorkspace } from './agent-workspace.js';
 import { enterOrderBranch, finishOrderBranch } from './git-sync.js';
 
 const git = (cwd: string, ...args: string[]): string =>
@@ -97,4 +97,19 @@ test('AIdeation-Ordner: Aufträge laufen im eigenen Worktree, der Arbeitsordner 
   assert.equal(git(folder, 'log', '--oneline', 'main').split('\n').length, 1);
   // Der WIP-Stand des Agents liegt auf seinem Auftrags-Branch und enthält nur seine Datei.
   assert.deepEqual(git(folder, 'show', '--name-only', '--format=', branch!.branch).split('\n'), ['agent.txt']);
+});
+
+test('Agent-Worktree: leerer node_modules-Ordner der Sandbox wird ohne Sandbox wieder verlinkt, gefüllter bleibt', () => {
+  const root = mkdtempSync(join(tmpdir(), 'link-deps-'));
+  const folder = join(root, 'source');
+  const workspace = join(root, 'agent');
+  mkdirSync(join(folder, 'node_modules'), { recursive: true });
+  mkdirSync(join(folder, 'frontend', 'node_modules'), { recursive: true });
+  mkdirSync(join(workspace, 'node_modules'), { recursive: true });
+  mkdirSync(join(workspace, 'frontend', 'node_modules'), { recursive: true });
+  writeFileSync(join(workspace, 'frontend', 'node_modules', 'eigen.txt'), 'x');
+  // Unter dem Test-Runner gilt die Sandbox als aus (NODE_TEST_CONTEXT).
+  linkDependencies(folder, workspace);
+  assert.ok(lstatSync(join(workspace, 'node_modules')).isSymbolicLink(), 'leerer Ordner → Link');
+  assert.ok(!lstatSync(join(workspace, 'frontend', 'node_modules')).isSymbolicLink(), 'gefüllter Ordner bleibt');
 });

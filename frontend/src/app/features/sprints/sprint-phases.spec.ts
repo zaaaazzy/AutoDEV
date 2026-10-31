@@ -1,6 +1,22 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { sprintButtons } from './sprint-actions.js';
 import { canEditSprintOrders, moveId, orderSprint, phaseLabel, sprintPhase } from './sprint-phases.js';
+
+test('Regression: Sprint-Seite bietet keine Aktionen an, die der Server mit 409 ablehnt', () => {
+  const all = () => true;
+  const a = { id: 'a', status: 'active' };
+  const b = { id: 'b', status: 'planned' };
+  for (const status of ['active', 'review']) {
+    assert.equal(sprintButtons({ id: 'a', status }, [], [], all).remove, false, `kein Löschen bei ${status}`);
+  }
+  const start = sprintButtons(b, [a, b], [], all);
+  assert.equal(start.start, true, 'Sprint starten bleibt sichtbar');
+  assert.ok(start.activateBlocked, 'Sprint starten in B gesperrt, solange A aktiv ist');
+  const live = sprintButtons(a, [a, b], [{ sprintId: 'a', status: 'in_progress' }], all);
+  assert.equal(live.live, true, 'Live schalten bleibt sichtbar');
+  assert.ok(live.liveBlocked, 'Live schalten gesperrt, solange ein Auftrag läuft');
+});
 
 test('Sprint-Aufträge: Umsortieren und Herausnehmen nur in geplanten oder aktiven Sprints mit Planungsrecht', () => {
   assert.equal(canEditSprintOrders('planned', true), true);

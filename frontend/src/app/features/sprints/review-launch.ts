@@ -1,4 +1,4 @@
-import type { DevelopmentItem, ReviewSlot, SprintCommit } from '../../core/models.js';
+import type { DevelopmentItem, ReviewSlot, SprintCommit, SprintStatus } from '../../core/models.js';
 import { isFinished } from '../../shared/labels.js';
 
 const STATUS_TEXT: Record<ReviewSlot['status'], string> = {
@@ -17,6 +17,11 @@ export function reviewStatusText(slot: Pick<ReviewSlot, 'status' | 'message'>): 
     if (line) return `Fehler: ${line.length > 160 ? `${line.slice(0, 159)}…` : line}`;
   }
   return STATUS_TEXT[slot.status];
+}
+
+/** Sprint-Review (Stand wählen und starten) nur bei offenen Sprints; abgeschlossene und abgebrochene fragen nichts ab. */
+export function sprintReviewable(status: SprintStatus): boolean {
+  return status === 'planned' || status === 'active' || status === 'review';
 }
 
 /** Container arbeitet noch am Start: Ladeanimation zeigen. */

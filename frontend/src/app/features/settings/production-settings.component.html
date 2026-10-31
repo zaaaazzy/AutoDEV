@@ -77,8 +77,8 @@
 
   <h3>Ingest-Endpunkt</h3>
   <p class="muted">
-    Die Anwendung meldet Fehler selbst an Dev Log – ohne Login, nur mit Token (16 KB je Meldung, Rate-Limit).
-    Gespeichert wird nur der Hash des Tokens; den Klartext zeigt Dev Log einmalig direkt nach dem Erzeugen.
+    Die Anwendung meldet Fehler selbst an AIdeation – ohne Login, nur mit Token (16 KB je Meldung, Rate-Limit).
+    Gespeichert wird nur der Hash des Tokens; den Klartext zeigt AIdeation einmalig direkt nach dem Erzeugen.
   </p>
   <div class="actions">
     <button class="button secondary" type="button" [disabled]="busy()" (click)="createToken()">
@@ -114,6 +114,6 @@
         {{ copied() === 'node' ? 'Kopiert ✓' : 'Snippet kopieren' }}
       </button>
     </details>
-    <p class="muted">Ausführlich: Dokumentation → „Betrieb: Fehler an Dev Log melden“.</p>
+    <p class="muted">Ausführlich: Dokumentation → „Betrieb: Fehler an AIdeation melden“.</p>
   }
 </details>

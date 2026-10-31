@@ -13,6 +13,12 @@
       </span>
     }
   </div>
+  @if (error()) {
+    <p class="notice error" role="status">
+      Git-Verlauf gerade nicht erreichbar{{ graph() ? ' – angezeigt wird der letzte Stand' : '' }}. Nächster Versuch in
+      einer Minute.
+    </p>
+  }
   @if (graph(); as g) {
     <div class="git-graph" [style.--git-graph-width.px]="graphWidth()">
       @for (row of visibleRows(); track row.commit.hash) {
@@ -54,6 +60,8 @@
         {{ showAll() ? 'Weniger anzeigen' : 'Alle ' + layout().rows.length + ' Commits anzeigen' }}
       </button>
     }
+  } @else if (error()) {
+    <!-- Fehler steht oben; nicht zusätzlich „leer“ melden. -->
   } @else if (loaded()) {
     <p class="empty-state">Noch kein Git-Verlauf – der Worker liest ihn jede Minute aus dem Projektordner.</p>
   } @else {

@@ -1,4 +1,6 @@
 import type { Pool } from 'pg';
+import { afterBugCreated } from '../agent/bug-classifier.js';
+import { categoryFromBug } from './bug-category.js';
 import type { TestCaseResult } from './test-results.js';
 
 /**
@@ -9,6 +11,8 @@ export interface BugDraft {
   title: string;
   description: string;
   severity: 'low' | 'medium' | 'high';
+  /** Betroffene Dateien (z. B. die Testdatei) für die Kategorie; dazu kommen die in der Beschreibung genannten. */
+  paths?: string[];
 }
 
 const MAX_TITLE = 180;
@@ -43,6 +47,7 @@ export function caseBugs(cases: TestCaseResult[], runId: string): BugDraft[] {
           .filter(Boolean)
           .join('\n\n'),
         severity: testCase.status === 'flaky' ? 'low' : testCase.category === 'unit' ? 'high' : 'medium',
+        paths: testCase.file ? [testCase.file] : [],
       };
     });
 }
@@ -61,18 +66,24 @@ export function stepBug(command: string, output: string, runId: string): BugDraf
   };
 }
 
-/** Legt die Bugs an (ohne Dubletten zu offenen Bugs) und liefert die Zahl der neuen. */
+/**
+ * Legt die Bugs an (ohne Dubletten zu offenen Bugs) und liefert die Zahl der neuen. Die Kategorie kommt aus Testdatei
+ * und genannten Pfaden; ohne Treffer stuft das lokale Modell danach im Hintergrund ein.
+ */
 export async function fileBugs(pool: Pool, project: string, drafts: BugDraft[]): Promise<number> {
   let created = 0;
   for (const draft of drafts) {
-    const result = await pool.query(
-      `INSERT INTO bugs (project_slug, title, description, severity, source)
-       SELECT $1, $2, $3, $4, 'test'
+    const category = categoryFromBug(draft);
+    const result = await pool.query<{ id: string }>(
+      `INSERT INTO bugs (project_slug, title, description, severity, source, category)
+       SELECT $1, $2, $3, $4, 'test', $5
         WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2
-                            AND status IN ('open', 'in_progress'))`,
-      [project, draft.title, draft.description, draft.severity],
+                            AND status IN ('open', 'in_progress'))
+       RETURNING id`,
+      [project, draft.title, draft.description, draft.severity, category],
     );
     created += result.rowCount ?? 0;
+    afterBugCreated(pool, result.rows[0]?.id, category, draft);
   }
   return created;
 }

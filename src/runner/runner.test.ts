@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import type { CommandExecutor } from '../core/command.js';
@@ -1201,8 +1204,23 @@ test('Tester mit eigenem CLI: Tokens und Kosten des CLI-Laufs bleiben beim Speic
   assert.equal(saved.values[6], 0.4);
 });
 
-/** Tester mit eigenem CLI und eigener Abdeckungsmessung von AIdeation (direkter `npx tsx --test`-Befehl). */
-async function testerAcceptanceRun(acceptance: object) {
+/**
+ * Tester mit eigenem CLI und eigener Abdeckungsmessung von AIdeation (direkter `npx tsx --test`-Befehl). Das Paket
+ * heisst „shop-backend“, damit die Messung dem Bereich „backend“ zugeordnet wird.
+ */
+async function testerAcceptanceRun(
+  acceptance: object,
+  {
+    coverageOutput = '# pass 75\n# fail 0\n# all files | 82.5 | 70.1 | 90.2 |',
+    testerCoverage = '',
+    packageName = 'shop-backend',
+  } = {},
+) {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const cwd = mkdtempSync(join(tmpdir(), 'coverage-run-'));
+  writeFileSync(join(cwd, 'package.json'), JSON.stringify({ name: packageName }));
   const queries: { sql: string; values: unknown[] }[] = [];
   const query = async (sql: string, values: unknown[] = []) => {
     queries.push({ sql, values });
@@ -1213,10 +1231,10 @@ async function testerAcceptanceRun(acceptance: object) {
   };
   const pool = { query, connect: async () => ({ query, release: () => undefined }) } as unknown as Pool;
   // Wie im gemeldeten Fall: Tests grün, aber kein @@COVERAGE vom Tester, weil der Wächter die Messung sperrt.
-  const output = `75 von 75 Tests grün.\n@@ACCEPTANCE ${JSON.stringify(acceptance)}`;
+  const output = `75 von 75 Tests grün.\n${testerCoverage}\n@@ACCEPTANCE ${JSON.stringify(acceptance)}`;
   const execute: CommandExecutor = async (command, _cwd, options) => {
     if (command.includes('--experimental-test-coverage')) {
-      return { exitCode: 0, durationMs: 1, output: '# pass 75\n# fail 0\n# all files | 82.5 | 70.1 | 90.2 |' };
+      return { exitCode: 0, durationMs: 1, output: coverageOutput };
     }
     options?.onChunk?.(JSON.stringify({ type: 'result', result: output }));
     return { exitCode: 0, durationMs: 1, output };
@@ -1224,8 +1242,15 @@ async function testerAcceptanceRun(acceptance: object) {
   const builtin: BuiltinAgent = async () => ({ exitCode: 0, durationMs: 1, output: 'grün' });
   const tester = { ...agent('Tester', 'after_task', 1, ['claude', '-p']), role: 'tester' as const };
   const order = { ...item, description: '## Akzeptanzkriterien\n- A ist belegt\n- B ist belegt' };
-  const result = await runWorkItem(pool, order, [tester], { cwd: '/r', timeoutMs: 1, execute, builtin });
+  const result = await runWorkItem(pool, order, [tester], { cwd, timeoutMs: 1, execute, builtin });
   return { result, queries };
+}
+
+/** Texte der Schritt-Ereignisse (logEvent). */
+function stepEvents(queries: { sql: string; values: unknown[] }[]): string[] {
+  return queries
+    .filter((query) => query.sql.includes('SET events = events ||'))
+    .flatMap((query) => (JSON.parse(String(query.values[1])) as { text: string }[]).map((event) => event.text));
 }
 
 const NOT_MEASURED = 'Tests grün, aber die Abdeckung konnte nicht gemessen werden (Wächter blockiert den Befehl)';
@@ -1250,8 +1275,68 @@ test('Abnahme: grüne Tests, alle Kriterien belegt, nur die Abdeckungsmessung de
   // Die von AIdeation gemessene Abdeckung wird weiterhin gespeichert – mit echten Werten, nicht null.
   const area = queries.find((query) => query.sql.includes('INSERT INTO test_coverage_areas'));
   assert.ok(area, 'Abdeckung gespeichert');
+  assert.equal(area.values[1], 'backend');
   assert.equal(area.values[8], 82.5);
   assert.notEqual(area.values[8], null);
+  assert.ok(stepEvents(queries).includes('Testabdeckung gespeichert (backend)'));
+});
+
+test('Abdeckung: Paket ohne erkennbaren Bereich (z. B. dev-log selbst) wird als „gesamt“ gespeichert', async () => {
+  for (const packageName of ['dev-log', 'builder']) {
+    const { queries } = await testerAcceptanceRun(
+      { criteria: [{ nr: 1, met: true, note: 'Test a' }], done: DONE_WITH_UNMEASURED },
+      { packageName },
+    );
+    const area = queries.find((query) => query.sql.includes('INSERT INTO test_coverage_areas'));
+    assert.equal(area?.values[1], 'gesamt', packageName);
+    assert.ok(stepEvents(queries).includes('Testabdeckung gespeichert (gesamt)'), packageName);
+  }
+});
+
+test('Abdeckung: ohne gültigen Bericht und ohne Messung steht der Grund im Schritt-Log', async () => {
+  const { queries } = await testerAcceptanceRun(
+    { criteria: [{ nr: 1, met: true, note: 'Test a' }], done: DONE_WITH_UNMEASURED },
+    { coverageOutput: 'keine Abdeckung' },
+  );
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO test_coverage')), 'kein Bericht angelegt');
+  assert.ok(stepEvents(queries).includes('Testabdeckung nicht gespeichert: kein gültiger Bericht und keine Messung'));
+});
+
+test('Abnahme: ohne gültige Messung durch AIdeation gilt die fehlende Abdeckung nicht mehr als erfüllt', async () => {
+  const criteria = [
+    { nr: 1, met: true, note: 'Test a' },
+    { nr: 2, met: true, note: 'Test b' },
+  ];
+  // Messung liefert nichts, der Tester meldet einen ungültigen Block (null-Werte): nichts gespeichert, abgelehnt.
+  const { result, queries } = await testerAcceptanceRun(
+    { criteria, done: DONE_WITH_UNMEASURED },
+    {
+      coverageOutput: 'keine Abdeckung',
+      testerCoverage: '@@COVERAGE {"summary":"x","areas":[{"area":"backend","unit":3,"lines":null,"branches":null}]}',
+    },
+  );
+  assert.equal(result, 'failed');
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO test_coverage_areas')), 'nichts gespeichert');
+  const event = queries
+    .flatMap((query) => query.values.map(String))
+    .find((value) => value.includes('Testabdeckung des Testers verworfen'));
+  assert.ok(event, 'Grund steht im Schrittverlauf');
+  assert.match(event, /Bereich backend: Zeilenwert/);
+});
+
+test('Abnahme: ungültiger Tester-Block wird verworfen, die eigene Messung bleibt gespeichert', async () => {
+  const { queries } = await testerAcceptanceRun(
+    { criteria: [], done: [1, 2, 3, 4, 5].map((nr) => ({ nr, met: true })) },
+    { testerCoverage: '@@COVERAGE {"summary":"x","areas":[{"area":"Sonstiges","unit":3,"lines":80,"branches":70}]}' },
+  );
+  const areas = queries.filter((query) => query.sql.includes('INSERT INTO test_coverage_areas'));
+  assert.deepEqual(
+    areas.map((query) => query.values[1]),
+    ['backend'],
+  );
+  assert.ok(
+    stepEvents(queries).some((text) => /Testabdeckung des Testers verworfen: Bereich „Sonstiges“ unbekannt/.test(text)),
+  );
 });
 
 test('Abnahme: ein unbelegtes Kriterium oder rote Tests bleiben trotz Abdeckungs-Hinweis abgelehnt', async () => {
@@ -1285,6 +1370,7 @@ test('Nutzungslimit des Agent-Kontos: Auftrag bleibt geplant mit Startzeit nach 
     exitCode: command[0] === 'b' ? 1 : 0,
     durationMs: 1,
     output: command[0] === 'b' ? "You've hit your session limit · resets 12:40am (Europe/Zurich)" : '',
+    ...(command[0] === 'b' ? { tokens: 1234, costUsd: 0.5 } : {}),
   });
   const agents = [agent('a', 'pre_task', 1, ['a']), agent('b', 'while_task', 1, ['b'])];
   const result = await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute });
@@ -1300,6 +1386,74 @@ test('Nutzungslimit des Agent-Kontos: Auftrag bleibt geplant mit Startzeit nach 
   const step = queries.find((query) => marksStepInterrupted(query.sql));
   assert.ok(step, 'Schritt als unterbrochen markiert');
   assert.match(step.sql, /tokens = \$5, cost_usd = \$6/);
+  assert.equal(step.values[4], 1234, 'Tokens des Versuchs zählen fürs Budget');
+  assert.equal(step.values[5], 0.5, 'Kosten des Versuchs zählen fürs Budget');
+});
+
+test('Arbeitscontainer defekt: Projekt pausiert eine Stunde, kein Bug, keine Problemanalyse', async () => {
+  const { pool, queries } = fakePool();
+  const execute: CommandExecutor = async (command) => ({
+    exitCode: command[0] === 'b' ? 1 : 0,
+    durationMs: 1,
+    output:
+      command[0] === 'b'
+        ? 'npm error Your cache folder contains root-owned files\nnpm error Log files were not written due to an error writing to the directory: /home/agent/.npm/_logs'
+        : '',
+  });
+  const agents = [agent('a', 'pre_task', 1, ['a']), agent('b', 'while_task', 1, ['b'])];
+  assert.equal(await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute }), 'failed');
+  const settled = queries.filter((query) => query.sql.includes('UPDATE development_items')).at(-1);
+  assert.match(settled?.sql ?? '', /'planned'/);
+  const retry = queries.find((query) => query.sql.includes('SET retry_after = $2'));
+  assert.ok(retry?.values[1] instanceof Date, 'Pause bis zum nächsten Versuch gespeichert');
+  assert.match(String(retry?.values[2]), /Arbeitscontainer bzw\. Sandbox defekt/);
+  assert.ok(
+    queries.some((query) => marksStepInterrupted(query.sql)),
+    'Schritt als unterbrochen markiert',
+  );
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')), 'kein Bug-Bericht');
+  assert.ok(!queries.some((query) => /analysis_status = CASE/.test(query.sql)), 'keine Problemanalyse');
+});
+
+test('Arbeitscontainer weiter defekt nach zwei Pausen: Auftrag blockiert mit „Aktion notwendig“, kein Bug', async () => {
+  const { pool: inner, queries } = fakePool();
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) =>
+      sql.includes('COUNT(*) AS count FROM agent_run_steps') ? { rows: [{ count: '2' }] } : inner.query(sql, values),
+  } as unknown as Pool;
+  const execute: CommandExecutor = async (command) => ({
+    exitCode: command[0] === 'b' ? 1 : 0,
+    durationMs: 1,
+    output: command[0] === 'b' ? 'Error response from daemon: No such exec instance: 7b6620d2a9e1' : '',
+  });
+  const agents = [agent('a', 'pre_task', 1, ['a']), agent('b', 'while_task', 1, ['b'])];
+  assert.equal(await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute }), 'failed');
+  assert.ok(!queries.some((query) => query.sql.includes('SET retry_after = $2')), 'keine weitere Pause');
+  assert.ok(
+    queries.some((query) => query.values.some((value) => String(value).startsWith('Arbeitscontainer bzw. Sandbox'))),
+    'Aktion notwendig gesetzt',
+  );
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')), 'kein Bug-Bericht');
+  assert.ok(!queries.some((query) => /analysis_status = CASE/.test(query.sql)), 'keine Problemanalyse');
+});
+
+test('Projektordner während des Schritts weg: Schritt unterbrochen, Tokens und Kosten bleiben am Schritt', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'runner-outage-'));
+  const { pool, queries } = fakePool();
+  const execute: CommandExecutor = async (command) => {
+    if (command[0] !== 'b') return { exitCode: 0, durationMs: 1, output: '' };
+    // Das externe Laufwerk wird mitten im Schritt getrennt.
+    await rm(cwd, { recursive: true, force: true });
+    return { exitCode: 1, durationMs: 1, output: 'ENOENT', tokens: 777, costUsd: 0.25 };
+  };
+  const agents = [agent('a', 'pre_task', 1, ['a']), agent('b', 'while_task', 1, ['b'])];
+  assert.equal(await runWorkItem(pool, item, agents, { cwd, timeoutMs: 1000, execute }), 'failed');
+  const step = queries.find((query) => marksStepInterrupted(query.sql));
+  assert.ok(step, 'Schritt als unterbrochen markiert');
+  assert.match(String(step.values[3]), /Der Auftrag wird erneut eingeplant/);
+  assert.equal(step.values[4], 777);
+  assert.equal(step.values[5], 0.25);
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')), 'kein Bug-Bericht');
 });
 
 test('Drain beim Neustart: nach dem laufenden Auftrag startet kein weiterer; danach geht es normal weiter', async () => {
@@ -1357,4 +1511,63 @@ test('Sprint während des Laufs abgebrochen: nächster Agent startet nicht, Auft
     'zurück ins Backlog',
   );
   assert.ok(!queries.some((query) => query.values.includes('done')), 'nicht erledigt');
+});
+
+// Abbruch durch den Benutzer: Der Worker sieht cancel_requested am laufenden Schritt. Danach startet kein Agent des
+// Auftrags mehr – auch nicht „Bei abgelehnt“ (Tokens, Dateiänderungen). Ohne Abbruch laufen die Beobachter weiter.
+async function runCancelled(options: { cancel: boolean; sprint?: boolean }) {
+  let removed = false;
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
+      if (sql.includes('SELECT cancel_requested')) return { rows: [{ cancel_requested: options.cancel }] };
+      if (sql.includes('paused_at IS NOT NULL AS paused')) return { rows: [{ paused: false }] };
+      if (sql.includes('SELECT sprint_id AS "sprintId"')) return { rows: [{ sprintId: removed ? null : 'sprint-1' }] };
+      if (sql.includes('FROM agent_runs WHERE development_id')) return { rows: [] };
+      if (sql.includes('FROM agent_run_steps WHERE run_id')) return { rows: [] };
+      return { rows: [{ id: 'step-row' }], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const calls: string[] = [];
+  const execute: CommandExecutor = async (command, _cwd, execOptions) => {
+    calls.push(command[0] ?? '');
+    if (command[0] !== 'dev') return { exitCode: 0, durationMs: 1, output: 'ok' };
+    if (!options.cancel) return { exitCode: 1, durationMs: 1, output: 'TypeError: x is undefined' };
+    // Der Entwickler hängt, bis der Abbruch ihn beendet (Sprint-Abbruch: der Auftrag verlässt dabei den Sprint).
+    if (options.sprint) removed = true;
+    return new Promise((resolve) => {
+      const done = () => resolve({ exitCode: 130, durationMs: 1, output: 'beendet' });
+      if (execOptions?.signal?.aborted) done();
+      else execOptions?.signal?.addEventListener('abort', done, { once: true });
+    });
+  };
+  const agents = [
+    agent('dev', 'while_task', 1, ['dev']),
+    agent('tester', 'after_task', 1, ['tester']),
+    agent('rejected', 'on_rejected', 1, ['rejected']),
+  ];
+  const target = options.sprint ? { ...item, sprintId: 'sprint-1' } : item;
+  const result = await runWorkItem(pool, target, agents, { cwd: '/r', timeoutMs: 60_000, execute });
+  return { result, calls, queries };
+}
+
+test('Abbrechen (cancel_requested): kein weiterer Agent, auch kein Schritt der Phase on_rejected', async () => {
+  const { result, calls, queries } = await runCancelled({ cancel: true });
+  assert.equal(result, 'failed');
+  assert.deepEqual(calls, ['dev']);
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')), 'kein Bug-Bericht für den Abbruch');
+});
+
+test('Sprint-Abbruch während des Laufs: kein Schritt der Phase on_rejected', async () => {
+  const { result, calls } = await runCancelled({ cancel: true, sprint: true });
+  assert.equal(result, 'failed');
+  assert.deepEqual(calls, ['dev']);
+});
+
+test('Gegenprobe: normales Scheitern ohne Abbruch startet weiter „Bei abgelehnt“', async () => {
+  const { result, calls } = await runCancelled({ cancel: false });
+  assert.equal(result, 'failed');
+  assert.deepEqual(calls, ['dev', 'rejected']);
 });

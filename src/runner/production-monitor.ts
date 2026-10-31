@@ -7,6 +7,7 @@ import { maskSecrets } from '../core/secret-mask.js';
 import { errorFingerprint, isExcluded, type ProductionError, recordEvent } from './production-events.js';
 import { agentEnvironment } from './runner-prompts.js';
 import { type AlertLabels, evaluate, problemKey, type WatchdogState } from './watchdog.js';
+import { defined } from '../core/defined.js';
 
 /**
  * Sammler des Produktions-Rückkanals im Worker: Health-URL alle 2 Minuten, Compose-Logs alle 15 Minuten (lückenlos ab
@@ -191,7 +192,7 @@ export function parseComposeLogs(output: string, ignore: readonly string[] = [])
   for (const raw of output.split(/\r?\n/)) {
     const prefixed = raw.match(COMPOSE_PREFIX);
     const service = prefixed?.[1] ?? '';
-    const text = prefixed ? prefixed[2]! : raw;
+    const text = prefixed ? defined(prefixed[2]) : raw;
     if (!text.trim()) continue;
     const current = open.get(service);
     if (current?.python) {
@@ -249,7 +250,7 @@ const LOG_TIMESTAMP = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:[.,](\d+))?(Z|[+
 export function logTimestamp(text: string): { at: number; length: number } | null {
   const match = LOG_TIMESTAMP.exec(text);
   if (!match) return null;
-  const zone = match[3] === 'Z' ? 'Z' : `${match[3]!.slice(0, 3)}:${match[3]!.slice(-2)}`;
+  const zone = match[3] === 'Z' ? 'Z' : `${defined(match[3]).slice(0, 3)}:${defined(match[3]).slice(-2)}`;
   const at = Date.parse(`${match[1]}.${(match[2] ?? '').padEnd(3, '0').slice(0, 3)}${zone}`);
   return Number.isNaN(at) ? null : { at, length: match[0].length };
 }
@@ -265,7 +266,7 @@ export function linesInWindow(output: string, since: Date, until: Date): string 
   for (const raw of output.split(/\r?\n/)) {
     const prefixed = raw.match(COMPOSE_PREFIX);
     const service = prefixed?.[1] ?? '';
-    const text = prefixed ? prefixed[2]! : raw;
+    const text = prefixed ? defined(prefixed[2]) : raw;
     const prefix = raw.slice(0, raw.length - text.length);
     const stamp = logTimestamp(text);
     if (stamp) inside.set(service, stamp.at > since.getTime() && stamp.at <= until.getTime());

@@ -30,7 +30,7 @@ export function refuseDefaultDatabasePassword(
   throw new Error(
     `Die Datenbank nutzt das öffentlich bekannte Standardpasswort „${DEFAULT_DB_PASSWORD}“ – Start abgebrochen. ` +
       './start.sh --setup erneut ausführen (setzt ein zufälliges DEV_LOG_DB_PASSWORD und ändert es in PostgreSQL), ' +
-      `danach den Worker neu installieren (docs/installation.md). Nur für Wegwerf-Umgebungen: ${ALLOW_DEFAULT_DB_PASSWORD}=1.`,
+      `danach den Worker neu installieren (docs/betrieb.md). Nur für Wegwerf-Umgebungen: ${ALLOW_DEFAULT_DB_PASSWORD}=1.`,
   );
 }
 
@@ -40,6 +40,6 @@ export function warnDefaultDatabasePassword(databaseUrl: string, warn: (message:
   warn(
     `WARNUNG: Die Datenbank nutzt das Standardpasswort „${DEFAULT_DB_PASSWORD}“. ` +
       'DEV_LOG_DB_PASSWORD in der .env setzen, das Passwort in PostgreSQL ändern und den Worker neu installieren ' +
-      '(docs/installation.md).',
+      '(docs/betrieb.md).',
   );
 }

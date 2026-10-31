@@ -1,6 +1,7 @@
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, realpath, rm } from 'node:fs/promises';
 import { isAbsolute, join, normalize, sep } from 'node:path';
+import { defined } from './defined.js';
 
 /**
  * Dateizugriffe des Workers im Projektordner, ohne Symlinks zu folgen. Agents schreiben in den Ordner; ein Link
@@ -69,12 +70,17 @@ async function realDirectory(root: string, parts: readonly string[], create: boo
  * Hardlink, Nicht-Datei oder mehr als `maxBytes`.
  */
 export async function readProjectText(cwd: string, relative: string, maxBytes: number): Promise<string | null> {
+  return (await readProjectFile(cwd, relative, maxBytes))?.toString('utf8') ?? null;
+}
+
+/** Wie readProjectText, aber roh (auch Binärdateien). */
+export async function readProjectFile(cwd: string, relative: string, maxBytes: number): Promise<Buffer | null> {
   const parts = segments(relative);
   const root = await projectRoot(cwd);
   if (!parts || !root) return null;
   const directory = await realDirectory(root, parts.slice(0, -1), false);
   if (!directory) return null;
-  const path = join(directory, parts.at(-1)!);
+  const path = join(directory, defined(parts.at(-1)));
   let handle;
   try {
     handle = await open(path, constants.O_RDONLY | NOFOLLOW);
@@ -89,7 +95,7 @@ export async function readProjectText(cwd: string, relative: string, maxBytes: n
     if (!again || again.ino !== info.ino || again.dev !== info.dev) return null;
     if ((await realDirectory(root, parts.slice(0, -1), false)) !== directory) return null;
     const content = await handle.readFile();
-    return content.length > maxBytes ? null : content.toString('utf8');
+    return content.length > maxBytes ? null : content;
   } catch {
     return null;
   } finally {
@@ -115,7 +121,7 @@ export async function removeProjectDirectory(cwd: string, relative: string): Pro
   }
   const real = await realpath(current).catch(() => null);
   if (!real || !isInside(root, real)) return false;
-  await rm(join(current, parts.at(-1)!), { recursive: true, force: true });
+  await rm(join(current, defined(parts.at(-1))), { recursive: true, force: true });
   return true;
 }
 

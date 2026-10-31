@@ -96,6 +96,22 @@ test('Worker-Status: geänderte Menge laufender Aufträge wird erkannt', () => {
   assert.equal(runningOrdersChanged([], []), false);
 });
 
+test('Abdeckung: Übersicht je Schlüssel und Verlauf werden zusammen geladen', async () => {
+  const report = { id: 'r1', summary: '', createdAt: '2026-10-20', developmentId: null, orderTitle: null, areas: [] };
+  const history = [
+    { area: 'backend', lines: 70, createdAt: '2026-10-01' },
+    { area: 'backend', lines: 80, createdAt: '2026-10-20' },
+  ];
+  const loaded = await fetchProjectData(fakeApi({ coverage: { report }, history: { history } }), 'p');
+  assert.deepEqual(loaded.data.coverage, { ...report, history });
+  // Verlauf nicht ladbar: Übersicht bleibt, Verlauf leer.
+  const withoutHistory = await fetchProjectData(fakeApi({ coverage: { report }, history: new Error('500') }), 'p');
+  assert.deepEqual(withoutHistory.data.coverage?.history, []);
+  assert.ok(!withoutHistory.failed.includes('coverage'));
+  // Kein Bericht: keine Abdeckung, auch wenn ein Verlauf käme.
+  assert.equal((await fetchProjectData(fakeApi({ history: { history } }), 'p')).data.coverage, null);
+});
+
 test('Hintergrund-Refresh: Fehler ohne Meldung (z. B. Abdeckung) behalten ebenfalls alte Daten', async () => {
   const previous = { ...emptyProjectData(), coverage: { total: 80 } as never };
   const loaded = await fetchProjectData(fakeApi({ coverage: new Error('500') }), 'p');

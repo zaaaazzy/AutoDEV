@@ -28,6 +28,7 @@ import {
   releaseBudgetBlocks,
 } from './budget.js';
 import { setActionTodo } from './action-todo.js';
+import { blockForOverrun, guardedOverrunGate, type OverrunState, overrunTodo } from './estimate-overrun.js';
 import { pauseForFolderProblem } from './folder-pause.js';
 import { leftItsSprint } from './runner-settle.js';
 import {
@@ -125,14 +126,10 @@ async function resumePosition(
   const corrected = [...count(rows.map(keyOf))].some(([key, times]) => times > (planned.get(key) ?? times));
   const steps = corrected ? ordered.map((agent) => latest.get(keyOfAgent(agent))) : rows;
   let position = 0;
-  while (
-    position < ordered.length &&
-    steps[position] &&
-    ordered[position] &&
-    keyOf(steps[position]!) === keyOfAgent(ordered[position]!)
-  ) {
+  while (position < ordered.length) {
     const step = steps[position];
-    if (!step) break;
+    const agent = ordered[position];
+    if (!step || !agent || keyOf(step) !== keyOfAgent(agent)) break;
     if (step.status !== AGENT_STEP_STATUS.passed) break;
     done.push({ agentName: step.agent_name, phase: step.phase, status: 'passed', output: step.output });
     position += 1;
@@ -269,6 +266,9 @@ export async function runWorkItem(
   const startedAt = Date.now();
   const folderAtStart = folderAvailable(options.cwd);
   let budgetStop: BudgetState | null = null;
+  let overrunStop: OverrunState | null = null;
+  // Vom Benutzer abgebrochen (auch Sprint-Abbruch): danach startet kein Agent des Auftrags mehr.
+  let cancelled = false;
   // Agents that change the working tree (developer, tester) hold the project lock from their first step until the
   // order is settled, so no other order edits files while this one is tested and committed.
   let releaseTree: (() => void) | undefined;
@@ -345,6 +345,25 @@ export async function runWorkItem(
         passed = false;
         break;
       }
+      // Schätzung: Liegt der Verbrauch seit der letzten Freigabe über dem Dreifachen der kalibrierten Schätzung, startet
+      // der nächste Agent nicht – „Aktion notwendig“ bis zur Freigabe. Zusätzlich zur Budget-Prüfung; ist sie nicht
+      // prüfbar, gilt der Auftrag wie beim Budget als unterbrochen. Ein von Hand gestarteter Einzel-Agent ist selbst
+      // eine Freigabe und wird nicht geprüft.
+      if (!item.agentId) {
+        const overrun = await guardedOverrunGate(ctx, agent);
+        if (overrun.failed) {
+          passed = false;
+          interrupted = true;
+          ctx.stopReason = overrun.failed;
+          await recordBudgetCheckFailure(ctx, agent, overrun.failed, stepPosition).catch(logged('runner'));
+          break;
+        }
+        overrunStop = overrun.stop;
+        if (overrunStop) {
+          passed = false;
+          break;
+        }
+      }
       if (!releaseTree && changesWorkingTree(agent)) {
         releaseTree = await acquireTree(options.cwd, waitingForTree(item.id, options.cwd));
         // Ab dem ersten Agent, der Dateien ändert, arbeitet der Auftrag auf seinem eigenen Branch.
@@ -357,6 +376,12 @@ export async function runWorkItem(
       const outcome = await runStep(ctx, agent, position, ordered.length, { stepPosition, canCorrect });
       stepPosition += 1;
       if (outcome.interrupted) interrupted = true;
+      // Abgebrochen: keine Nachbesserung, kein nächster Agent und kein „Bei abgelehnt“.
+      if (outcome.cancelled) {
+        cancelled = true;
+        passed = false;
+        break;
+      }
       // Budget vor dem neuen Versuch nach einem vorübergehenden Fehler erreicht: anhalten wie vor einem Schritt.
       if (outcome.budget) {
         budgetStop = outcome.budget;
@@ -384,8 +409,9 @@ export async function runWorkItem(
       position += 1;
     }
     // Ende des Auftrags: „Bei abgeschlossen“ bzw. „Bei abgelehnt“ – noch vor dem Abschluss, damit ihre Änderungen im
-    // Commit des Auftrags landen. Sie ändern das Ergebnis nicht. Nicht bei Unterbrechung oder Kostenbremse.
-    if (!interrupted && !budgetStop && !item.agentId && !isShuttingDown()) {
+    // Commit des Auftrags landen. Sie ändern das Ergebnis nicht. Nicht bei Unterbrechung, Kostenbremse, Abbruch oder
+    // überschrittener Schätzung (der Stopp soll gerade keinen weiteren Agent starten).
+    if (!interrupted && !budgetStop && !overrunStop && !cancelled && !item.agentId && !isShuttingDown()) {
       const phase = passed ? 'on_done' : 'on_rejected';
       const observers = agents.filter((agent) => agent.phase === phase);
       const last = ctx.done.at(-1);
@@ -406,11 +432,13 @@ export async function runWorkItem(
           ctx.sprintName = sprint?.name ?? null;
           ctx.branch = await enterOrderBranch(options.cwd, item, sprint, ctx.execute);
         }
-        await runStep(ctx, agent, ordered.length + index, ordered.length + observers.length, {
+        const observed = await runStep(ctx, agent, ordered.length + index, ordered.length + observers.length, {
           stepPosition,
           observer: { outcome },
         });
         stepPosition += 1;
+        // Ein Beobachter abgebrochen: die übrigen starten auch nicht mehr.
+        if (observed.cancelled) break;
       }
     }
   } catch (error) {
@@ -440,6 +468,13 @@ export async function runWorkItem(
       const todo = await blockForBudget(pool, item.id, budgetStop).catch(logged('runner', null));
       console.info(`[${item.id}] ${todo ?? 'Budget erreicht'}`);
       if (todo) await setActionTodo(pool, item.id, todo).catch(logged('runner'));
+      ctx.stopReason = todo;
+    } else if (overrunStop) {
+      // Hinweis und Aktion getrennt absichern: Scheitert eins, steht wenigstens das andere am Auftrag.
+      const todo = overrunTodo(overrunStop);
+      await blockForOverrun(pool, item.id, overrunStop).catch(logged('runner'));
+      console.info(`[${item.id}] ${todo}`);
+      await setActionTodo(pool, item.id, todo).catch(logged('runner'));
       ctx.stopReason = todo;
     }
     // Erst den Auftrag abschliessen, dann den Lauf: Stirbt der Worker dazwischen, gilt der Lauf als unterbrochen und

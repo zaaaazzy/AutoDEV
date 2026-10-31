@@ -4,7 +4,8 @@ import { manualTodo, setActionTodo } from './action-todo.js';
 import { withProjectContext } from '../core/project-context.js';
 import { sendPush } from '../core/push.js';
 import { AGENT_STEP_STATUS } from '../core/status.js';
-import { isTransientFailure, registerFailure, ruleRefusal, usageLimitReset } from './autofix.js';
+import { isSandboxFailure, isTransientFailure, registerFailure, ruleRefusal } from './autofix.js';
+import { noteProviderOutcome, USAGE_LIMIT_REASON, usageLimitReset } from '../core/provider-limits.js';
 import { startProgress } from '../agent/chat-progress.js';
 import { folderAvailable, hadOutage, missingFolderMessage } from '../core/folder-guard.js';
 import { isShuttingDown, killGroup } from '../core/shutdown.js';
@@ -24,12 +25,15 @@ import {
   acceptanceProblems,
   manualChecks,
   parseAcceptance,
+  parseEvidence,
   saveAcceptance,
+  saveEvidence,
   stripAcceptance,
+  stripEvidence,
   waiveUnmeasuredCoverage,
 } from './acceptance.js';
 import type { BudgetState } from './budget.js';
-import { buildPrompt } from './runner-prompts.js';
+import { buildPrompt, EVIDENCE_ROLES } from './runner-prompts.js';
 import type { WorkflowAgent } from './runner-types.js';
 import { testerPlan } from './order-tests.js';
 import {
@@ -42,6 +46,7 @@ import {
 } from './runner-context.js';
 import {
   type AgentResult,
+  configuredCommand,
   findResumableSession,
   invokeAgent,
   routeStep,
@@ -83,6 +88,8 @@ interface StepOutcome {
   correctable?: boolean;
   /** Budget vor dem neuen Versuch erreicht: der Lauf hält an wie vor einem Schritt (kein Bug-Bericht). */
   budget?: BudgetState;
+  /** Vom Benutzer abgebrochen („Abbrechen“, Sprint-Abbruch): kein weiterer Agent des Auftrags, auch nicht „Bei abgelehnt“. */
+  cancelled?: boolean;
 }
 
 export interface StepOptions {
@@ -122,6 +129,22 @@ async function markInterrupted(
   );
 }
 
+/** Pausen wegen eines defekten Arbeitscontainers je Auftrag (innerhalb eines Tages), bevor er blockiert. */
+export const SANDBOX_PAUSES = 2;
+export const SANDBOX_PAUSE_MS = 60 * 60_000;
+const SANDBOX_PAUSE_MARK = 'Arbeitscontainer bzw. Sandbox defekt, kein Fehler im Auftrag';
+
+/** Wie oft der Auftrag in den letzten 24 Stunden schon wegen eines defekten Arbeitscontainers pausiert hat. */
+async function sandboxPauses(pool: RunContext['pool'], itemId: string): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
+      WHERE r.development_id = $1 AND s.interrupted AND r.started_at > NOW() - INTERVAL '24 hours'
+        AND strpos(s.output, $2) > 0`,
+    [itemId, SANDBOX_PAUSE_MARK],
+  );
+  return Number(result.rows[0]?.count ?? 0);
+}
+
 /** Konfliktabschnitt am Anfang des Prompts, solange der Auftrags-Branch offene Merge-Konflikte hat; sonst leer. */
 export function conflictSection(branch: OrderBranch | null | undefined): string {
   return branch?.conflicts?.length ? `${conflictPrompt(branch)}\n\n` : '';
@@ -151,7 +174,7 @@ export async function runStep(
   total: number,
   stepOptions: StepOptions = {},
 ): Promise<StepOutcome> {
-  const { pool, item, runId, done, options, execute } = ctx;
+  const { pool, item, runId } = ctx;
   console.info(`[${item.id}] ${agent.phase} › ${agent.name}`);
   const routed = await routeStep(ctx, agent);
   const model = stepModel(ctx, agent, routed);
@@ -175,6 +198,32 @@ export async function runStep(
       ],
     )
   ).rows[0]?.id;
+  // Ab hier steht der Schritt auf „läuft“: Wirft etwas vor dem Endstatus (Datenbank, Testbefehle), gilt er als
+  // gescheitert. Die Aufräumroutinen erfassen nur Schritte noch laufender Läufe, der Schritt hinge sonst für immer.
+  try {
+    return await executeStep(ctx, agent, position, total, stepOptions, stepId, routed, model);
+  } catch (error) {
+    await pool
+      .query(`UPDATE agent_run_steps SET status = '${AGENT_STEP_STATUS.failed}' WHERE id = $1 AND status = $2`, [
+        stepId,
+        AGENT_STEP_STATUS.running,
+      ])
+      .catch((cleanup: unknown) => console.error(`[${item.id}] Schritt-Status nicht zurückgesetzt:`, cleanup));
+    throw error;
+  }
+}
+
+async function executeStep(
+  ctx: RunContext,
+  agent: WorkflowAgent,
+  position: number,
+  total: number,
+  stepOptions: StepOptions,
+  stepId: string,
+  routed: Awaited<ReturnType<typeof routeStep>>,
+  model: ReturnType<typeof stepModel>,
+): Promise<StepOutcome> {
+  const { pool, item, done, options, execute } = ctx;
   await logEvent(pool, stepId, 'Schritt gestartet');
   // Stand vor dem ersten Schritt dieses Laufs, damit erkennbar ist, welcher Agent Dateien geändert hat.
   if (ctx.branch && ctx.changedFiles === undefined) ctx.changedFiles = await orderFilePaths(ctx);
@@ -337,10 +386,18 @@ export async function runStep(
   let output = redactOutput(result.output, process.env);
   // Nutzungslimit des Agent-Kontos: kein Fehler im Auftrag, kein Bug, keine Wiederholung in Minuten. Der Auftrag bleibt
   // geplant und startet erst nach dem Reset wieder (retry_after); bisherige Schritte gelten wie bei einer Unterbrechung.
+  // Der Anbieterstatus (Dashboard) merkt sich das Limit bzw. setzt es nach einem erfolgreichen Schritt zurück.
+  const providerCommand =
+    configuredCommand(ctx, agent, routed) ?? (agent.role === 'tester' && !routed.model ? ctx.fallbackCommand : null);
   const limitReset = result.exitCode !== 0 && !cancelled ? usageLimitReset(output) : null;
+  if (!cancelled) {
+    await noteProviderOutcome(pool, providerCommand, { exitCode: result.exitCode, output }).catch(
+      logged('runner-steps'),
+    );
+  }
   if (limitReset) {
     const until = limitReset.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
-    const reason = `Unterbrochen: Nutzungslimit des Agent-Kontos erreicht – der Auftrag startet ab ${until} Uhr wieder.`;
+    const reason = `${USAGE_LIMIT_REASON} – der Auftrag startet ab ${until} Uhr wieder.`;
     await markInterrupted(pool, stepId, result, `${output}\n${reason}`);
     await pool
       .query(`UPDATE development_items SET retry_after = $2, failure = $3 WHERE id = $1`, [item.id, limitReset, reason])
@@ -348,6 +405,24 @@ export async function runStep(
     await logEvent(pool, stepId, reason);
     console.info(`[${item.id}] ${reason}`);
     return { passed: false, interrupted: true };
+  }
+  // Arbeitscontainer bzw. Sandbox defekt: Das ganze Projekt pausiert (retry_after gilt projektweit), statt dass jeder
+  // Auftrag einzeln scheitert, Bugs anlegt und Problemanalysen startet. Nach SANDBOX_PAUSES Pausen bleibt der Auftrag
+  // blockiert (registerFailure: „Aktion notwendig“), bis ein Mensch den Container repariert hat.
+  if (result.exitCode !== 0 && !cancelled && isSandboxFailure(output)) {
+    const pauses = await sandboxPauses(pool, item.id).catch(() => SANDBOX_PAUSES);
+    if (pauses < SANDBOX_PAUSES) {
+      const until = new Date(Date.now() + SANDBOX_PAUSE_MS);
+      const time = until.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+      const reason = `Unterbrochen: ${SANDBOX_PAUSE_MARK} – das Projekt pausiert bis ${time} Uhr, dann neuer Versuch.`;
+      await markInterrupted(pool, stepId, result, `${output}\n${reason}`);
+      await pool
+        .query(`UPDATE development_items SET retry_after = $2, failure = $3 WHERE id = $1`, [item.id, until, reason])
+        .catch(logged('runner-steps'));
+      await logEvent(pool, stepId, reason);
+      console.info(`[${item.id}] ${reason}`);
+      return { passed: false, interrupted: true };
+    }
   }
   // Budget vor dem zweiten Versuch nicht prüfbar: unterbrochen wie vor einem Schritt – derselbe Agent setzt nach der
   // Pause fort, ohne Bug-Bericht und ohne Nachbesserung. Tokens und Kosten des ersten Versuchs bleiben am Schritt.
@@ -368,13 +443,63 @@ export async function runStep(
     await markInterrupted(pool, stepId, result, `${output}\n${reason}`);
     return { passed: false, interrupted: true };
   }
+  // Der Tester meldet die Testabdeckung als @@COVERAGE-Block; gespeichert wird sie auch bei roten Tests. Ein ungültiger
+  // Block (unbekannter Bereich, fehlender Zeilen- oder Zweigwert, 0 Tests) wird ganz verworfen, der Grund steht im Verlauf.
+  const parsed = agent.role === 'tester' ? parseCoverage(output) : { report: null, errors: [] };
+  const discarded = parsed.errors.length ? `Testabdeckung des Testers verworfen: ${parsed.errors.join(' ')}` : '';
+  if (discarded) await logEvent(pool, stepId, discarded.slice(0, 1000));
+  // Zusätzlich misst AIdeation selbst, wo der Node-Test-Runner läuft – unabhängig von den Rechten des Testers.
+  const refusedSetup: string[] = [];
+  const measured =
+    agent.role === 'tester' && !cancelled
+      ? await measureCoverage(
+          options.cwd,
+          await coverageCommands(ctx),
+          // Projektcode: in der Sandbox im Testcontainer, nicht auf dem Host.
+          await gateExecutor(pool, item.projectSlug, options.cwd, execute, ctx.runId),
+          (message) => refusedSetup.push(message),
+        ).catch(logged('runner-steps', []))
+      : [];
+  // Abgelehnte Befehle stehen im Schritt selbst (Ausgabe und Verlauf), nicht nur im Worker-Log.
+  for (const message of refusedSetup) {
+    await logEvent(pool, stepId, message);
+    output += `\n\n${message}`;
+  }
+  const merged = mergeCoverage(parsed.report, measured);
+  for (const message of merged.errors) await logEvent(pool, stepId, message.slice(0, 1000));
+  const coverage = merged.report;
+  let coverageSaved = false;
+  if (coverage) {
+    const failure = await saveCoverage(pool, item.projectSlug, item.id, coverage).then(
+      () => null,
+      (error: unknown) => {
+        console.error('Coverage could not be saved:', error);
+        return error instanceof Error ? error.message : String(error);
+      },
+    );
+    coverageSaved = failure === null;
+    await logEvent(
+      pool,
+      stepId,
+      coverageSaved
+        ? `Testabdeckung gespeichert (${coverage.areas.map((area) => area.area).join(', ')})`
+        : `Testabdeckung nicht gespeichert: ${failure}`.slice(0, 1000),
+    );
+  } else if (agent.role === 'tester' && !cancelled) {
+    await logEvent(pool, stepId, 'Testabdeckung nicht gespeichert: kein gültiger Bericht und keine Messung');
+  }
+  if (agent.role === 'tester') output = stripCoverage(output);
+  if (discarded) output += `\n\n${discarded}`;
   // Abnahme durch den Tester: jedes Akzeptanzkriterium und jeder DoD-Punkt muss erfüllt sein.
   let accepted = true;
   if (agent.role === 'tester' && ctx.definitionOfDone && !stepOptions.observer) {
     const criteria = ctx.criteria ?? [];
     const reportedAcceptance = parseAcceptance(output, criteria.length, ctx.definitionOfDone.length);
-    // Fehlt nur die eigene Abdeckungsmessung des Testers, ist das kein Abnahmegrund: AIdeation misst danach selbst.
-    const waiver = reportedAcceptance ? waiveUnmeasuredCoverage(reportedAcceptance, criteria.length) : null;
+    // Fehlt nur die eigene Abdeckungsmessung des Testers, ist das kein Abnahmegrund – aber nur, wenn trotzdem ein
+    // gültiger Bericht gespeichert wurde (Messung durch AIdeation). Ohne Messung bleibt der DoD-Punkt offen.
+    const waiver = reportedAcceptance
+      ? waiveUnmeasuredCoverage(reportedAcceptance, criteria.length, coverageSaved)
+      : null;
     const acceptance = waiver?.result ?? null;
     if (waiver?.waived.length) {
       await logEvent(
@@ -417,6 +542,16 @@ export async function runStep(
       }
     }
   }
+  // Offene Testnachweise (@@NACHWEIS) von Tester und Dokumentierer: als test_evidence speichern und aus Ausgabe und
+  // Auftragsdoku entfernen. Sie setzen keine Aktion (action_todo): Autopilot und Sprintabschluss bleiben unberührt.
+  if (EVIDENCE_ROLES.has(agent.role) && !cancelled) {
+    const evidence = parseEvidence(output);
+    output = stripEvidence(output);
+    if (evidence.length) {
+      const created = await saveEvidence(pool, item.id, evidence, agent.name).catch(logged('runner-steps', 0));
+      await logEvent(pool, stepId, `Testnachweise: ${evidence.length} gemeldet, ${created} neu`);
+    }
+  }
   // Der Reviewer muss ausdrücklich freigeben; ohne eindeutiges Ergebnis gilt der Schritt als nicht bestanden.
   const review = agent.role === 'reviewer' ? parseReview(output) : true;
   if (review !== true && result.exitCode === 0) {
@@ -438,33 +573,6 @@ export async function runStep(
   }
   const passed =
     result.exitCode === 0 && !cancelled && review === true && accepted && !refusedByRule && !unresolved.length;
-  // Der Tester meldet die Testabdeckung als @@COVERAGE-Block; gespeichert wird sie auch bei roten Tests.
-  const reported = agent.role === 'tester' ? parseCoverage(output) : null;
-  // Zusätzlich misst AIdeation selbst, wo der Node-Test-Runner läuft – unabhängig von den Rechten des Testers.
-  const refusedSetup: string[] = [];
-  const measured =
-    agent.role === 'tester' && !cancelled
-      ? await measureCoverage(
-          options.cwd,
-          await coverageCommands(ctx),
-          // Projektcode: in der Sandbox im Testcontainer, nicht auf dem Host.
-          await gateExecutor(pool, item.projectSlug, options.cwd, execute, ctx.runId),
-          (message) => refusedSetup.push(message),
-        ).catch(logged('runner-steps', []))
-      : [];
-  // Abgelehnte Befehle stehen im Schritt selbst (Ausgabe und Verlauf), nicht nur im Worker-Log.
-  for (const message of refusedSetup) {
-    await logEvent(pool, stepId, message);
-    output += `\n\n${message}`;
-  }
-  const coverage = mergeCoverage(reported, measured);
-  if (coverage) {
-    await saveCoverage(pool, item.projectSlug, item.id, coverage).catch((error) =>
-      console.error('Coverage could not be saved:', error),
-    );
-    await logEvent(pool, stepId, `Testabdeckung gespeichert (${coverage.areas.map((area) => area.area).join(', ')})`);
-    output = stripCoverage(output);
-  }
   await logEvent(
     pool,
     stepId,
@@ -533,7 +641,7 @@ export async function runStep(
   // „Bei abgelehnt“ / „Bei abgeschlossen“ ändern das Ergebnis des Auftrags nicht.
   if (stepOptions.observer) {
     await commitStep();
-    return { passed, interrupted: false };
+    return { passed, interrupted: false, cancelled };
   }
   // Budget erreicht statt neuem Versuch: kein Fehler im Code, der Lauf hält an (Kostenbremse wie vor einem Schritt).
   if (budgetStop) {
@@ -555,5 +663,5 @@ export async function runStep(
     await afterStep(pool, item, agent, output).catch((error) => console.error('Post-step handling failed:', error));
   }
   await commitStep();
-  return { passed, interrupted: false, correctable };
+  return { passed, interrupted: false, correctable, cancelled };
 }

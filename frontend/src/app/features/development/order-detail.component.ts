@@ -5,8 +5,10 @@ import { OrderBriefComponent } from '../../shared/order-brief.component.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
 import { Component, computed, effect, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { AcceptanceCheck, DevelopmentItem } from '../../core/models.js';
+import { AuthService } from '../../core/auth.service.js';
+import type { AcceptanceCheck, CounterCheckResult, DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { AcceptanceTicks } from '../../shared/acceptance-ticks.js';
 import { visibleInterval } from '../../core/visible-interval.js';
 import type { FormValues } from '../../shared/forms.js';
 import { CATEGORIES, DEVELOPMENT_STATUSES } from '../../shared/labels.js';
@@ -24,6 +26,15 @@ import { OrderApprovalComponent } from './order-approval.component.js';
 import { OrderVisualComponent } from './order-visual.component.js';
 import { needsVisual } from './needs-visual.js';
 import { agentEnds, buildWorkflow } from '../../shared/workflow.js';
+
+/** Texte der Gegenprobe je Testdatei (wie im Testbericht). */
+const COUNTER_CHECK_LABELS: Record<CounterCheckResult, string> = {
+  fails: 'scheitert ohne Fix',
+  passes: 'läuft auch ohne Fix grün',
+  import: 'bricht beim Import ab',
+  skipped: 'nicht bewertet',
+  error: 'Gegenprobe gescheitert',
+};
 
 /** Aufgeklappte Detailansicht eines offenen Auftrags. */
 @Component({
@@ -52,6 +63,9 @@ export class OrderDetailComponent {
   protected readonly store = inject(ProjectStore);
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
+  protected readonly auth = inject(AuthService);
+  /** Häkchen der offenen Abnahmepunkte: gesetzt nur während des Speicherns, nach Fehler wieder leer. */
+  protected readonly ticks = new AcceptanceTicks();
   protected readonly categories = CATEGORIES;
   protected readonly isAssignableSprintStatus = isAssignableSprintStatus;
   protected readonly manualAgent: Record<string, string> = {};
@@ -126,6 +140,10 @@ export class OrderDetailComponent {
   /** Risiken des Bug-Wächters als einzelne Einträge. */
   protected readonly risks = computed(() => parseRisks(this.order().risks));
 
+  /** Ergebnis der Gegenprobe (nur wenn gesetzt; ohne Ergebnis erscheint nichts, auch kein „offen“). */
+  protected readonly counterCheck = computed(() => this.order().counterCheck ?? null);
+  protected readonly counterCheckLabels = COUNTER_CHECK_LABELS;
+
   /** Formular für einen Folgeauftrag (nur bei erledigten Aufträgen). */
   protected readonly followUpOpen = signal(false);
   protected readonly activeSprintId = computed(
@@ -172,8 +190,10 @@ export class OrderDetailComponent {
     return check.status === 'met' ? '✓' : check.status === 'unmet' ? '✕' : check.status === 'manual' ? '👤' : '○';
   }
 
-  protected checkPoint(item: DevelopmentItem, check: AcceptanceCheck, checked: boolean): Promise<void> {
-    return this.orders.checkPoint(item, check, checked);
+  protected tickPoint(event: Event, item: DevelopmentItem, check: AcceptanceCheck): Promise<void> {
+    return this.ticks.tick(event.target as HTMLInputElement, item.id, check, () =>
+      this.orders.checkPoint(item, check, true),
+    );
   }
 
   protected verifyPoints(item: DevelopmentItem, check?: AcceptanceCheck): Promise<void> {

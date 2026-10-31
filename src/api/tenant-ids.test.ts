@@ -5,6 +5,7 @@ import test from 'node:test';
 import express from 'express';
 import type { Pool } from 'pg';
 import { withMigratedDatabase } from '../db/test-database.test.js';
+import { saveEvidence } from '../runner/acceptance.js';
 import { access, routeTable, type RouteEntry } from './access.js';
 import { createApiRouter } from './app.js';
 import type { Principal } from './roles.js';
@@ -54,34 +55,57 @@ function idNames(text: string): Set<string> {
 
 const mentions = (text: string, name: string): boolean => new RegExp(`\\b${name}\\b`).test(text);
 
+interface Helper {
+  name: string;
+  file: string;
+  text: string;
+  fields: Set<string>;
+}
+
+/** Importierte Namen je Datei: Nur dort sichtbare Hilfen zählen, sonst träfe ein kurzer Name wie `update` jede Route. */
+function importedNames(sources: Source[]): Map<string, Set<string>> {
+  const imports = new Map<string, Set<string>>();
+  for (const { file, text } of sources) {
+    const names = new Set<string>();
+    for (const [, list] of text.matchAll(/^import (?:type )?\{([^}]*)\} from/gm)) {
+      for (const part of list!.split(',')) {
+        const name = /(\w+)\s*$/.exec(part.replace(/^\s*type\s+/, '').trim())?.[1];
+        if (name) names.add(name);
+      }
+    }
+    imports.set(file, names);
+  }
+  return imports;
+}
+
+/** Ist die Hilfe in `file` sichtbar (dort deklariert oder importiert) und wird sie in `text` genannt? */
+const uses = (helper: Helper, file: string, text: string, imports: Map<string, Set<string>>): boolean =>
+  (helper.file === file || !!imports.get(file)?.has(helper.name)) && mentions(text, helper.name);
+
 /** Hilfen mit ID-Feldern, auch über weitere Hilfen (NEW_ORDER_FIELDS → DEV_FIELDS); ohne register*-Funktionen. */
-function idHelpers(sources: Source[]): Map<string, Set<string>> {
-  const helpers: { name: string; text: string; fields: Set<string> }[] = [];
-  for (const { text } of sources) {
+function idHelpers(sources: Source[], imports: Map<string, Set<string>>): Helper[] {
+  const helpers: Helper[] = [];
+  for (const { file, text } of sources) {
     const starts = [...text.matchAll(DECLARATION)];
     starts.forEach((match, index) => {
       if (match[1]!.startsWith('register')) return;
       const chunk = text.slice(match.index, starts[index + 1]?.index ?? text.length);
-      helpers.push({ name: match[1]!, text: chunk, fields: idNames(chunk) });
+      helpers.push({ name: match[1]!, file, text: chunk, fields: idNames(chunk) });
     });
   }
-  for (let changed = true; changed; ) {
+  for (let changed = true; changed;) {
     changed = false;
     const withIds = helpers.filter((helper) => helper.fields.size);
     for (const helper of helpers) {
       for (const used of withIds) {
-        if (used === helper || !mentions(helper.text, used.name)) continue;
+        if (used === helper || !uses(used, helper.file, helper.text, imports)) continue;
         for (const field of used.fields) {
           if (!helper.fields.has(field)) changed = !!helper.fields.add(field);
         }
       }
     }
   }
-  const result = new Map<string, Set<string>>();
-  for (const helper of helpers.filter((entry) => entry.fields.size)) {
-    result.set(helper.name, new Set([...(result.get(helper.name) ?? []), ...helper.fields]));
-  }
-  return result;
+  return helpers.filter((helper) => helper.fields.size);
 }
 
 const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -99,18 +123,18 @@ function firstInCode(text: string, pattern: RegExp): number | undefined {
  * Quelltext der Route: von ihrer Registrierung bis zur nächsten Route bzw. Deklaration. Routen mit Pfad aus einer Liste
  * (attachments.ts: app.post(owner.path, …)) ab dem Pfad in der Liste; `fromLists` sind solche Pfade aller Routen.
  */
-function routeSource(sources: Source[], method: string, path: string, fromLists: string[]): string | undefined {
+function routeSource(sources: Source[], method: string, path: string, fromLists: string[]): Source | undefined {
   const quoted = `'${path}'`;
   const registration = new RegExp(`\\.${method.toLowerCase()}\\(\\s*${escape(quoted)}`, 'g');
   for (const pass of ['registration', 'literal'] as const) {
-    for (const { text } of sources) {
+    for (const { file, text } of sources) {
       const start = firstInCode(text, pass === 'registration' ? registration : new RegExp(escape(quoted), 'g'));
       if (start === undefined) continue;
       const boundaries = [
         ...[...text.matchAll(REGISTRATION), ...text.matchAll(DECLARATION)].map((match) => match.index ?? -1),
         ...fromLists.map((other) => text.indexOf(`'${other}'`)),
       ].filter((index) => index > start);
-      return text.slice(start, Math.min(text.length, ...boundaries));
+      return { file, text: text.slice(start, Math.min(text.length, ...boundaries)) };
     }
   }
   return undefined;
@@ -131,11 +155,9 @@ function listedPaths(routes: RouteEntry[], sources: Source[]): string[] {
 }
 
 /** Alle ID-Felder der Routen; tenant 'admin' (nur Administration, kein Projekt) zählt nicht. */
-export function findIdFields(
-  routes: RouteEntry[],
-  sources: Source[],
-): { fields: FoundIdField[]; unlocated: string[] } {
-  const helpers = idHelpers(sources);
+export function findIdFields(routes: RouteEntry[], sources: Source[]): { fields: FoundIdField[]; unlocated: string[] } {
+  const imports = importedNames(sources);
+  const helpers = idHelpers(sources, imports);
   const fromLists = listedPaths(routes, sources);
   const fields = new Map<string, FoundIdField>();
   const unlocated: string[] = [];
@@ -147,14 +169,14 @@ export function findIdFields(
     for (const [, param] of route.path.matchAll(/:(\w+)/g)) {
       if (param !== own) add({ method: route.method, path: route.path, in: 'path', field: param! });
     }
-    const text = routeSource(sources, route.method, route.path, fromLists);
-    if (text === undefined) {
+    const source = routeSource(sources, route.method, route.path, fromLists);
+    if (source === undefined) {
       unlocated.push(`${route.method} ${route.path}`);
       continue;
     }
-    const names = idNames(text);
-    for (const [helper, helperFields] of helpers) {
-      if (mentions(text, helper)) for (const field of helperFields) names.add(field);
+    const names = idNames(source.text);
+    for (const helper of helpers) {
+      if (uses(helper, source.file, source.text, imports)) for (const field of helper.fields) names.add(field);
     }
     for (const field of names) add({ method: route.method, path: route.path, in: 'body', field });
   }
@@ -208,11 +230,17 @@ test('Gegenprobe Erkennung: eine neue Route mit ID-Feld ohne Eintrag lässt den 
   ].join('\n');
   const { fields, unlocated } = findIdFields(routeTable(router), [{ file: 'extra.ts', text: source }]);
   assert.deepEqual(unlocated, []);
-  assert.deepEqual(fields.filter((field) => !listed.has(key(field))).map(key).sort(), [
-    'PATCH /extra/:id agentId',
-    'POST /projects/:slug/extra-assign sprintId',
-    'POST /projects/:slug/extra/:otherId otherId',
-  ]);
+  assert.deepEqual(
+    fields
+      .filter((field) => !listed.has(key(field)))
+      .map(key)
+      .sort(),
+    [
+      'PATCH /extra/:id agentId',
+      'POST /projects/:slug/extra-assign sprintId',
+      'POST /projects/:slug/extra/:otherId otherId',
+    ],
+  );
 });
 
 const OWN = 'demo';
@@ -320,6 +348,14 @@ test('Mandanten-Prüfung auf PostgreSQL: fremde IDs 400/404 ohne Schreibzugriff,
       );
       return agentId;
     };
+    /** Offener Testnachweis mit freigegebenem Befehl am Auftrag eines Projekts. */
+    const evidence = async (slug: string) => {
+      const befehl = `npm test -- nachweis-${next()}`;
+      await saveEvidence(pool, await order(slug, 'done'), [
+        { datei: 'src/x.test.ts', befehl, grund: 'gegenprobe_fehlt' },
+      ]);
+      return id(`SELECT id FROM test_evidence WHERE befehl = $1`, [befehl]);
+    };
     const group = async (slug: string) => {
       const groupId = `x-gruppe-${next()}`;
       await pool.query(
@@ -418,6 +454,8 @@ test('Mandanten-Prüfung auf PostgreSQL: fremde IDs 400/404 ohne Schreibzugriff,
       },
       'GET /projects/:slug/test-runs/:id/cases id': () =>
         same((runId) => get(`/projects/${OWN}/test-runs/${runId}/cases`), testRun, 200),
+      'POST /projects/:slug/test-evidence/:id/run id': () =>
+        same((evidenceId) => post(`/projects/${OWN}/test-evidence/${evidenceId}/run`, {}), evidence, 201),
       'PATCH /projects/:slug/permission-groups/:id id': () => {
         const rename = (groupId: string) =>
           patch(`/projects/${OWN}/permission-groups/${groupId}`, { label: 'Neu', rules: ['Bash(make test)'] });

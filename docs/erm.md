@@ -1,18 +1,75 @@
 # AIdeation-Datenbank
 
-Eigene Datenbank, getrennt von `mainty`: `projects` (slug) 1:n `test_runs` 1:n `test_run_steps`; `projects` 1:n `ideation_items` 1:n `ideation_attachments` (Bilder bis 5 MB als BYTEA; Aufträge erreichen sie über `ideation_id`, der Runner legt sie unter `.dev-log/attachments/<auftrag>/` im Projektordner ab und nennt sie im Prompt); `projects` 1:n `development_items`, optional verknüpft mit einer Idee, einem Testlauf und einem Sprint desselben Projekts. `ideation_items` und `development_items` tragen `effort_hours`, `token_estimate`, `benefit` und `cost` (0–10). `projects` 1:n `sprints` (1:n `development_items`) und `projects` 1:n `agents` (`phase` pre_task/while_task/after_task, `position` = Reihenfolge). Das Schema wird beim Start von Dienst bzw. Agent automatisch angelegt.
+Kern des Schemas (Auswahl; alle Tabellen stehen weiter unten):
+
+```mermaid
+erDiagram
+  projects ||--o{ ideation_items : "hat"
+  ideation_items ||--o{ ideation_attachments : "Bilder"
+  ideation_items ||--o| development_items : "wird Auftrag"
+  projects ||--o{ sprints : "hat"
+  sprints ||--o{ development_items : "enthält"
+  sprints ||--o| sprint_reports : "Bericht"
+  projects ||--o{ bugs : "hat"
+  bugs ||--o{ development_items : "Behebungsauftrag"
+  projects ||--o{ agents : "hat"
+  agents ||--o{ workflow_steps : "Einsatz je Phase"
+  development_items ||--o{ agent_runs : "Läufe"
+  agent_runs ||--o{ agent_run_steps : "Schritte"
+  agents ||--o{ agent_run_steps : "führt aus"
+  development_items ||--o{ acceptance_checks : "Abnahme"
+  development_items ||--o{ development_events : "Verlauf"
+```
+
+Benutzer, Dokumentation und Tests:
+
+```mermaid
+erDiagram
+  users ||--o{ project_members : "Mitglied"
+  projects ||--o{ project_members : "Mandant"
+  users ||--o{ auth_sessions : "Sitzungen"
+  users ||--o{ push_subscriptions : "Geräte"
+  projects ||--o{ docs : "Handbücher, Berichte"
+  docs ||--o{ doc_revisions : "Änderungen (Vier-Augen)"
+  users ||--o{ doc_revisions : "Autor"
+  projects ||--o{ test_runs : "Testläufe"
+  test_runs ||--o{ test_run_steps : "Schritte"
+  projects ||--o{ chat_messages : "Chat"
+  projects ||--o{ agent_tasks : "Aktionen, Routinen"
+  agent_tasks ||--o{ agent_task_runs : "Läufe"
+```
+
+Eigene Datenbank, getrennt von `mainty`: `projects` (slug) 1:n `test_runs` 1:n `test_run_steps`; `projects` 1:n `ideation_items` 1:n `ideation_attachments` (Bilder bis 5 MB als BYTEA; Aufträge erreichen sie über `ideation_id`, der Runner legt sie unter `.dev-log/attachments/<auftrag>/` im Projektordner ab und nennt sie im Prompt); `projects` 1:n `development_items`, optional verknüpft mit einer Idee, einem Testlauf und einem Sprint desselben Projekts. `ideation_items` und `development_items` tragen `effort_hours`, `token_estimate`, `benefit` und `cost` (0–10). `projects` 1:n `sprints` (1:n `development_items`) und `projects` 1:n `agents` (`phase` pre_sprint/pre_task/while_task/after_task/on_rejected/on_done, `position` = Reihenfolge; `workflow_steps` überschreibt Phase und Position je Projekt). Das Schema wird beim Start von Dienst bzw. Agent automatisch angelegt.
 
 Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:n `agent_runs` (ein laufender Lauf pro Auftrag) 1:n `agent_run_steps` (Agent, Phase, Status, Exit-Code, Dauer, Ausgabe). `runner_workers` (ID, PID, Rechner, `last_seen`) ist das Lebenszeichen je Worker; `agent_runs.worker_id` und `agent_processes.worker_id` verweisen darauf (ohne Fremdschlüssel, Altzeilen ohne ID).
 
 ## Erweiterungen: Bugs, Dokumentation, Sprintberichte
 
-- `bugs` (Projekt, Titel, Schwere, Status open/in_progress/fixed/wontfix, Quelle, Sprint, fix_notes) – 1:n zu `development_items.bug_id` (kind `bug`).
+- `bugs` (Projekt, Titel, Schwere, Status open/in_progress/fixed/wontfix/rejected, Quelle, Sprint, fix_notes) – 1:n zu `development_items.bug_id` (kind `bug`). `rejected` = verstösst gegen die Projektregeln; ein Trigger übernimmt ihn von einem abgelehnten Auftrag, solange der Bug offen oder in Arbeit ist.
+- `development_items.status`: backlog/planned/in_progress/blocked/approval/done/rejected (`approval` = wartet auf Freigabe, `rejected` = abgelehnt).
+- `sprints.status`: planned/active/review/completed/cancelled (`cancelled` = abgebrochen über `PATCH /api/sprints/:id`, `cancelSprint` stoppt laufende Schritte und löst nicht erledigte Aufträge aus dem Sprint).
 - `sprint_reports` (Sprint, implemented, missing, problems, notes) – 1:1 je Sprint.
-- `docs` (Projekt, kind manual/sprint/order/repo, Titel, Inhalt).
-- `development_items`: zusätzlich `kind`, `bug_id`, `completed_at`; Trigger synchronisieren den Bug-Status.
+- `docs` (Projekt, kind manual/sprint/order/repo/request, Titel, Inhalt).
+- `development_items`: zusätzlich `kind` (feature/bug/express), `bug_id`, `completed_at`; Trigger synchronisieren den Bug-Status.
 - `agents.role`: author, developer, tester, reviewer, documenter, bug_reviewer, manual_writer, user_manual_writer, custom.
-- Git-Sicherung: `projects.git_remote` (HTTPS/SSH-URL ohne Zugangsdaten); `projects.database_url` (optional, Zugang zur Projekt-Datenbank für `run_sql`); `sprints.git_sync` (pending/running/done/failed), `git_action` (push/pull), `git_message`, `git_commit`, `git_synced_at`. Ein Trigger setzt `git_sync='pending'`, sobald ein Sprint `completed` wird (nicht beim Übergang `review` → `completed`).
+- Git-Sicherung: `projects.git_remote` (HTTPS/SSH-URL ohne Zugangsdaten); `projects.database_url` (optional, Zugang zur Projekt-Datenbank für `run_sql`); `sprints.git_sync` (pending/running/done/failed/awaiting_merge), `git_action` (push/pull), `git_message`, `git_commit`, `git_synced_at`. Ein Trigger setzt `git_sync='pending'`, sobald ein Sprint `completed` wird (nicht beim Übergang `review` → `completed`).
 - GitHub-Brücke: `projects.github_mode` (aus/issues/issues+pr), `github_require_approval`, `github_synced_at`, `github_auth` (ok/missing) mit `github_auth_message` und `github_auth_checked_at`; `sprints.status` zusätzlich `review`, dazu `pr_url`, `ci_status` (pending/success/failure) und `ci_bug_run`; `ideation_items` und `bugs` mit `source='github'`, `external_ref` (`owner/repo#N`, eindeutig je Projekt) und `github_synced_status`; `development_items.git_commit`.
+
+## Anmeldung, Benutzer und Mandanten
+
+- `app_settings` (`key` PK, `value`): globale Einstellungen, u. a. `auth_totp_secret` / `auth_totp_pending` (TOTP-Schlüssel des Systemadministrators aus der `.env`, mit `DEV_LOG_SECRET_KEY` verschlüsselt), `push_vapid_keys`, `visionary_max_ideas`, `provider_limit:<anbieter>`.
+- `app_settings.provider_limit:<anbieter>` (Anbieter `claude` | `copilot` | `gemini`, JSON `{ "since", "resetAt", "scope", "paymentUrl" }`): Nutzungslimit des Agent-Kontos, erkannt an der CLI-Meldung („You've hit your … limit · resets …“, `src/core/provider-limits.ts`). `scope` ist `account` oder `org` (Limit der Organisation). `paymentUrl` kommt aus der Meldung, wenn sie https auf dem Host des Anbieters ist, sonst ist es die feste Seite. Beim Lesen wird sie erneut gegen diese Hosts geprüft. Ein erfolgreicher Lauf desselben Anbieters oder „Fortsetzen“ löscht den Eintrag; nach `resetAt` gilt er als abgelaufen.
+- `users` (`id` UUID, `username` – eindeutig ohne Gross-/Kleinschreibung, `display_name`, `password_hash`, `roles` TEXT[], `active`, `totp_secret`, `totp_pending` (beide verschlüsselt), `last_login_at`, `created_at`, `updated_at`): benannte Benutzer zusätzlich zum Systemadministrator.
+- `auth_sessions` (`token_hash` PK, `created_at`, `last_seen`, `expires_at`, `user_agent`, `user_id` → `users` (`ON DELETE CASCADE`, NULL = Systemadministrator), `credential_version` (an das Passwort gebunden, `src/db/migrations.ts`)) – n:1 zu `users`.
+- `push_subscriptions` (`endpoint` PK, `p256dh`, `auth`, `user_agent`, `created_at`, `user_id` → `users` (`ON DELETE CASCADE`), `system_admin`) – n:1 zu `users`; Push geht nur an Geräte mit Zugriff auf das Projekt.
+- `project_members` (`user_id` → `users`, `project_slug` → `projects`, `created_at`; PK aus beiden) – n:m zwischen `users` und `projects` (Mandantentrennung; Administratoren sehen alle Projekte).
+- `doc_revisions` (`id`, `doc_id` → `docs` (`ON DELETE CASCADE`), `title`, `content`, `base_title`, `base_content`, `note`, `status` pending/approved/rejected, `author_id` → `users` (`ON DELETE SET NULL`), `author_name`, `reviewer_name`, `review_note`, `reviewed_at`, `created_at`) – n:1 zu `docs`: eingereichte Änderungen, die erst nach Prüfung übernommen werden.
+
+## Review-Container, Budgets und Modell-Routing
+
+- `review_slots` (`slot` 1–9 PK, `enabled`, `project_slug` → `projects` (`ON DELETE SET NULL`), `commit_sha`, `label`, `development_id` → `development_items`, `kind` manual/approval, `status` idle/requested/starting/running/failed/stopping, `message`, `requested_at`, `started_at`, `updated_at`): projektübergreifende Review-Container (Port 4200 + Nummer); Slot 1 ist beim Anlegen aktiv, 2 und 3 aus. Ersetzt die frühere Tabelle `review_instances`.
+- `budgets` (`project_slug` → `projects`, `period` day/sprint/order, `max_tokens`, `max_cost_usd`; PK aus Projekt und Zeitraum): leere Grenze = unbegrenzt, keine Zeile = keine Prüfung. Dazu `budget_warnings` (gemeldete 80-%-Schwelle je Zeitraum und Periode) und `budget_role_limits` (Token-Limit je Agent-Rolle und Zeitraum); `development_items.budget_blocked` / `budget_blocked_role` nennen das blockierende Limit.
+- `routing_rules` (`id`, `project_slug` → `projects`, `position`, `condition` JSONB-Objekt, `tier` local/strong/up/down) – n:1 zu `projects`; Regeln nach Priorität. Ohne gespeicherte Regeln (`projects.routing_customized = false`) gelten die Standardregeln; `agent_run_steps.model` und `routing_rule` halten die Wahl je Schritt fest.
 
 ## Erweiterung: Visionär (Ideen-Herkunft und Läufe)
 
@@ -33,14 +90,30 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 - `production_status` (je Projekt): Health-Fehlschläge in Folge, `down`, letzter Fehler, Zeitpunkt der Prüfung bzw. des letzten erfolgreichen Log-Scans (`logs_scanned_at`, untere Grenze des nächsten Scan-Fensters), letzter Scan-Fehler (`log_error`, höchstens 300 Zeichen, beim nächsten Erfolg leer), zuletzt vermerkte Lücke (`log_gap`) und – wie beim Wächter – gemeldete Probleme (`problems`, `notified_at`).
 - Aufbewahrung: Der Worker löscht stündlich Ereignisse, Verlauf und Deploys, die älter als `production_retention_days` sind.
 
+## Erweiterung: Offene Testnachweise (Migration 23)
+
+- `test_evidence` (`id` UUID, `development_id` → `development_items`, `position`, `datei`, `befehl`, `grund` `nicht_freigegeben`/`gegenprobe_fehlt`, `status` `open`/`passed`/`failed`/`nicht_freigegeben`, `run_id` → `test_runs`, `checked_at`). Eindeutig je `(development_id, befehl)`.
+- `test_requests.evidence_id` → `test_evidence`; `test_requests.scope` zusätzlich `befehl` (alle bisherigen Werte bleiben erlaubt).
+
 ## Erweiterung: Visuelle Abnahme (Screenshots vor und nach dem Auftrag)
 
 - `projects`: `preview_url` (http(s), ohne Zugangsdaten; leer = Schritt übersprungen), `preview_pages` (JSONB-Liste von Pfaden wie `/#dashboard`), `visual_settings` (JSONB: `tolerance` in Prozent, `threshold` Farbabstand, `masks` CSS-Selektoren, `login` mit Seite, Selektoren und den **Namen** der Testwerte aus der `.env.example`, `aiJudge`, `visionModel`).
 - `agents.role` zusätzlich `visual_tester`; `acceptance_checks.kind` zusätzlich `visual` (Befunde der visuellen Prüfung, ersetzt bei jedem Lauf; der Tester lässt sie stehen).
 - `development_items`: `visual_approved_at`, `visual_approved_by` (Anzeigename) – „Optisch freigeben“ im Reiter „Ansicht“.
-- `visual_snapshots` (`id` UUID, `development_id` → `development_items`, `project_slug` → `projects` (Mandant), `page`, `device` desktop/mobile, `kind` shot/diff, `data` PNG als BYTEA höchstens 2 MB, `diff_percent`, `base_id` → Vorher-Stand, `created_at`). Je Projekt, Seite, Gerät und Art bleiben die letzten 3 Stände; ältere löscht der Schritt beim Speichern. Auslieferung über `/api/visual-snapshots/<id>` mit Mandantenprüfung (`tenancy.ts`).
+- `visual_snapshots` (`id` UUID, `development_id` → `development_items`, `project_slug` → `projects` (Mandant), `page`, `device` desktop/mobile, `kind` shot/diff, `data` PNG als BYTEA höchstens 2 MB, `diff_percent`, `base_id` → Vorher-Stand, `created_at`). Je Projekt, Seite, Gerät und Art bleiben die letzten 3 Stände; ältere löscht der Schritt beim Speichern. Auslieferung über `/api/visual-snapshots/<id>` mit Mandantenprüfung (`src/api/tenancy.ts`).
 
 ## Erweiterung: Wartungs-Jobs im Worker
 
-- `scheduled_jobs` (eigenständig, ohne Fremdschlüssel): `key` (PK, `[a-z0-9_-]`, max. 64), `enabled`, `start_at`, `interval_seconds` (60 s bis 30 Tage), `job_kind` (Schlüssel der festen Registry in `src/runner/scheduler.ts`: `backup_check`, `restore_probe`, `watchdog_logs`, `close_old_sprints`, `push_alert`; anderes wird nicht ausgeführt, sondern mit `failed` gespeichert), `config` (JSONB-Objekt, je Art z. B. `dir`, `maxAgeHours`, `minBytes`, `inactiveDays`, `project`, `jobs`, `timeoutSeconds`), `next_run_at`, `last_run_at`, `last_status` (running/ok/warning/failed), `last_message`, `state` (JSONB, bereits gemeldete Probleme und Zeitpunkt wie beim Wächter), `locked_until` (Sperre eines beanspruchten Laufs gegen andere Worker; nach Zeitlimit + 30 s frei), `updated_at`.
-- Die vier Standardjobs legt das Schema über `ON CONFLICT (key) DO NOTHING` an. `close_old_sprints` ist aus, weil er den Sprint-Status ändert. Ändert ein Administrator Intervall oder Startzeit (`PATCH /api/scheduled-jobs/<key>`), wird `next_run_at` ab dem letzten Lauf neu berechnet, frühestens ab der Startzeit.
+- `scheduled_jobs` (eigenständig, ohne Fremdschlüssel): `key` (PK, `[a-z0-9_-]`, max. 64), `enabled`, `start_at`, `interval_seconds` (60 s bis 30 Tage), `job_kind` (Schlüssel der festen Registry in `src/runner/scheduler.ts`: `backup_check`, `restore_probe`, `watchdog_logs`, `close_old_sprints`, `push_alert`, `bug_categories`; anderes wird nicht ausgeführt, sondern mit `failed` gespeichert), `config` (JSONB-Objekt, je Art z. B. `dir`, `maxAgeHours`, `minBytes`, `inactiveDays`, `project`, `jobs`, `timeoutSeconds`), `next_run_at`, `last_run_at`, `last_status` (running/ok/warning/failed), `last_message`, `state` (JSONB, bereits gemeldete Probleme und Zeitpunkt wie beim Wächter), `locked_until` (Sperre eines beanspruchten Laufs gegen andere Worker; nach höchstem Zeitlimit + 30 s, also 330 s, frei), `updated_at`.
+- Die fünf Standardjobs legt das Schema über `ON CONFLICT (key) DO NOTHING` an; Migration 22 ergänzt `restore_probe` in bestehenden Datenbanken, Migration 26 den einmaligen Job `bug_categories`. `close_old_sprints` ist aus, weil er den Sprint-Status ändert. Ändert ein Administrator Intervall oder Startzeit (`PATCH /api/scheduled-jobs/<key>`), wird `next_run_at` ab dem letzten Lauf neu berechnet, frühestens ab der Startzeit.
+
+## Weitere Tabellen (Kurzüberblick)
+
+- `workflow_steps`: Reihenfolge und Anweisung der Agents je Projekt und Phase (überschreibt `agents.phase`/`position`).
+- `test_cases`, `test_coverage_areas`, `test_coverage_reports`, `test_media`, `test_requests`: Testfälle, Abdeckung, Medien der Testläufe und angeforderte Testläufe.
+- `acceptance_checks`: Abnahmepunkte (Akzeptanzkriterien) je Auftrag.
+- `development_events`, `chat_messages`, `agent_usage`: Verlauf je Auftrag, Chat des Assistenten, Token- und Kostenverbrauch.
+- `sprint_commits`, `sprint_proposal_comments`, `project_git_graphs`, `git_fix_requests`: Commits je Sprint, Kommentare zum Sprintvorschlag, Git-Verlauf fürs Dashboard, Reparaturwünsche für Git.
+- `setup_jobs`, `system_agent_settings`, `project_permission_groups`: Einrichtungs-Aufträge, Modelle der System-Agents, eigene Rechte-Gruppen je Projekt.
+- `worker_heartbeats` (Lebenszeichen je Projekt) und `runner_workers` (je Worker-Prozess, Migration 16).
+- `schema_migrations`: ausgeführte Migrationen (`src/db/migrations.ts`).

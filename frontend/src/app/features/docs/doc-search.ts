@@ -1,5 +1,6 @@
 import { escapeHtml } from '../../shared/html.js';
 import type { DocumentEntry } from '../../core/models.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 /** Suche über alle Dokumente: unabhängig von Gross-/Kleinschreibung und Umlauten, Wortanfänge, kleine Tippfehler. */
 export interface SearchHit {
@@ -28,7 +29,7 @@ function normalizeWithMap(text: string): { value: string; map: number[] } {
   let value = '';
   const map: number[] = [];
   for (let index = 0; index < text.length; index += 1) {
-    const part = normalize(text[index]!);
+    const part = normalize(text.charAt(index));
     for (const char of part) {
       value += char;
       map.push(index);
@@ -87,13 +88,17 @@ function matchRanges(text: string, tokens: string[]): { start: number; end: numb
   for (const token of tokens) {
     let from = value.indexOf(token);
     while (from >= 0) {
-      ranges.push({ start: map[from]!, end: map[from + token.length - 1]! + 1, token });
+      ranges.push({ start: defined(map[from]), end: defined(map[from + token.length - 1]) + 1, token });
       from = value.indexOf(token, from + token.length);
     }
     if (token.length >= 5 && !ranges.some((range) => range.token === token)) {
       for (const word of value.matchAll(/[a-z0-9]+/g)) {
         if (closeEnough(word[0], token)) {
-          ranges.push({ start: map[word.index]!, end: map[word.index + word[0].length - 1]! + 1, token });
+          ranges.push({
+            start: defined(map[word.index]),
+            end: defined(map[word.index + word[0].length - 1]) + 1,
+            token,
+          });
         }
       }
     }

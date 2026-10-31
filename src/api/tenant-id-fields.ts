@@ -17,16 +17,19 @@ export interface TenantIdField {
   in: 'path' | 'body';
   field: string;
   /** Tabelle, zu der die ID gehört. */
-  table: ProjectTable;
+  table: Table;
   /** Antwort bei einer ID aus einem anderen Projekt: 400 (falsche Eingabe) oder 404 (nicht gefunden). */
   refused: 400 | 404;
 }
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+/** Tabellen ohne eigene Spalte project_slug: Die Route prüft das Projekt über einen Join (assertInProject passt nicht). */
+type IndirectTable = 'test_evidence';
+type Table = ProjectTable | IndirectTable;
 
-const body = (method: Method, path: string, field: string, table: ProjectTable, refused: 400 | 404 = 400) =>
+const body = (method: Method, path: string, field: string, table: Table, refused: 400 | 404 = 400) =>
   ({ method, path, in: 'body', field, table, refused }) as const;
-const inPath = (method: Method, path: string, field: string, table: ProjectTable, refused: 400 | 404 = 404) =>
+const inPath = (method: Method, path: string, field: string, table: Table, refused: 400 | 404 = 404) =>
   ({ method, path, in: 'path', field, table, refused }) as const;
 
 export const TENANT_ID_FIELDS: readonly TenantIdField[] = [
@@ -59,6 +62,8 @@ export const TENANT_ID_FIELDS: readonly TenantIdField[] = [
   body('PATCH', '/development/:id', 'agentId', 'agents'),
   // test-runs.ts
   inPath('GET', '/projects/:slug/test-runs/:id/cases', 'id', 'test_runs'),
+  // test-requests.ts (Nachweis gehört über seinen Auftrag zum Projekt)
+  inPath('POST', '/projects/:slug/test-evidence/:id/run', 'id', 'test_evidence'),
   // permission-groups.ts (ID je Projekt, Schlüssel project_slug + id)
   inPath('PATCH', '/projects/:slug/permission-groups/:id', 'id', 'project_permission_groups'),
   inPath('DELETE', '/projects/:slug/permission-groups/:id', 'id', 'project_permission_groups'),
@@ -74,7 +79,10 @@ export const TENANT_ID_FIELDS: readonly TenantIdField[] = [
   body('POST', '/projects/:slug/sprints/proposal/comment', 'ids', 'development_items'),
 ];
 
-/** Pfadparameter, die wie ein ID-Feld aussehen, aber keinen Datensatz eines Projekts bezeichnen. */
+/**
+ * ID-Felder ohne Projekt der Route: Pfadparameter, die keinen Datensatz eines Projekts bezeichnen, und
+ * projektübergreifende Routen (tenant 'global'), die selbst nach allowedProjects filtern.
+ */
 export const TENANT_ID_EXEMPT: readonly { method: Method; path: string; field: string; reason: string }[] = [
   {
     method: 'PUT',
@@ -87,5 +95,23 @@ export const TENANT_ID_EXEMPT: readonly { method: Method; path: string; field: s
     path: '/review-slots/:slot/stop',
     field: 'slot',
     reason: 'Nummer eines geteilten Review-Containers (1–9), kein Datensatz eines Projekts.',
+  },
+  {
+    method: 'POST',
+    path: '/agent-limits/:provider/resume',
+    field: 'provider',
+    reason: 'Name eines Agent-Anbieters aus fester Liste; Fortsetzen verlangt Zugriff auf alle Projekte.',
+  },
+  {
+    method: 'POST',
+    path: '/ideation/bulk/reject',
+    field: 'ids',
+    reason: 'Kein Projekt im Pfad; das UPDATE filtert nach allowedProjects, fremde Ideen gelten als nicht gefunden.',
+  },
+  {
+    method: 'POST',
+    path: '/ideation/bulk/priority',
+    field: 'ids',
+    reason: 'Kein Projekt im Pfad; das UPDATE filtert nach allowedProjects, fremde Ideen gelten als nicht gefunden.',
   },
 ];

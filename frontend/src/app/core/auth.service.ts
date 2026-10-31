@@ -1,4 +1,4 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { inject, Injectable, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
@@ -23,14 +23,21 @@ export class AuthService {
     void this.refresh();
   }
 
-  async refresh(): Promise<void> {
+  async refresh(attempt = 0): Promise<void> {
     try {
       const session = await firstValueFrom(
         this.http.get<{ authenticated: boolean; user: CurrentUser | null }>(`${this.basePath}/api/session`),
       );
       this.user.set(session.authenticated ? session.user : null);
-    } catch {
+    } catch (error) {
       this.user.set(null);
+      if (error instanceof HttpErrorResponse && error.status === 401) {
+        this.required.set(true);
+        return;
+      }
+      // Server kurz weg (Neustart, Netz): ohne Sitzung fehlen alle Rollen und Aktionen bleiben ausgeblendet –
+      // deshalb erneut versuchen statt bis zum Neuladen ohne Rechte weiterzulaufen.
+      setTimeout(() => void this.refresh(attempt + 1), Math.min(30_000, 1_000 * 2 ** attempt));
     }
   }
 

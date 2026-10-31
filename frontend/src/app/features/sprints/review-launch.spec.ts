@@ -7,10 +7,19 @@ import {
   nextOpenOrders,
   reviewStarting,
   reviewStatusText,
+  sprintReviewable,
   sprintReviewSlot,
 } from './review-launch.js';
 
 const hash = (digit: string) => digit.repeat(40);
+
+test('Sprint-Review nur bei geplanten, aktiven und Review-Sprints einbinden', () => {
+  assert.equal(sprintReviewable('planned'), true);
+  assert.equal(sprintReviewable('active'), true);
+  assert.equal(sprintReviewable('review'), true);
+  assert.equal(sprintReviewable('completed'), false, 'abgeschlossene Sprints fragen nichts ab');
+  assert.equal(sprintReviewable('cancelled'), false);
+});
 
 function slot(values: Partial<ReviewSlot>): ReviewSlot {
   return {
