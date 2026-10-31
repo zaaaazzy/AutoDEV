@@ -22,7 +22,7 @@ Oberfläche. Die Aufnahmen stehen unter „Noch offen“.
 | Was | Wo in AIdeation | Sichtbar, wenn |
 |---|---|---|
 | „✓ Alle abnehmen (n)“ | Seite „Aktionen“, Kopf des Panels „Rückmeldungen der Agents“ | Recht „Ausführen“ und mindestens eine Umsetzung wartet |
-| „✓ Alle abnehmen (n)“ | Sprints, Sprintmenü neben „Live schalten“ | Recht „Ausführen“ und mindestens eine Umsetzung dieses Sprints wartet |
+| „✓ Alle abnehmen (n)“ | Sprints, Sprintmenü vor „Live schalten“ | Recht „Ausführen“ und mindestens eine Umsetzung dieses Sprints wartet |
 | Reiter „Anfragen“ | Sprints, über der Auftragsliste des Sprints | immer; die Zahl nennt die wartenden Umsetzungen |
 
 ## Was passiert
@@ -43,7 +43,7 @@ gesperrt – auf beiden Seiten. Nach Abbruch oder Fehler sind sie sofort wieder 
 ### Fremde Änderungen im Projektordner
 
 Liegen im Ordner der Agents fremde Änderungen, warnt der Dialog wie bei der Einzelfreigabe („Git-Zustand nicht
-sauber“). Abnehmen geht dann nur mit „Trotzdem alle abnehmen“ und einer Begründung. Ohne Bestätigung wird nichts
+sauber“). Abnehmen geht dann nur mit „Trotzdem alle abnehmen“; das Feld „Warum trotzdem? (Pflicht)“ muss ausgefüllt sein. Ohne Bestätigung wird nichts
 abgenommen. Die Prüfung gilt einmal für alle Umsetzungen zusammen.
 
 ### Register „Anfragen“
@@ -68,7 +68,7 @@ abgenommen. Die Prüfung gilt einmal für alle Umsetzungen zusammen.
 |---|---|---|
 | „Freigeben ist gesperrt: …“ | Fremde Änderungen im Ordner der Agents, ohne Begründung bestätigt | im roten Git-Hinweis beheben oder mit Begründung „Trotzdem alle abnehmen“ |
 | „Keine Umsetzung wartete mehr auf die Freigabe – nichts abgenommen.“ | Alle wurden inzwischen von jemand anderem bearbeitet | nichts, die Liste ist schon nachgeladen |
-| „n Umsetzungen abgenommen … m standen nicht mehr in Freigabe.“ | Einzelne haben sich zwischen Anzeige und Klick geändert | nichts; die übrigen werden gemergt |
+| „n Umsetzungen abgenommen – werden gleich gemergt. … m Umsetzungen standen nicht mehr in Freigabe.“ | Einzelne haben sich zwischen Anzeige und Klick geändert | nichts; die übrigen werden gemergt |
 | Knopf fehlt | Recht „Ausführen“ fehlt oder nichts wartet | Admin nach dem Recht fragen |
 
 ## Noch offen
