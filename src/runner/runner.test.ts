@@ -1204,8 +1204,23 @@ test('Tester mit eigenem CLI: Tokens und Kosten des CLI-Laufs bleiben beim Speic
   assert.equal(saved.values[6], 0.4);
 });
 
-/** Tester mit eigenem CLI und eigener Abdeckungsmessung von AIdeation (direkter `npx tsx --test`-Befehl). */
-async function testerAcceptanceRun(acceptance: object) {
+/**
+ * Tester mit eigenem CLI und eigener Abdeckungsmessung von AIdeation (direkter `npx tsx --test`-Befehl). Das Paket
+ * heisst „shop-backend“, damit die Messung dem Bereich „backend“ zugeordnet wird.
+ */
+async function testerAcceptanceRun(
+  acceptance: object,
+  {
+    coverageOutput = '# pass 75\n# fail 0\n# all files | 82.5 | 70.1 | 90.2 |',
+    testerCoverage = '',
+    packageName = 'shop-backend',
+  } = {},
+) {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const cwd = mkdtempSync(join(tmpdir(), 'coverage-run-'));
+  writeFileSync(join(cwd, 'package.json'), JSON.stringify({ name: packageName }));
   const queries: { sql: string; values: unknown[] }[] = [];
   const query = async (sql: string, values: unknown[] = []) => {
     queries.push({ sql, values });
@@ -1216,10 +1231,10 @@ async function testerAcceptanceRun(acceptance: object) {
   };
   const pool = { query, connect: async () => ({ query, release: () => undefined }) } as unknown as Pool;
   // Wie im gemeldeten Fall: Tests grün, aber kein @@COVERAGE vom Tester, weil der Wächter die Messung sperrt.
-  const output = `75 von 75 Tests grün.\n@@ACCEPTANCE ${JSON.stringify(acceptance)}`;
+  const output = `75 von 75 Tests grün.\n${testerCoverage}\n@@ACCEPTANCE ${JSON.stringify(acceptance)}`;
   const execute: CommandExecutor = async (command, _cwd, options) => {
     if (command.includes('--experimental-test-coverage')) {
-      return { exitCode: 0, durationMs: 1, output: '# pass 75\n# fail 0\n# all files | 82.5 | 70.1 | 90.2 |' };
+      return { exitCode: 0, durationMs: 1, output: coverageOutput };
     }
     options?.onChunk?.(JSON.stringify({ type: 'result', result: output }));
     return { exitCode: 0, durationMs: 1, output };
@@ -1227,8 +1242,15 @@ async function testerAcceptanceRun(acceptance: object) {
   const builtin: BuiltinAgent = async () => ({ exitCode: 0, durationMs: 1, output: 'grün' });
   const tester = { ...agent('Tester', 'after_task', 1, ['claude', '-p']), role: 'tester' as const };
   const order = { ...item, description: '## Akzeptanzkriterien\n- A ist belegt\n- B ist belegt' };
-  const result = await runWorkItem(pool, order, [tester], { cwd: '/r', timeoutMs: 1, execute, builtin });
+  const result = await runWorkItem(pool, order, [tester], { cwd, timeoutMs: 1, execute, builtin });
   return { result, queries };
+}
+
+/** Texte der Schritt-Ereignisse (logEvent). */
+function stepEvents(queries: { sql: string; values: unknown[] }[]): string[] {
+  return queries
+    .filter((query) => query.sql.includes('SET events = events ||'))
+    .flatMap((query) => (JSON.parse(String(query.values[1])) as { text: string }[]).map((event) => event.text));
 }
 
 const NOT_MEASURED = 'Tests grün, aber die Abdeckung konnte nicht gemessen werden (Wächter blockiert den Befehl)';
@@ -1253,8 +1275,67 @@ test('Abnahme: grüne Tests, alle Kriterien belegt, nur die Abdeckungsmessung de
   // Die von AIdeation gemessene Abdeckung wird weiterhin gespeichert – mit echten Werten, nicht null.
   const area = queries.find((query) => query.sql.includes('INSERT INTO test_coverage_areas'));
   assert.ok(area, 'Abdeckung gespeichert');
+  assert.equal(area.values[1], 'backend');
   assert.equal(area.values[8], 82.5);
   assert.notEqual(area.values[8], null);
+  assert.ok(stepEvents(queries).includes('Testabdeckung gespeichert (backend)'));
+});
+
+test('Abdeckung: Paket ohne erkennbaren Bereich (z. B. dev-log selbst) wird als „gesamt“ gespeichert', async () => {
+  for (const packageName of ['dev-log', 'builder']) {
+    const { queries } = await testerAcceptanceRun(
+      { criteria: [{ nr: 1, met: true, note: 'Test a' }], done: DONE_WITH_UNMEASURED },
+      { packageName },
+    );
+    const area = queries.find((query) => query.sql.includes('INSERT INTO test_coverage_areas'));
+    assert.equal(area?.values[1], 'gesamt', packageName);
+    assert.ok(stepEvents(queries).includes('Testabdeckung gespeichert (gesamt)'), packageName);
+  }
+});
+
+test('Abdeckung: ohne gültigen Bericht und ohne Messung steht der Grund im Schritt-Log', async () => {
+  const { queries } = await testerAcceptanceRun(
+    { criteria: [{ nr: 1, met: true, note: 'Test a' }], done: DONE_WITH_UNMEASURED },
+    { coverageOutput: 'keine Abdeckung' },
+  );
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO test_coverage')), 'kein Bericht angelegt');
+  assert.ok(stepEvents(queries).includes('Testabdeckung nicht gespeichert: kein gültiger Bericht und keine Messung'));
+});
+
+test('Abnahme: ohne gültige Messung durch AIdeation gilt die fehlende Abdeckung nicht mehr als erfüllt', async () => {
+  const criteria = [
+    { nr: 1, met: true, note: 'Test a' },
+    { nr: 2, met: true, note: 'Test b' },
+  ];
+  // Messung liefert nichts, der Tester meldet einen ungültigen Block (null-Werte): nichts gespeichert, abgelehnt.
+  const { result, queries } = await testerAcceptanceRun(
+    { criteria, done: DONE_WITH_UNMEASURED },
+    {
+      coverageOutput: 'keine Abdeckung',
+      testerCoverage:
+        '@@COVERAGE {"summary":"x","areas":[{"area":"backend","unit":3,"lines":null,"branches":null}]}',
+    },
+  );
+  assert.equal(result, 'failed');
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO test_coverage_areas')), 'nichts gespeichert');
+  const event = queries
+    .flatMap((query) => query.values.map(String))
+    .find((value) => value.includes('Testabdeckung des Testers verworfen'));
+  assert.ok(event, 'Grund steht im Schrittverlauf');
+  assert.match(event, /Bereich backend: Zeilenwert/);
+});
+
+test('Abnahme: ungültiger Tester-Block wird verworfen, die eigene Messung bleibt gespeichert', async () => {
+  const { queries } = await testerAcceptanceRun(
+    { criteria: [], done: [1, 2, 3, 4, 5].map((nr) => ({ nr, met: true })) },
+    { testerCoverage: '@@COVERAGE {"summary":"x","areas":[{"area":"Sonstiges","unit":3,"lines":80,"branches":70}]}' },
+  );
+  const areas = queries.filter((query) => query.sql.includes('INSERT INTO test_coverage_areas'));
+  assert.deepEqual(
+    areas.map((query) => query.values[1]),
+    ['backend'],
+  );
+  assert.ok(stepEvents(queries).some((text) => /Testabdeckung des Testers verworfen: Bereich „Sonstiges“ unbekannt/.test(text)));
 });
 
 test('Abnahme: ein unbelegtes Kriterium oder rote Tests bleiben trotz Abdeckungs-Hinweis abgelehnt', async () => {

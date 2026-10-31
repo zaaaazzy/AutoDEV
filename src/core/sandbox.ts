@@ -1,5 +1,6 @@
-import { randomUUID } from 'node:crypto';
-import { basename, isAbsolute, posix, relative, resolve, sep, win32 } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { basename, isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path';
 import { READ_ONLY_ROLES } from '../agent/permission-rules.js';
 import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
 
@@ -13,12 +14,14 @@ import { type CommandExecutor, type CommandResult, redactOutput, runCommand } fr
  * Compose-Dienst worker (src/core/worker-container.ts), dort über den eingebundenen Docker-Socket.
  */
 
-export type SandboxMode = 'off' | 'docker';
+export type SandboxMode = 'off' | 'docker' | 'workbench';
 
 export const SANDBOX_IMAGE = 'aideation-agent';
 export const SANDBOX_LABEL = 'aideation.run';
 export const SANDBOX_WORKDIR = '/workspace';
-const SANDBOX_HOME = '/home/agent';
+export const SANDBOX_HOME = '/home/agent';
+/** npm-Cache im Container: /tmp ist für jede UID beschreibbar (ein ~/.npm aus dem Image-Build gehört root). */
+const SANDBOX_NPM_CACHE = '/tmp/npm-cache';
 /** Wächter im Image (deploy/agent/Dockerfile bündelt agent-guard.ts dorthin). */
 export const SANDBOX_GUARD = { node: 'node', script: '/opt/aideation/agent-guard.mjs' } as const;
 /** Internes Docker-Netzwerk der Agent-Container: keine Route nach aussen, nur zum Egress-Proxy. */
@@ -37,17 +40,18 @@ export const SANDBOX_CREDENTIALS = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KE
 /** Ollama auf dem Host, vom Container aus gesehen. */
 export const SANDBOX_OLLAMA_URL = 'http://host.docker.internal:11434';
 /** Nach dem Abbruch höchstens so lange auf docker kill/rm warten. */
-const KILL_TIMEOUT_MS = 8_000;
+export const KILL_TIMEOUT_MS = 8_000;
 const CHECK_TIMEOUT_MS = 20_000;
 
 /** Liest einen Schalterwert; unbekannte Werte gelten als nicht gesetzt. */
 export function parseSandboxMode(value: unknown): SandboxMode | null {
   const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  return text === 'off' || text === 'docker' ? text : null;
+  return text === 'off' || text === 'docker' || text === 'workbench' ? text : null;
 }
 
 /**
- * Wirksamer Schalter: Projekt vor global (DEV_LOG_AGENT_SANDBOX), Standard „docker“. „off“ ist der ausdrückliche
+ * Wirksamer Schalter: Projekt vor global (DEV_LOG_AGENT_SANDBOX), Standard „workbench“ (dauerhafter Arbeitscontainer
+ * je Projekt mit eigenem Docker, workbench.ts); „docker“ ist der kurzlebige Container je Lauf. „off“ ist der ausdrückliche
  * Notfallmodus (Agents und Tests wieder auf dem Host) und zeigt im Worker-Badge eine Warnung. Ausnahme ohne
  * ausdrückliche Angabe: unter dem Node-Test-Runner (NODE_TEST_CONTEXT) gilt „off“ – Unit-Tests arbeiten mit
  * Attrappen, und im Testcontainer gibt es ohnehin kein Docker. So bleiben auch Einzelaufrufe wie
@@ -57,13 +61,13 @@ export function sandboxMode(projectValue: unknown, environment: NodeJS.ProcessEn
   return (
     parseSandboxMode(projectValue) ??
     parseSandboxMode(environment.DEV_LOG_AGENT_SANDBOX) ??
-    (environment.NODE_TEST_CONTEXT ? 'off' : 'docker')
+    (environment.NODE_TEST_CONTEXT ? 'off' : 'workbench')
   );
 }
 
 /** Läuft ein Agent bzw. Projekttest im Container? Seit Phase 3 gilt das für alle Rollen. */
 export function usesSandbox(mode: SandboxMode): boolean {
-  return mode === 'docker';
+  return mode !== 'off';
 }
 
 /** Lesende Rollen (Visionär, Problemanalyse, Vor dem Sprint …) bekommen den Workspace nur als :ro. */
@@ -125,27 +129,35 @@ export interface SandboxOptions {
   network?: string;
   /** Weitere Variablen, die nur als Name (-e NAME) weitergehen; den Wert liest der Docker-Client aus seiner Umgebung. */
   passEnv?: readonly string[];
+  /** Abhängigkeiten vor dem Lauf ins node_modules-Volume installieren (Standard: ja, ausser bei :ro). */
+  dependencies?: boolean;
+  /**
+   * Wirksamer Schalter des Projekts. „workbench“: schreibende Läufe gehen in den Arbeitscontainer des Projekts
+   * (workbench.ts); lesende (:ro) und Läufe ohne Worktree bleiben kurzlebige Container.
+   */
+  mode?: SandboxMode;
 }
 
 /** Host-Pfad im Format von docker -v. */
-function hostMount(path: string, platform: NodeJS.Platform): string {
+export function hostMount(path: string, platform: NodeJS.Platform): string {
   return dockerHostPath((platform === 'win32' ? win32 : posix).resolve(path), platform);
 }
 
+/**
+ * Ziele im Container selbst: nie über den Proxy. Sonst antwortet er für localhost (Playwright meldet den Port als
+ * belegt, Tests gegen einen eigenen Server im Container scheitern).
+ */
+export const SANDBOX_NO_PROXY = 'localhost,127.0.0.1,::1,0.0.0.0';
+
 /** Proxy-Variablen für das Agent-Netzwerk: Claude-CLI, npm und Playwright gehen nur über den Egress-Proxy. */
-function proxyEnvironment(): string[] {
-  return [
-    'HTTPS_PROXY',
-    'HTTP_PROXY',
-    'https_proxy',
-    'http_proxy',
-    'npm_config_https_proxy',
-    'npm_config_proxy',
-  ].flatMap((name) => ['-e', `${name}=${EGRESS_URL}`]);
+export function proxyEnvironment(): string[] {
+  return ['HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy', 'npm_config_https_proxy', 'npm_config_proxy']
+    .flatMap((name) => ['-e', `${name}=${EGRESS_URL}`])
+    .concat(['NO_PROXY', 'no_proxy'].flatMap((name) => ['-e', `${name}=${SANDBOX_NO_PROXY}`]));
 }
 
 /** Host-Pfade gehören nicht in den Container: die CLI heisst im Image einfach „claude“. */
-function containerCommand(command: string[]): string[] {
+export function containerCommand(command: string[]): string[] {
   const [binary, ...rest] = command;
   if (!binary) return command;
   const name = basename(binary.replaceAll('\\', '/'));
@@ -160,7 +172,7 @@ export function containerDirectory(worktree: string, cwd: string | undefined): s
   return `${SANDBOX_WORKDIR}/${inner.split(sep).join('/')}`;
 }
 
-function sandboxUser(options: SandboxOptions): string | null {
+export function sandboxUser(options: Pick<SandboxOptions, 'platform' | 'uid' | 'gid'>): string | null {
   if ((options.platform ?? process.platform) === 'win32') return null;
   const uid = options.uid ?? process.getuid?.();
   const gid = options.gid ?? process.getgid?.();
@@ -225,6 +237,8 @@ export function sandboxRunArgs(
     containerDirectory(worktree, options.cwd),
     '-e',
     `HOME=${SANDBOX_HOME}`,
+    '-e',
+    `npm_config_cache=${SANDBOX_NPM_CACHE}`,
     '-e',
     `CLAUDE_PROJECT_DIR=${SANDBOX_WORKDIR}`,
     '-e',
@@ -323,12 +337,12 @@ export function sandboxBadge(project: string): string | null {
   return problems.get(project) ?? null;
 }
 
-function noteProblem(project: string, problem: string | null): void {
+export function noteProblem(project: string, problem: string | null): void {
   if (problem) problems.set(project, problem);
   else problems.delete(project);
 }
 
-const blocked = (output: string, environment: NodeJS.ProcessEnv): CommandResult => ({
+export const blocked = (output: string, environment: NodeJS.ProcessEnv): CommandResult => ({
   exitCode: 1,
   durationMs: 0,
   output: `${redactOutput(output, environment)}\n`,
@@ -338,9 +352,9 @@ const blocked = (output: string, environment: NodeJS.ProcessEnv): CommandResult 
  * node_modules-Volume anlegen und dem Benutzer des Containers geben: ein neues Volume gehört root, der Agent läuft
  * ohne root. Einmaliger Hilfscontainer ohne Mount des Worktrees.
  */
-async function prepareModulesVolume(
+export async function prepareModulesVolume(
   docker: CommandExecutor,
-  options: SandboxOptions,
+  options: Pick<SandboxOptions, 'runId' | 'project' | 'platform' | 'uid' | 'gid' | 'image'>,
   env: NodeJS.ProcessEnv,
   cwd: string,
 ): Promise<CommandResult> {
@@ -369,13 +383,116 @@ async function prepareModulesVolume(
   ).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: String(error) }));
 }
 
+/**
+ * Eigene Agent-Worktrees verlinken node_modules des Hauptordners (agent-workspace.ts). Im Container zeigt der Link auf
+ * einen Host-Pfad: Docker hängt das Volume dann dort ein, und npm scheitert an „/workspace/node_modules“ (ENOTDIR).
+ * Der Link wird darum durch einen leeren Ordner ersetzt (nur der Link, nie sein Ziel); linkDependencies stellt ihn
+ * ohne Sandbox wieder her.
+ */
+export function replaceLinkedModules(worktree: string): void {
+  const path = join(worktree, 'node_modules');
+  try {
+    if (!lstatSync(path).isSymbolicLink()) return;
+    rmSync(path);
+    mkdirSync(path);
+  } catch {
+    // Kein node_modules oder nicht änderbar: Der Lauf geht trotzdem weiter.
+  }
+}
+
+/** Stempel im node_modules-Volume: Hash der package-lock.json, mit dem zuletzt installiert wurde. */
+export const DEPENDENCY_STAMP = 'node_modules/.aideation-lock';
+export const INSTALL_TIMEOUT_MS = 15 * 60_000;
+
+/** Hash der package-lock.json (sonst package.json) im Worktree; null ohne package.json. */
+export function dependencyStamp(worktree: string): string | null {
+  const manifest = join(worktree, 'package.json');
+  if (!existsSync(manifest)) return null;
+  const lock = join(worktree, 'package-lock.json');
+  return createHash('sha256')
+    .update(readFileSync(existsSync(lock) ? lock : manifest))
+    .digest('hex')
+    .slice(0, 16);
+}
+
+/** Sperrdatei im Volume: hält die Installation fest, solange sie läuft (flock, auch über Worker-Neustarts hinweg). */
+export const DEPENDENCY_LOCK = 'node_modules/.aideation-install.lock';
+
+/**
+ * Installiert nur, wenn der Stempel im Volume nicht passt, und dann frisch (Reste eines abgebrochenen Laufs liessen
+ * npm mit ENOTEMPTY scheitern; der Cache bleibt). npm install statt npm ci: node_modules ist ein Mountpunkt,
+ * den npm ci löschen wollte. Ohne Installationsskripte, wie bei den Agents; der Cache liegt im Volume (HOME ist im
+ * Container nicht beschreibbar). Die Sperre gilt für alle Container am selben Volume: Startet der Worker neu, während
+ * npm im Arbeitscontainer weiterläuft, wartet die nächste Installation und prüft danach den Stempel (sonst ENOENT).
+ */
+export function dependencyCommand(stamp: string): string[] {
+  return [
+    'sh',
+    '-c',
+    `exec 9>${DEPENDENCY_LOCK} && flock 9 && ` +
+      `{ [ "$(cat ${DEPENDENCY_STAMP} 2>/dev/null)" = "${stamp}" ] || ` +
+      '{ find node_modules -mindepth 1 -maxdepth 1 ! -name .cache ! -name .aideation-install.lock -exec rm -rf {} + && ' +
+      `npm install --ignore-scripts --no-audit --no-fund --cache node_modules/.cache/npm && echo ${stamp} > ${DEPENDENCY_STAMP}; }; }`,
+  ];
+}
+
+const installs = new Map<string, Promise<CommandResult>>();
+
+/**
+ * Das Volume ist anfangs leer: ohne diesen Schritt fehlen im Container tsx, tsc & Co. (Exit-Code 127). Läuft je
+ * Projekt und Lockfile einmal gleichzeitig, im Agent-Netzwerk (npm über den Egress-Proxy), auch wenn die Tests im
+ * Compose-Netzwerk des Projekts laufen.
+ */
+function ensureDependencies(
+  worktree: string,
+  options: SandboxOptions & { docker?: CommandExecutor; signal?: AbortSignal },
+): Promise<CommandResult> | null {
+  const stamp = dependencyStamp(worktree);
+  if (!stamp) return null;
+  const key = `${modulesVolume(options.project)}:${stamp}`;
+  let install = installs.get(key);
+  if (!install) {
+    install = runInSandbox(dependencyCommand(stamp), worktree, {
+      runId: options.runId,
+      project: options.project,
+      platform: options.platform,
+      uid: options.uid,
+      gid: options.gid,
+      image: options.image,
+      environment: options.environment,
+      docker: options.docker,
+      signal: options.signal,
+      name: `${options.name ?? containerName(options.runId)}-npm`,
+      dependencies: false,
+      timeoutMs: INSTALL_TIMEOUT_MS,
+    }).finally(() => installs.delete(key));
+    installs.set(key, install);
+  }
+  return install;
+}
+
+/** Docker Hub: Registry, Anmeldung und CDN der Image-Schichten. */
+export const DOCKER_HUB_HOSTS = [
+  'registry-1.docker.io:443',
+  'auth.docker.io:443',
+  'production.cloudflare.docker.com:443',
+  'production.cloudfront.docker.com:443',
+];
+
 /** Erlaubte Ziele des Egress-Proxys (siehe egress-proxy.ts); weitere über DEV_LOG_AGENT_SANDBOX_EGRESS (host:port, …). */
 export function egressAllowList(environment: NodeJS.ProcessEnv = process.env): string {
   const extra = (environment.DEV_LOG_AGENT_SANDBOX_EGRESS ?? '')
     .split(',')
     .map((entry) => entry.trim().toLowerCase())
     .filter((entry) => /^[a-z0-9.-]+:\d{1,5}$/.test(entry));
-  return ['api.anthropic.com:443', 'registry.npmjs.org:443', 'host.docker.internal:11434', ...extra].join(',');
+  return [
+    'api.anthropic.com:443',
+    'registry.npmjs.org:443',
+    'host.docker.internal:11434',
+    // Docker im Arbeitscontainer (workbench.ts) lädt Images von Docker Hub.
+    ...DOCKER_HUB_HOSTS,
+    ...extra,
+  ].join(',');
 }
 
 /** docker run des Egress-Proxys: am normalen Bridge-Netzwerk (Weg nach aussen), ohne Rechte, ohne Mounts. */
@@ -502,6 +619,10 @@ export async function runInSandbox(
       docker?: CommandExecutor;
     },
 ): Promise<CommandResult> {
+  if (options.mode === 'workbench' && options.workspace !== false && !options.readOnly) {
+    const { runInWorkbench } = await import('./workbench.js');
+    return runInWorkbench(command, worktree, options);
+  }
   const { docker = runCommand, signal, timeoutMs, onSpawn, onOutput, onChunk } = options;
   const source = options.environment ?? process.env;
   // Geschwärzt wird gegen alles, was der Worker kennt – auch gegen die Werte der Anmeldedaten.
@@ -520,9 +641,18 @@ export async function runInSandbox(
     return blocked(missing, redactWith);
   }
   if (options.workspace !== false) {
+    replaceLinkedModules(worktree);
     const volume = await prepareModulesVolume(docker, options, env, worktree);
     if (volume.exitCode !== 0) {
       const message = `Sandbox: node_modules-Volume „${modulesVolume(options.project)}“ liess sich nicht vorbereiten (Exit-Code ${volume.exitCode}). Der Agent wurde nicht gestartet.\n${volume.output.trim().slice(-500)}`;
+      noteProblem(options.project, message.split('\n')[0]);
+      return blocked(message, redactWith);
+    }
+  }
+  if (options.workspace !== false && !options.readOnly && options.dependencies !== false) {
+    const installed = await ensureDependencies(worktree, { ...options, environment: source });
+    if (installed && installed.exitCode !== 0) {
+      const message = `Sandbox: Abhängigkeiten liessen sich nicht ins Volume „${modulesVolume(options.project)}“ installieren (Exit-Code ${installed.exitCode}). Befehl nicht gestartet.\n${installed.output.trim().slice(-800)}`;
       noteProblem(options.project, message.split('\n')[0]);
       return blocked(message, redactWith);
     }
@@ -562,7 +692,11 @@ export async function runInSandbox(
     signal?.removeEventListener('abort', onAbort);
     // Auch nach Erfolg, Fehler oder getötetem Client: kein Container bleibt zurück (--rm greift nur bei sauberem Ende).
     if (killing) await killing;
-    await docker(['docker', 'rm', '-f', name], worktree, { timeoutMs: KILL_TIMEOUT_MS, env }).catch(() => undefined);
+    const removed = await docker(['docker', 'rm', '-f', name], worktree, { timeoutMs: KILL_TIMEOUT_MS, env }).catch(
+      () => null,
+    );
+    // Hat --rm das Entfernen schon begonnen, kehrt rm -f sofort zurück („already in progress“): kurz warten, bis er weg ist.
+    if (removed && /already in progress/i.test(removed.output)) await waitUntilGone(docker, name, worktree, env);
   }
   const note = signal?.aborted ? null : sandboxFailureNote(result.exitCode, result.output);
   if (note && /^Sandbox:/.test(note)) noteProblem(options.project, note);
@@ -571,6 +705,23 @@ export async function runInSandbox(
     durationMs: Date.now() - startedAt,
     output: redactOutput(note ? `${result.output}\n\n${note}\n` : result.output, redactWith),
   };
+}
+
+async function waitUntilGone(
+  docker: CommandExecutor,
+  name: string,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  const until = Date.now() + KILL_TIMEOUT_MS;
+  while (Date.now() < until) {
+    const left = await docker(['docker', 'ps', '-aq', '--filter', `name=^${name}$`], cwd, {
+      timeoutMs: CHECK_TIMEOUT_MS,
+      env,
+    }).catch(() => null);
+    if (!left || left.exitCode !== 0 || !left.output.trim()) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
 }
 
 /**

@@ -111,7 +111,7 @@ export function firstStepsTour(api: ApiService): TourStep[] {
       targets: ['.worker-status', '.agents-chip'],
       shape: 'circle',
       title: 'Ein Agent beginnt',
-      text: 'Gleich übernimmt ein Agent den ersten Auftrag. Hier oben siehst du jederzeit, wie viele Agents arbeiten.',
+      text: 'Gleich übernimmt ein Agent den ersten Auftrag. Er arbeitet im eigenen Arbeitscontainer deines Projekts – beim allerersten Auftrag richtet AIdeation diesen erst ein, das kann einige Minuten dauern. Hier oben siehst du jederzeit, wie viele Agents arbeiten.',
       waitFor: (tour) => tour.store.worker().agents.some((agent) => agent.active),
       waitHint: 'Warte, bis der erste Agent startet …',
     },

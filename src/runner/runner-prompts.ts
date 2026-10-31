@@ -1,6 +1,6 @@
 import { agentComposeProject } from './project-command.js';
 import { HANDOFF_RULE } from '../core/workflow-phases.js';
-import { acceptanceInstructions } from './acceptance.js';
+import { acceptanceInstructions, EVIDENCE_INSTRUCTIONS } from './acceptance.js';
 import { reviewInstructions } from './review.js';
 import { COVERAGE_INSTRUCTIONS } from './coverage.js';
 import { containsUntrusted, UNTRUSTED_HINT } from './hoster.js';
@@ -17,6 +17,9 @@ const MANUAL_PROMPT_CHARS = 12_000;
 /** Der Entwickler listet am Ende jede geänderte Datei auf (der Tester-Schritt testet nur diese Dateien). */
 export const CHANGED_FILES_INSTRUCTIONS = `## Geänderte Dateien melden
 Beende deine Antwort mit dem Abschnitt „## Geänderte Dateien“ und liste darin jede Datei, die du angelegt, geändert oder gelöscht hast – eine Zeile pro Datei im Format \`- pfad/zur/datei\` (relativ zum Projektordner, gelöschte mit „(gelöscht)“). Lass keine Datei weg: Der Tester-Schritt testet nur die geänderten Dateien.`;
+
+/** Rollen, die offene Testnachweise (@@NACHWEIS) melden. */
+export const EVIDENCE_ROLES = new Set(['tester', 'documenter']);
 
 export function buildPrompt(
   agent: WorkflowAgent,
@@ -58,6 +61,7 @@ export function buildPrompt(
     agent.role === 'tester' && extras.definitionOfDone
       ? acceptanceInstructions(extras.criteria ?? [], extras.definitionOfDone)
       : '',
+    EVIDENCE_ROLES.has(agent.role) ? EVIDENCE_INSTRUCTIONS : '',
     agent.role === 'reviewer' ? reviewInstructions(extras.baseBranch ?? null) : '',
     agent.role === 'developer' ? CHANGED_FILES_INSTRUCTIONS : '',
     HANDOFF_RULE,

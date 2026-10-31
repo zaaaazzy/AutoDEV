@@ -16,6 +16,17 @@ Alle `actions/checkout`-Schritte nutzen `persist-credentials: false`: Das `GITHU
   3. `up -d --wait` für `db`, `dev-log`, `frontend`, dann `curl /health` auf Port 3100.
   4. Bei Fehlern `docker compose logs` (db, dev-log, frontend) im Log, am Ende immer `down -v`.
 
+## CI-Spiegel vor dem Pull Request
+
+Im PR-Modus (`issues+pr`) führt der Worker die Prüfschritte aus `.github/workflows/ci.yml` lokal aus, bevor er den Sprint-Branch pusht. Das gilt beim Sprint-Abschluss (der Push öffnet den Pull Request) und bei der Nachbesserung im Review (der Push aktualisiert den offenen Pull Request). Ohne PR-Modus läuft der Spiegel nicht. Er läuft zusätzlich zum Test-Gate (Projekt-Testbefehle) und ersetzt es nicht. Die echte CI bleibt maßgeblich.
+
+- **Schritte:** Die Datei wird bei jedem Lauf neu gelesen. Übernommen werden nur `- run: npm run …`-Zeilen mit `lint`, `format:check`, `typecheck` und `test:unit`, in der Reihenfolge der Datei. Kommt ein Schritt in mehreren Jobs vor, läuft er einmal. `npm ci`, `docker …`, `npx … playwright`, `build:ui` und `test:e2e` werden nicht gespiegelt. Fehlt die Datei oder enthält sie keinen dieser Schritte, vermerkt der Log „CI-Spiegel übersprungen“. Der Parser ist ein einfacher Zeilenleser, keine YAML-Bibliothek (`mirroredSteps` in `src/runner/git-sync/ci-mirror.ts`).
+- **Ausführung:** über `runProjectCommand` mit dem gefilterten Environment (keine AIdeation-Zugänge, auch kein `DEV_LOG_*`) und, wie das Test-Gate, im Testcontainer der Sandbox. Der Spiegel hält beim ersten roten Schritt an.
+- **Roter Schritt:** kein Push, kein Pull Request, kein Merge. Die Git-Sicherung steht auf „gescheitert“ mit dem Schritt in der Meldung. Es entsteht ein Bug „CI-Spiegel rot vor Pull Request von „<Sprintname>““ (höchstens 180 Zeichen, Priorität `high`, Quelle `github`). Im Text stehen `Fehlgeschlagener Schritt: \`npm run …\`` und ein gekürzter, maskierter Log-Auszug (`ciLogExcerpt`: höchstens 60 Zeilen bzw. 3000 Zeichen). Pro Sprint und Schritt gibt es höchstens einen offenen Bug, ein weiterer roter Lauf legt keinen zweiten an. Der Titel unterscheidet sich von „CI rot im Pull Request von …“, die Bereinigung in Migration 8 erfasst ihn nicht.
+- **Keine Datenbank:** Lokal fehlt oft die Postgres-Instanz der CI. Der Spiegel setzt `DEV_LOG_TEST_REQUIRE_DATABASE` nicht (das Environment filtert `DEV_LOG_*`), Datenbank-Tests werden dann übersprungen. Ist `test:unit` rot und zeigt die Ausgabe eine fehlende Datenbank (`keine PostgreSQL-Datenbank`, `DEV_LOG_TEST_REQUIRE_DATABASE`, `ECONNREFUSED …:543x`), gilt der Schritt als „nicht prüfbar“: Der Log vermerkt das, es entsteht kein Bug und der Pull Request wird geöffnet. Die echte CI prüft ihn dann. Diese Regel gilt nur für `test:unit`.
+- **Liegengebliebene Ausgaben:** Der Spiegel läuft im Worktree, nicht in einem frischen Checkout. Gitignorierte Testausgaben (`test-results/`) schließt `eslint.config.mjs` deshalb aus; sonst wäre `lint` lokal rot, obwohl die echte CI diese Dateien nie sieht.
+- **Laufzeit:** Die vier Schritte verlängern die Sicherung im PR-Modus (Zeitlimit je Schritt wie beim Test-Gate: 45 Minuten).
+
 ## Typprüfung der Tests
 
 `npm run typecheck` prüft jetzt vier Konfigurationen:

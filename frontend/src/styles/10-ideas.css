@@ -407,6 +407,30 @@
 .idea-reject textarea {
   min-height: 70px;
 }
+/* Popover der Ideenliste: Massenablehnung, Massenpriorität, Schnell ablehnen. Fest am Bildschirm (Position aus dem
+   Knopf), damit die horizontal scrollbare Tabelle es nicht abschneidet. */
+.idea-popover {
+  position: fixed;
+  z-index: 20;
+  display: grid;
+  gap: 8px;
+  width: min(320px, calc(100vw - 16px));
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.idea-popover-title {
+  margin: 0;
+  font-weight: 600;
+}
+.idea-popover .actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
 
 /* ── Express-Anfragen aus dem Dashboard: ungeplant im Sprint ──────────── */
 .express-badge {

@@ -11,6 +11,7 @@ import { dropReportCopies } from './git-sync/report-copies.js';
 import { gitEnvironment, projectEnvironment, runProjectCommand } from './project-command.js';
 import type { RunnerOptions } from './runner-types.js';
 import { runTestAgent } from './test-agent.js';
+import { isAllowedCommand, shellWords, withIgnoreScripts } from '../agent/command-checks.js';
 import { gateExecutor } from './test-sandbox.js';
 
 /** Ein Komplettlauf mit Playwright dauert; danach gilt er als hängend. */
@@ -22,7 +23,37 @@ const DEFAULT_COMMANDS = [
 
 interface Claimed {
   id: string;
-  scope: 'full' | 'ui';
+  scope: 'full' | 'ui' | 'befehl';
+  evidenceId: string | null;
+}
+
+/**
+ * Befehl eines Testnachweises (Umfang „befehl“): nur aus der gespeicherten Zeile, nie aus dem Request. Er stammt aus
+ * einer Agent-Ausgabe und ist nicht vertrauenswürdig: Lehnt isAllowedCommand ihn ab, startet nichts, und der Nachweis
+ * erhält den Status „nicht_freigegeben“. Liefert die Argumentliste (ohne Shell) für den Testlauf.
+ */
+export async function evidenceCommand(
+  pool: Pick<Pool, 'query'>,
+  project: string,
+  evidenceId: string | null,
+  cwd: string,
+): Promise<string[]> {
+  const row = evidenceId
+    ? (
+        await pool.query<{ befehl: string }>(
+          `SELECT e.befehl FROM test_evidence e JOIN development_items d ON d.id = e.development_id
+            WHERE e.id = $1 AND d.project_slug = $2`,
+          [evidenceId, project],
+        )
+      ).rows[0]
+    : undefined;
+  if (!row) throw new Error('Testnachweis nicht gefunden.');
+  if (!isAllowedCommand(row.befehl, cwd)) {
+    await pool.query(`UPDATE test_evidence SET status = 'nicht_freigegeben' WHERE id = $1`, [evidenceId]);
+    throw new Error(`Befehl nicht freigegeben: ${row.befehl}`);
+  }
+  // Installationen laufen auch hier ohne Installationsskripte.
+  return withIgnoreScripts(shellWords(row.befehl));
 }
 
 /**
@@ -130,13 +161,18 @@ export async function processTestRequest(
           -- Nicht neben einem laufenden Auftrag: der Agent schreibt sonst gleichzeitig im Projektordner.
           AND NOT EXISTS (SELECT 1 FROM agent_runs r JOIN development_items d ON d.id = r.development_id
                            WHERE d.project_slug = $1 AND r.status = 'running')
-        RETURNING id, scope`,
+        RETURNING id, scope, evidence_id AS "evidenceId"`,
       [options.project],
     )
   ).rows[0];
   if (!request) return false;
   console.info(`[${options.project}] Kompletter Test (${request.scope}) startet`);
+  const evidence = request.scope === 'befehl';
   try {
+    // Testnachweis: Befehl vor dem Start prüfen – abgelehnt startet gar nichts (kein Lauf, kein Checkout).
+    const evidenceArgs = evidence
+      ? await evidenceCommand(pool, options.project, request.evidenceId, options.cwd)
+      : null;
     // Unter der Projektsperre: kein Agent und kein Git-Sync arbeitet währenddessen im Ordner.
     // Exklusiv im Arbeitsordner: kein Auftrag wechselt währenddessen den Branch, kein Assistent schreibt hinein.
     const releaseTree = await acquireTree(options.cwd);
@@ -146,7 +182,7 @@ export async function processTestRequest(
       // Projektcode im Testcontainer (Sandbox, Standard); Git bleibt beim Worker. Im Container gibt es keinen Zugang
       // zur AIdeation-Datenbank: test:full meldet dann nur Exit-Code und Ausgabe, keinen eigenen Testlauf.
       const testExecute = await gateExecutor(pool, options.project, options.cwd, execute, `test-${request.id}`);
-      if (await hasFullTestScript(options.cwd)) {
+      if (!evidenceArgs && (await hasFullTestScript(options.cwd))) {
         const outcome = await runProjectCommand(
           fullTestCommand(options.project, request),
           options.cwd,
@@ -162,13 +198,14 @@ export async function processTestRequest(
         if (outcome.exitCode !== 0 && !linked) throw new Error(failureTail(outcome.output));
         return { passed: outcome.exitCode === 0, output: outcome.output };
       }
-      const commands =
-        (
-          await pool.query<{ commands: string[][] | null }>(
-            'SELECT test_commands AS commands FROM projects WHERE slug = $1',
-            [options.project],
-          )
-        ).rows[0]?.commands ?? DEFAULT_COMMANDS;
+      const commands = evidenceArgs
+        ? [evidenceArgs]
+        : ((
+            await pool.query<{ commands: string[][] | null }>(
+              'SELECT test_commands AS commands FROM projects WHERE slug = $1',
+              [options.project],
+            )
+          ).rows[0]?.commands ?? DEFAULT_COMMANDS);
       const runId = await runAgent(
         {
           project: options.project,
@@ -191,6 +228,15 @@ export async function processTestRequest(
           [runId],
         )
       ).rows;
+      if (evidenceArgs) {
+        // Grün hakt den Nachweis ab; rot bleibt er unter „Aktion notwendig“ sichtbar (keine Bugs aus dem Einzelbefehl).
+        await pool.query(`UPDATE test_evidence SET status = $2, run_id = $3, checked_at = NOW() WHERE id = $1`, [
+          request.evidenceId,
+          failed.length === 0 ? 'passed' : 'failed',
+          runId,
+        ]);
+        return { passed: failed.length === 0, output: '' };
+      }
       const bugs = await fileBugs(
         pool,
         options.project,
@@ -211,10 +257,14 @@ export async function processTestRequest(
     await sendPush(
       pool,
       {
-        title: `${result.passed ? '✅' : '❌'} Kompletter Test · ${options.project}`,
-        body: result.passed
-          ? 'Alle Prüfungen bestanden.'
-          : `Mit Befunden${row?.bugs ? ` – ${row.bugs} neue Bugs angelegt` : ''}.`,
+        title: `${result.passed ? '✅' : '❌'} ${evidence ? 'Testnachweis' : 'Kompletter Test'} · ${options.project}`,
+        body: evidence
+          ? result.passed
+            ? 'Nachweis erbracht und abgehakt.'
+            : 'Befehl ist rot – der Nachweis bleibt unter „Aktion notwendig“.'
+          : result.passed
+            ? 'Alle Prüfungen bestanden.'
+            : `Mit Befunden${row?.bugs ? ` – ${row.bugs} neue Bugs angelegt` : ''}.`,
         url: `${row?.runId ? `#runs/${row.runId}` : '#runs'}?project=${encodeURIComponent(options.project)}`,
         tag: `test-${request.id}`,
       },
@@ -230,6 +280,18 @@ export async function processTestRequest(
         [request.id],
       )
       .catch(logged('test-request'));
+    // Testnachweis mit schon angelegtem Lauf: gilt als rot (sichtbar, mit diesem Lauf), nie als abgehakt – auch bei
+    // erneutem Start eines schon roten Nachweises.
+    if (evidence) {
+      await pool
+        .query(
+          `UPDATE test_evidence e SET status = 'failed', run_id = r.run_id, checked_at = NOW()
+             FROM test_requests r
+            WHERE r.id = $1 AND e.id = r.evidence_id AND r.run_id IS NOT NULL AND e.status IN ('open', 'failed')`,
+          [request.id],
+        )
+        .catch(logged('test-request'));
+    }
     await pool.query(`UPDATE test_requests SET status = 'failed', finished_at = NOW(), error = $2 WHERE id = $1`, [
       request.id,
       message.slice(0, 2000),
