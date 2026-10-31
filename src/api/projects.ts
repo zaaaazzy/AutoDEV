@@ -5,7 +5,7 @@ import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { withTransaction } from '../db/transaction.js';
 import { access } from './access.js';
-import { ensureDefaultAgents, ensureVisualTester } from './agents.js';
+import { ensureDefaultAgents, ensureVisualTester } from '../agent/default-agents.js';
 import { parsePreviewSettings, VISUAL_COLUMNS } from './visual.js';
 import { logged } from '../core/log.js';
 import { parseSandboxMode } from '../core/sandbox.js';

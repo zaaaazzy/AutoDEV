@@ -1,6 +1,6 @@
 // Gemeinsamer Zustand eines Auftragslaufs: Kontext, Budget-Prüfpunkt, geänderte Dateien und Verlauf je Schritt.
 import type { Pool } from 'pg';
-import type { KnownBug } from '../api/bugs.js';
+import type { KnownBug } from '../core/known-bugs.js';
 import { logged } from '../core/log.js';
 import { type CommandExecutor, redactOutput } from '../core/command.js';
 import { AGENT_STEP_STATUS } from '../core/status.js';

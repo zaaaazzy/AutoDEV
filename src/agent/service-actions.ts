@@ -7,7 +7,7 @@ import { type CommandExecutor, redactOutput, runCommand } from '../core/command.
 import { withProjectLock } from '../core/project-lock.js';
 import { projectEnvironment } from '../runner/project-command.js';
 import { composeViolation } from './compose-check.js';
-import { READ_ONLY_ROLES, SERVICES_COMMAND } from './permission-rules.js';
+import { READ_ONLY_ROLES, SERVICES_COMMAND } from '../core/permission-rules.js';
 import {
   describeServiceRequest,
   extractServiceMarkers,

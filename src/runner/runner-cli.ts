@@ -17,6 +17,7 @@ import {
   WORKER_STALE_SECONDS,
   workerIdFor,
 } from './worker-identity.js';
+import { seedProjectDefaults } from '../agent/default-agents.js';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
 import { publishSystemAgents } from '../agent/system-agents.js';
@@ -69,7 +70,9 @@ const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(do
 async function connect(watch: boolean): Promise<Pool> {
   for (;;) {
     try {
-      return await createDatabasePool(readDatabaseConfig());
+      const pool = await createDatabasePool(readDatabaseConfig());
+      await seedProjectDefaults(pool);
+      return pool;
     } catch (error) {
       if (!watch) {
         throw error;

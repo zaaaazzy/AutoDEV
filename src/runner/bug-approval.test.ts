@@ -9,7 +9,9 @@ import {
   isUntrustedBugSource,
   plainExternalText,
 } from '../core/bug-trust.js';
-import { type KnownBug, loadKnownBugs, registerBugRoutes } from '../api/bugs.js';
+import { registerBugRoutes } from '../api/bugs.js';
+import type { KnownBug } from '../core/known-bugs.js';
+import { loadKnownBugs } from '../db/bugs-repository.js';
 import { hasRole } from '../api/roles.js';
 import { requiredRole } from '../api/route-table.test.js';
 import { selectItems } from './runner-selection.js';

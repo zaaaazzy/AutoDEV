@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
 import { EXTERNAL_TEXT_END, EXTERNAL_TEXT_START } from '../core/bug-trust.js';
-import { UNTRUSTED_END, UNTRUSTED_HINT, UNTRUSTED_START } from '../runner/hoster.js';
+import { UNTRUSTED_END, UNTRUSTED_HINT, UNTRUSTED_START } from '../core/bug-trust.js';
 import { MAX_REFERENCES, parseReferences, referenceContext } from './chat-references.js';
 import { buildChatPrompt } from './chat.js';
 

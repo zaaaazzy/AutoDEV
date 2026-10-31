@@ -5,7 +5,7 @@ import { BUG_STATUSES, BUG_STATUS, DEVELOPMENT_STATUS, type BugStatus } from '..
 import { isAssignableSprintStatus, SPRINT_POOL_DEVELOPMENT_STATUSES } from '../core/development-transitions.js';
 import { fencedBugDescriptionSql, isUntrustedBugSource, unapprovedBugSql } from '../core/bug-trust.js';
 import { startProductionFix } from '../runner/production-events.js';
-import { UNTRUSTED_START } from '../runner/hoster.js';
+import { UNTRUSTED_START } from '../core/bug-trust.js';
 import type { Principal } from './roles.js';
 import {
   buildUpdate,
@@ -130,55 +130,6 @@ export async function syncBugOrder(db: Pool | PoolClient, bugId: string): Promis
       WHERE d.bug_id = b.id AND b.id = $1 AND b.status IN ('${BUG_STATUS.fixed}', '${BUG_STATUS.wontfix}') AND d.status IN ('planned', 'backlog')`,
     [bugId],
   );
-}
-
-/** Creates a bug report for a failed agent step unless an identical open bug already exists. */
-export async function reportAgentBug(
-  pool: Pool,
-  bug: { projectSlug: string; title: string; description: string; sprintId?: string | null; developmentId?: string },
-): Promise<string> {
-  const title = bug.title.slice(0, 180);
-  // development_id: Ist der Auftrag später doch erledigt, kommt die Meldung auf den Friedhof (Trigger).
-  const created = await pool.query<{ id: string }>(
-    `INSERT INTO bugs (project_slug, title, description, severity, source, sprint_id, development_id)
-     SELECT $1, $2, $3, 'high', 'agent', NULL, $4
-      WHERE NOT EXISTS (
-        SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2 AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')
-      ) RETURNING id`,
-    [bug.projectSlug, title, bug.description.slice(0, 10_000), bug.developmentId ?? null],
-  );
-  if (created.rows[0]) return created.rows[0].id;
-  const existing = (
-    await pool.query<{ id: string }>(
-      `SELECT id FROM bugs WHERE project_slug = $1 AND title = $2 AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}') ORDER BY created_at LIMIT 1`,
-      [bug.projectSlug, title],
-    )
-  ).rows[0];
-  if (!existing) throw new Error('Bug report could not be found after insertion.');
-  return existing.id;
-}
-
-export interface KnownBug {
-  title: string;
-  description: string;
-  severity: string;
-  status: BugStatus;
-  fixNotes: string;
-  source: string;
-}
-
-/** Bekannte Bugs für den Prompt; fremde, nicht freigegebene Bugs (Betrieb, GitHub) kommen nicht in den Prompt. */
-export async function loadKnownBugs(pool: Pool, projectSlug: string, limit = 40): Promise<KnownBug[]> {
-  const result = await pool.query<KnownBug>(
-    `SELECT title, description, severity, status, fix_notes AS "fixNotes", source
-       FROM bugs
-      WHERE project_slug = $1 AND status NOT IN ('${BUG_STATUS.wontfix}', '${BUG_STATUS.rejected}')
-        AND NOT ${unapprovedBugSql('bugs')}
-      ORDER BY CASE status WHEN '${BUG_STATUS.open}' THEN 0 WHEN '${BUG_STATUS.inProgress}' THEN 0 ELSE 1 END, updated_at DESC
-      LIMIT $2`,
-    [projectSlug, limit],
-  );
-  return result.rows;
 }
 
 /**

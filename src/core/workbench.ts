@@ -31,7 +31,7 @@ import {
   sandboxFailureNote,
   sandboxProblem,
   sandboxUser,
-} from './sandbox.js';
+} from './sandbox-base.js';
 import { defined } from './defined.js';
 
 /**
