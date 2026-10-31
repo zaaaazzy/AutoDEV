@@ -109,6 +109,30 @@ test('Ist-Referenz: unter 5 Aufträgen der engsten Gruppe gilt der Median der Ka
   });
 });
 
+test('Ist-Referenz: Bereichsanzahl und Schrittklasse zusammen, sonst nur die Bereichsanzahl', async () => {
+  const order = (hours: number, files: number, steps: number) => ({
+    hours,
+    tokens: hours * 1_000_000,
+    description: withFiles(files),
+    steps,
+  });
+  const rows = [
+    ...[0.1, 0.2, 0.3, 0.4, 0.5].map((hours) => order(hours, 1, 8)),
+    ...[2, 3, 4].map((hours) => order(hours, 1, 15)),
+  ];
+  const small = await loadActualReference(donePool(rows).pool, 'p', 'backend', { areas: '1', stepClass: 'small' });
+  assert.equal(small?.count, 5);
+  assert.equal(small?.stepClass, 'small');
+  assert.equal(small?.medianHours, 0.3);
+  assert.ok(small);
+  assert.match(referenceSection(small), /1 betroffener Bereich, bis 10 Schritte: Median 0,3 h/);
+  // Nur 3 Aufträge mit 11 bis 20 Schritten: Rückfall auf die Bereichsanzahl (alle 8), ohne Schrittklasse.
+  const medium = await loadActualReference(donePool(rows).pool, 'p', 'backend', { areas: '1', stepClass: 'medium' });
+  assert.equal(medium?.count, 8);
+  assert.equal(medium?.areas, '1');
+  assert.equal(medium?.stepClass, undefined);
+});
+
 test('Ist-Referenz: Idee ohne Art nur mit feature-Aufträgen, Art bug nur mit bug-Aufträgen', async () => {
   const { pool, queries } = donePool([{ hours: 1, tokens: 10, description: 'x' }]);
   assert.equal((await loadActualReference(pool, 'p', null, {}))?.kind, 'feature');

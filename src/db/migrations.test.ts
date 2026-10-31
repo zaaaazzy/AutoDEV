@@ -142,7 +142,7 @@ test('Migration 25: Bereiche umschreiben, Kollisionen zusammenführen, Altbestan
       [report],
     );
 
-    assert.deepEqual(await runMigrations(client), [25, 26]);
+    assert.deepEqual(await runMigrations(client), [25, 26, 27]);
     const rows = (
       await client.query(
         `SELECT area, unit_tests AS unit, passed, lines, branches FROM test_coverage_areas
@@ -245,7 +245,7 @@ test('Migrationen 24 und 25: Altbestand wird zugeordnet, bereinigt, abgesichert;
       for (const label of LEGACY_LABELS) await area(await report(label, '2026-09-01T10:00:00Z'), label, 50, 50, 50);
 
       // 24 schreibt über die Zuordnungstabelle um; nach 23 ist alles schon zugeordnet, es ändert sich nichts.
-      assert.deepEqual(await runMigrations(client), [24, 25, 26]);
+      assert.deepEqual(await runMigrations(client), [24, 25, 26, 27]);
 
       const rows = async (id: string) =>
         (await client.query('SELECT area, lines FROM test_coverage_areas WHERE report_id = $1 ORDER BY area', [id]))
