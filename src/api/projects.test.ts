@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool } from 'pg';
-import { encryptProjectSecrets, parseProductionSettings, registerProjectRoutes } from './projects.js';
+import { registerProjectRoutes } from './projects.js';
+import { parseProductionSettings } from './project-input.js';
+import { encryptProjectSecrets } from '../db/project-repository.js';
 import type { Principal } from './roles.js';
 import { requiredRole } from './route-table.test.js';
 import { serveRoutes } from './serve-routes.test.js';
