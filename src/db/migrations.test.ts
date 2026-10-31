@@ -99,6 +99,14 @@ test('Migrationen: Budget je Rolle kommt per Migration auch in bestehende Datenb
   assert.match(migration?.sql ?? '', /ADD COLUMN IF NOT EXISTS budget_blocked_role/);
 });
 
+test('Migrationen: Gegenprobe je Auftrag kommt per Migration, nicht über das eingefrorene Basis-Schema', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 28);
+  assert.equal(migration?.name, 'gegenprobe-je-auftrag');
+  assert.match(migration?.sql ?? '', /ALTER TABLE development_items ADD COLUMN IF NOT EXISTS counter_check JSONB/);
+  assert.match(migration?.sql ?? '', /counter_check IS NULL OR/);
+  assert.doesNotMatch(SCHEMA, /counter_check/);
+});
+
 test('Migration 25: Zuordnungstabelle enthält genau die Schreibweisen aus COVERAGE_AREA_ALIASES', () => {
   const migration = MIGRATIONS.find((step) => step.version === 25);
   assert.equal(migration?.name, 'coverage-feste-bereiche');
@@ -142,7 +150,7 @@ test('Migration 25: Bereiche umschreiben, Kollisionen zusammenführen, Altbestan
       [report],
     );
 
-    assert.deepEqual(await runMigrations(client), [25, 26, 27]);
+    assert.deepEqual(await runMigrations(client), [25, 26, 27, 28]);
     const rows = (
       await client.query(
         `SELECT area, unit_tests AS unit, passed, lines, branches FROM test_coverage_areas
@@ -245,7 +253,7 @@ test('Migrationen 24 und 25: Altbestand wird zugeordnet, bereinigt, abgesichert;
       for (const label of LEGACY_LABELS) await area(await report(label, '2026-09-01T10:00:00Z'), label, 50, 50, 50);
 
       // 24 schreibt über die Zuordnungstabelle um; nach 23 ist alles schon zugeordnet, es ändert sich nichts.
-      assert.deepEqual(await runMigrations(client), [24, 25, 26, 27]);
+      assert.deepEqual(await runMigrations(client), [24, 25, 26, 27, 28]);
 
       const rows = async (id: string) =>
         (await client.query('SELECT area, lines FROM test_coverage_areas WHERE report_id = $1 ORDER BY area', [id]))

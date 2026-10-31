@@ -400,6 +400,29 @@
         </ul>
       </details>
     }
+    @if (counterCheck(); as check) {
+      <details class="run-step order-brief counter-check" open>
+        <summary>Gegenprobe ohne Fix</summary>
+        <ul class="changed-file-list">
+          @for (file of check.files; track file.path) {
+            <li [class]="'counter-check-' + file.result">
+              {{ file.path }}: <strong>{{ counterCheckLabels[file.result] }}</strong>
+              @if (file.result === 'passes') {
+                <span class="muted"> – der Test beweist den Fix nicht (grün auch vor dem Fix).</span>
+              } @else if (file.detail) {
+                <span class="muted"> – {{ file.detail }}</span>
+              }
+            </li>
+          }
+          @if (check.error) {
+            <li class="counter-check-error">
+              <strong>{{ counterCheckLabels.error }}</strong
+              ><span class="muted"> – {{ check.error }}</span>
+            </li>
+          }
+        </ul>
+      </details>
+    }
     @if (item.analysis && !embedded()) {
       <details class="run-step order-brief">
         <summary>Analyse des Assistenten</summary>

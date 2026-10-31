@@ -601,6 +601,17 @@ export const MIGRATIONS: readonly Migration[] = [
         CHECK (kind IN ('feature', 'bug'));
     `,
   },
+  // Gegenprobe nach Bugfixes: neue Tests auf dem Stand vor dem Fix (Ergebnis je Testdatei). NULL = keine Gegenprobe;
+  // bestehende Aufträge bleiben unverändert (keine rückwirkende Prüfung). Im Auftrag als Version 19 geplant; 19–27
+  // belegte inzwischen Sprint 30, darum Version 28.
+  {
+    version: 28,
+    name: 'gegenprobe-je-auftrag',
+    sql: `
+      ALTER TABLE development_items ADD COLUMN IF NOT EXISTS counter_check JSONB
+        CHECK (counter_check IS NULL OR jsonb_typeof(counter_check) = 'object');
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;
