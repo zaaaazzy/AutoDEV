@@ -1,4 +1,4 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import type { AcceptanceCheck, DevelopmentItem, Estimate } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
@@ -6,6 +6,8 @@ import { ConfirmService, type ConfirmOptions } from '../../core/confirm.service.
 import { GitGuardService } from '../../core/git-guard.service.js';
 import { retryComment } from '../../shared/attention-card.js';
 import { numberOrNull, type FormValues } from '../../shared/forms.js';
+import { exclusive } from '../sprints/sprint-actions.js';
+import { approveAllFlow, approvedMessage } from './approve-all.js';
 
 function estimateValues(values: FormValues): Estimate {
   return {
@@ -23,6 +25,8 @@ export class OrderService {
   private readonly store = inject(ProjectStore);
   private readonly confirm = inject(ConfirmService);
   private readonly gitGuard = inject(GitGuardService);
+  /** Sammelabnahme läuft (ab dem Klick, auch während der Rückfrage): gilt für „Aktionen“ und das Sprintmenü. */
+  readonly approving = signal(false);
 
   /** Jede Aktion auf einem Auftrag erst nach Rückfrage im globalen Dialog; ohne Kommentarfeld. */
   private async sure(options: Omit<ConfirmOptions, 'withoutComment'>): Promise<boolean> {
@@ -204,6 +208,33 @@ export class OrderService {
     await this.store.perform(
       () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/approve`, answer.body),
       'Freigegeben – wird gleich gemergt.',
+    );
+  }
+
+  /**
+   * „Alle abnehmen“: eine Rückfrage mit Anzahl und Titeln, dann eine Anfrage für alle – im Sprint (`sprintId`) für
+   * dessen wartende Umsetzungen, sonst (Seite „Aktionen“) für genau die genannten. Die Meldung nennt die Anzahl, die
+   * der Server tatsächlich abgenommen hat. `approving` sperrt alle Knöpfe „Alle abnehmen“ bis zum Ende, auch nach
+   * Abbruch oder Fehler wird sie im finally gelöst.
+   */
+  async approveAll(items: DevelopmentItem[], sprintId: string | null): Promise<void> {
+    const path = sprintId
+      ? `/api/sprints/${encodeURIComponent(sprintId)}/approve`
+      : `${this.api.projectPath(this.store.activeProject())}/approve`;
+    let approved = 0;
+    await exclusive(this.approving, () =>
+      approveAllFlow(
+        items,
+        (options) => this.gitGuard.confirmAction('approve', options, 'Trotzdem alle abnehmen'),
+        (guard) =>
+          this.store.perform(
+            async () => {
+              const body = sprintId ? guard : { ...guard, ids: items.map((item) => item.id) };
+              approved = (await this.api.post<{ approved: number }>(path, body)).approved;
+            },
+            () => approvedMessage(approved, items.length),
+          ),
+      ),
     );
   }
 

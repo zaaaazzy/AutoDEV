@@ -18,6 +18,7 @@ import { actionHint } from './action-hints.js';
 import { needsVisual } from '../development/needs-visual.js';
 import { OrderDetailSlotDirective, OrderTableComponent } from '../development/order-table.component.js';
 import { OrderService } from '../development/order.service.js';
+import { awaitsApproval } from '../sprints/sprint-actions.js';
 import { AcceptanceReviewComponent } from './acceptance-review.component.js';
 import { RunningPanelComponent } from './running-panel.component.js';
 
@@ -186,6 +187,17 @@ export class ActionsComponent {
 
   protected approve(item: DevelopmentItem): Promise<void> {
     return this.orders.approve(item);
+  }
+
+  /** „Alle abnehmen“: Umsetzungen, deren Karte auf die Freigabe wartet und die noch nicht abgenommen sind. */
+  protected readonly waitingApprovals = computed(() =>
+    this.items().filter((item) => this.entryOf(item.id)?.card.step === 'approve' && awaitsApproval(item)),
+  );
+  /** Läuft eine Sammelabnahme (auch aus dem Sprintmenü), sind alle Knöpfe „Alle abnehmen“ gesperrt. */
+  protected readonly approving = this.orders.approving;
+
+  protected approveAll(): Promise<void> {
+    return this.orders.approveAll(this.waitingApprovals(), null);
   }
 
   protected reject(item: DevelopmentItem): Promise<void> {

@@ -395,6 +395,7 @@ Jeder dieser Knöpfe (und „Erneut versuchen“, „Sprintvorschlag übernehmen
 | Sprint → Live schalten                             | Sprint `completed` (bzw. `review` im PR-Modus), `git_sync` pending | Arbeitszyklus, Schritt 1: Test-Gate, Merge, Tag, Push, Deploy (`goLive`)      |
 | Sprint / Auftrag → ▶ Review-Container              | `review_slots` requested                 | Review-Takt 5 s (`reviewSlots.sync()`)                                                 |
 | Auftrag → Freigeben / Zurückweisen                 | `review_approved_at` bzw. Status `planned` | Arbeitszyklus, Schritt 4 (`processApprovals`)                                         |
+| Aktionen / Sprint → Alle abnehmen                  | `review_approved_at` für alle wartenden (`POST /api/projects/:slug/approve` bzw. `/api/sprints/:id/approve`) | ein `pg_notify`, dann Arbeitszyklus, Schritt 4 (Merge nacheinander) |
 | Bug → Für Agents freigeben                         | `bugs.approved_at` (`POST /api/bugs/:id/approve`) | Arbeitszyklus: der Behebungsauftrag darf starten                              |
 | Bug → Rollback bestätigen                          | `production_rollbacks` requested         | Heartbeat 15 s (`processRollback`), sobald kein Agent und kein Deploy läuft             |
 | Dashboard → Git-Hinweis → Lösung ausführen         | `git_fix_requests`                       | Heartbeat 15 s (`processGitFix`)                                                        |

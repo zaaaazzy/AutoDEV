@@ -19,8 +19,10 @@ import {
   TokensPipe,
   UsdPipe,
 } from '../../shared/pipes.js';
-import { exclusive, sprintButtons } from './sprint-actions.js';
+import { OrderService } from '../development/order.service.js';
+import { awaitsApproval, exclusive, sprintButtons } from './sprint-actions.js';
 import { SprintOrdersComponent } from './sprint-orders.component.js';
+import { SprintRequestsComponent } from './sprint-requests.component.js';
 import { sprintReviewable } from './review-launch.js';
 import { orderSprint } from './sprint-phases.js';
 import { SprintReviewComponent } from './sprint-review.component.js';
@@ -38,6 +40,7 @@ import { defined } from '../../../../../src/core/defined.js';
     GitTreeComponent,
     NavIconComponent,
     SprintOrdersComponent,
+    SprintRequestsComponent,
     SprintReviewComponent,
     DurationPipe,
     HoursPipe,
@@ -53,6 +56,7 @@ export class SprintDetailComponent {
   private readonly api = inject(ApiService);
   private readonly gitGuard = inject(GitGuardService);
   private readonly auth = inject(AuthService);
+  private readonly orders = inject(OrderService);
   protected readonly store = inject(ProjectStore);
   /** Sprint-Aktion ab dem Klick bis zur Antwort (auch während der Rückfrage): sperrt die Knöpfe gegen Doppelklick. */
   private readonly acting = signal(false);
@@ -78,6 +82,18 @@ export class SprintDetailComponent {
     const sprintId = this.sprintInput().id;
     return orderSprint(this.store.data().development.filter((item) => item.sprintId === sprintId));
   });
+
+  /** Register unter dem Sprint: „Aufträge“ (Standard) oder „Anfragen“ (Umsetzungen in Freigabe). */
+  protected readonly tab = signal<'orders' | 'requests'>('orders');
+  /** Wartende Umsetzungen: Zahl im Reiter „Anfragen“ und Umfang von „Alle abnehmen“. */
+  private readonly waiting = computed(() => this.sprintItems().filter(awaitsApproval));
+  protected readonly waitingCount = computed(() => this.waiting().length);
+  /** Läuft eine Sammelabnahme (auch von der Seite „Aktionen“), sind alle Knöpfe „Alle abnehmen“ gesperrt. */
+  protected readonly approving = this.orders.approving;
+
+  protected approveAll(): Promise<void> {
+    return this.orders.approveAll(this.waiting(), this.sprintInput().id);
+  }
 
   protected readonly sprintProgress = computed(() => {
     const orders = this.sprintItems();
