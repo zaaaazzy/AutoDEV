@@ -85,4 +85,4 @@ Diese Aufnahmen fehlen. Sie brauchen eine laufende App mit Testdaten und einem B
 - [`workflow-reihenfolge-nach-einstellungen-ausfuehren-2026-10-29.md`](workflow-reihenfolge-nach-einstellungen-ausfuehren-2026-10-29.md) (Entwicklerdoku zu diesem Auftrag)
 - [`benutzerhandbuch-workflow-umbau-waehrend-lauf.md`](benutzerhandbuch-workflow-umbau-waehrend-lauf.md) (Umbau während eines laufenden Auftrags)
 - [`agenten-per-drag-and-drop-zwischen-phasen-2026-10-28.md`](agenten-per-drag-and-drop-zwischen-phasen-2026-10-28.md) (Verschieben von Schritten im Panel)
-- [`workflows.md`](workflows.md), Abschnitt 4a (Workflow)
+- [`workflows.md`](../workflows.md), Abschnitt 4a (Workflow)

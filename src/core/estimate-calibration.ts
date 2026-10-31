@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { defined } from './defined.js';
 import {
   exceedsEstimate,
   kindOf,
@@ -260,7 +261,7 @@ export async function loadMeasuredOrders(pool: Pick<Pool, 'query'>): Promise<Mea
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+  return sorted.length % 2 ? defined(sorted[middle]) : (defined(sorted[middle - 1]) + defined(sorted[middle])) / 2;
 }
 
 /**

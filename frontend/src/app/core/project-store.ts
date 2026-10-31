@@ -13,7 +13,9 @@ import { isSection, projectFromHash, sectionFromHash, targetFromHash, type Secti
 import { fetchProjectData, keepFailedSections, runningOrdersChanged, runStepFinished } from './project-loader.js';
 import { isFinished } from '../shared/labels.js';
 import { orderAttention } from '../shared/order-attention.js';
+import { sameIds } from './focus-once.js';
 import { visibleInterval } from './visible-interval.js';
+import { defined } from '../../../../src/core/defined.js';
 
 const WORKER_REFRESH_MS = 10_000;
 const LIVE_RUNS_REFRESH_MS = 3_000;
@@ -82,7 +84,10 @@ export class ProjectStore {
   readonly attention = computed(() =>
     orderAttention(this.data().development, this.data().acceptance, this.data().evidence),
   );
-  readonly attentionIds = computed(() => new Set(this.attention().map((entry) => entry.item.id)));
+  /** Bleibt dasselbe Objekt, solange sich die Menge nicht ändert: Effekte daran laufen nicht bei jedem Poll neu. */
+  readonly attentionIds = computed(() => new Set(this.attention().map((entry) => entry.item.id)), {
+    equal: sameIds,
+  });
   readonly openBugCount = computed(
     () => this.data().bugs.filter((bug) => bug.status === 'open' || bug.status === 'in_progress').length,
   );
@@ -162,7 +167,7 @@ export class ProjectStore {
         this.data.set(emptyProjectData());
         return;
       }
-      const slug = projects.some((project) => project.slug === selectedSlug) ? selectedSlug : projects[0]!.slug;
+      const slug = projects.some((project) => project.slug === selectedSlug) ? selectedSlug : defined(projects[0]).slug;
       await this.loadProject(slug);
     } catch (error) {
       this.notice.set(errorMessage(error, 'Projekte konnten nicht geladen werden.'));

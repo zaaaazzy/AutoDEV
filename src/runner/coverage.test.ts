@@ -170,7 +170,10 @@ test('saveCoverage: ungültiger Bericht wird abgelehnt und nicht gespeichert', a
     [area(), area()],
   ]) {
     const fake = fakeClient();
-    await assert.rejects(saveCoverage(fake.pool, 'shop', null, { summary: 'x', areas: broken }), CoverageValidationError);
+    await assert.rejects(
+      saveCoverage(fake.pool, 'shop', null, { summary: 'x', areas: broken }),
+      CoverageValidationError,
+    );
     assert.equal(fake.connected(), false, 'keine Verbindung, nichts geschrieben');
   }
 });

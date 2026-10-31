@@ -1,4 +1,5 @@
 import { escapeHtml, replaceInText } from '../../shared/html.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 /**
  * @-Erwähnungen in Kommentaren: „@“ schlägt Agents und Personen vor, die Auswahl wird als „@Name“ in den Text
@@ -23,7 +24,7 @@ export function findAtTrigger(text: string, caret: number): AtTrigger | null {
   const before = text.slice(0, caret);
   const match = before.match(/(^|\s)@([^\s@]*(?: [^\s@]*)?)$/);
   if (!match) return null;
-  const query = match[2]!;
+  const query = defined(match[2]);
   return { query, start: caret - query.length - 1, end: caret };
 }
 

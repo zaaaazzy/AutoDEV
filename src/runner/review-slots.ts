@@ -7,6 +7,7 @@ import { type CommandExecutor, runCommand } from '../core/command.js';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { sprintBranchOf } from './git-sync.js';
 import { gitEnvironment } from './project-command.js';
+import { defined } from '../core/defined.js';
 
 /**
  * Review-Container: projektübergreifend geteilte Docker-Container, die der Administrator freigibt (einer ist
@@ -266,7 +267,7 @@ export class ReviewSlots {
       )
     ).rows.filter((item) => !shown.has(item.id));
     for (const [index, item] of waiting.slice(0, free.length).entries()) {
-      const slot = free[index]!;
+      const slot = defined(free[index]);
       await update(this.pool, slot.slot, {
         status: 'requested',
         project_slug: item.projectSlug,

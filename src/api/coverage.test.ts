@@ -9,7 +9,14 @@ import { coverageTrend } from './coverage.js';
 test('coverageTrend: je fester Bereich eine Zeitreihe nach Datum, Lücken bleiben null, Altbestand ausgeblendet', () => {
   const trend = coverageTrend([
     { reportId: 'b', createdAt: '2026-10-29T10:00:00Z', area: 'backend', lines: 82, branches: 70, tests: '12' },
-    { reportId: 'a', createdAt: new Date('2026-10-28T10:00:00Z'), area: 'backend', lines: null, branches: 60, tests: 9 },
+    {
+      reportId: 'a',
+      createdAt: new Date('2026-10-28T10:00:00Z'),
+      area: 'backend',
+      lines: null,
+      branches: 60,
+      tests: 9,
+    },
     { reportId: 'a', createdAt: '2026-10-28T10:00:00Z', area: 'Sonstiges', lines: 90, branches: 90, tests: 2 },
   ]);
   assert.deepEqual(
@@ -31,7 +38,9 @@ async function request(method: 'GET' | 'POST', path: string, body?: unknown) {
     if (sql.includes('RETURNING id')) return { rows: [{ id: 'r-1' }], rowCount: 1 };
     if (sql.includes('AS tests')) {
       return {
-        rows: [{ reportId: 'r-1', createdAt: '2026-10-30T08:00:00Z', area: 'gesamt', lines: 80, branches: 70, tests: 5 }],
+        rows: [
+          { reportId: 'r-1', createdAt: '2026-10-30T08:00:00Z', area: 'gesamt', lines: 80, branches: 70, tests: 5 },
+        ],
       };
     }
     return { rows: [], rowCount: 0 };

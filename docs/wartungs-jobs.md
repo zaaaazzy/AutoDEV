@@ -4,12 +4,29 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 
 ## Ablauf
 
+```mermaid
+flowchart TB
+  Z["nach jedem Arbeitszyklus (30 s)<br/>runScheduledJobs"] --> Q["runDueJobs:<br/>fällige aktive Zeilen<br/>FOR UPDATE SKIP LOCKED"]
+  Q --> L["next_run_at + Intervall<br/>locked_until = 330 s<br/>last_status running"]
+  L --> K{"Job-Art in<br/>JOB_KINDS?"}
+  K -->|nein| F1["failed<br/>(nichts aus der DB ausführen)"]:::bad
+  K -->|ja| R["Job mit Zeitlimit<br/>timeoutSeconds, max. 300 s"]:::ok
+  R -->|ok / warning| S["Status, Zeitpunkt,<br/>Meldung in die Zeile"]:::ok
+  R -->|Fehler| F2["failed + Meldung<br/>Zyklus läuft weiter"]:::bad
+  R -->|Zeitlimit| G["Abbruchsignal,<br/>bis 20 s Gnadenfrist"]:::wait
+  G -->|beendet| F2
+  G -->|"läuft noch"| H["failed „läuft noch“,<br/>Sperre bleibt"]:::bad
+  classDef ok fill:#e3f1e8,stroke:#2f8a57,color:#1d4d33
+  classDef bad fill:#fbe9e4,stroke:#b4472f,color:#6b2717
+  classDef wait fill:#fdf1e0,stroke:#e08a1e,color:#5c3a0a
+```
+
 1. `runner-cli.ts` ruft nach jedem Arbeitszyklus (30 s) `runScheduledJobs()` auf, ausserhalb von `runWorkflow`, weil dieses je Projekt läuft.
-2. `runDueJobs` (`src/runner/scheduler.ts`) beansprucht fällige, aktive Zeilen mit `FOR UPDATE SKIP LOCKED`. Dabei setzt es `next_run_at` auf jetzt + Intervall, `locked_until` auf Zeitlimit + Reserve und `last_status` auf `running`. Ein zweiter Worker sieht die Zeile nicht und führt sie nicht doppelt aus.
+2. `runDueJobs` (`src/runner/scheduler.ts`) beansprucht fällige, aktive Zeilen mit `FOR UPDATE SKIP LOCKED`. Dabei setzt es `next_run_at` auf jetzt + Intervall, `locked_until` auf höchstes Zeitlimit + Reserve (330 s) und `last_status` auf `running`. Ein zweiter Worker sieht die Zeile nicht und führt sie nicht doppelt aus.
 3. Die Job-Art wird in der festen Registry `JOB_KINDS` nachgeschlagen. Unbekannte Art: Status `failed`, andere Jobs laufen weiter. Es wird nie ein Pfad oder Befehl aus der Datenbank ausgeführt.
 4. Der Job läuft mit hartem Zeitlimit (`config.timeoutSeconds`, sonst Art-Standard, höchstens 300 s). Status, Zeitpunkt und Meldung werden in die Zeile zurückgeschrieben. Ein Fehler wird gespeichert und bricht weder den Durchgang noch den Worker-Zyklus ab.
    - Beim Zeitlimit bekommt der Job das Abbruchsignal. `runWithTimeout` wartet danach noch bis zu 20 s (`TIMEOUT_GRACE_MS`) auf sein echtes Ende. Erst dann wird `locked_until` freigegeben.
-   - Läuft der Task danach noch, steht der Job als `failed` mit dem Hinweis „läuft noch“. Die Sperre bleibt stehen, und der Worker beansprucht den Job nicht erneut, auch nicht nach Ablauf der Sperre. Im Log steht eine Warnung. Endet der Task, gibt er die Sperre frei, aber nur, wenn sie noch seiner Beanspruchung gehört. Für andere Worker bleibt die Obergrenze die Sperrzeit (Zeitlimit + 30 s).
+   - Läuft der Task danach noch, steht der Job als `failed` mit dem Hinweis „läuft noch“. Die Sperre bleibt stehen, und der Worker beansprucht den Job nicht erneut, auch nicht nach Ablauf der Sperre. Im Log steht eine Warnung. Endet der Task, gibt er die Sperre frei, aber nur, wenn sie noch seiner Beanspruchung gehört. Für andere Worker bleibt die Obergrenze die Sperrzeit (330 s).
 5. Der Durchgang läuft im Hintergrund, höchstens einer gleichzeitig je Worker. Er zählt beim Neustart-Zähler (`busy`) mit und startet nicht mehr, sobald der Worker stoppt.
 
 ## Job-Arten
@@ -18,7 +35,7 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 | ------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
 | `backup_check`      | Neuestes `aideation-*.dump` in `./backups`: jung genug, plausible Grösse und für `pg_restore --list` lesbar (mit Tabellendaten). Fehlender Ordner, fehlendes `pg_restore` oder kaputter Dump = Fehler + Push. | `dir`, `maxAgeHours`, `minBytes`           |
 | `restore_probe`     | Wöchentlich: neuestes Backup mit `scripts/restore.sh --probe` in einen Wegwerf-Container (eigener Name, Port 5439) einspielen, Tabellen und `DEV_LOG_SECRET_KEY` prüfen, Container löschen. | `dir`, `timeoutSeconds` (Standard 300)     |
-| `watchdog_logs`     | Wächter-Probleme (`collectProblems`); gleiche Probleme erst nach `REMIND_MS` (6 h) erneut.               | `project`                                  |
+| `watchdog_logs`     | Wächter-Probleme (`collectProblems`); gleiche Probleme erst nach `REMIND_MS` (6 h) erneut.               | `backupDir`, `localUrl`, `publicUrl`       |
 | `close_old_sprints` | Schliesst über `completeSprint` Sprints, die `sprintSettled` sind und `inactiveDays` inaktiv waren. Standardmässig **aus**. | `inactiveDays` (1–365)                     |
 | `push_alert`        | Push an den Projektkreis über `sendPush`, wenn ein beobachteter Job fehlgeschlagen ist.                  | `project`, `jobs`                          |
 | `bug_categories`    | Einmalig: Kategorie für Bugs mit `category IS NULL` nachtragen (Pfade, sonst lokales Modell). Vorhandene Kategorien bleiben. Fertig = `state.done`. | `timeoutSeconds` (Standard 300)            |
@@ -27,19 +44,19 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 
 - `GET /api/scheduled-jobs` liefert Jobs und die erlaubten Job-Arten.
 - `PATCH /api/scheduled-jobs/:key` ändert `enabled`, `intervalSeconds` (60 s bis 30 Tage), `startAt` und `config` (JSON-Objekt, höchstens 4000 Zeichen). Bei neuem Intervall oder neuer Startzeit wird `next_run_at` ab dem letzten Lauf neu berechnet, frühestens ab der Startzeit.
-- Beide Routen prüfen die Admin-Rolle serverseitig (Deklaration `access({ tenant: 'admin' })` an der Route und zusätzliche Prüfung in der Route, siehe `docs/agents-und-rechte.md`, Abschnitt „Benutzerrollen und Mandanten an den API-Routen“). Nicht-Administratoren erhalten 403.
+- Beide Routen prüfen die Admin-Rolle serverseitig (Deklaration `access({ tenant: 'admin' })` am GET bzw. `access({ role: 'admin', tenant: 'admin' })` am PATCH und zusätzliche Prüfung in der Route, siehe `docs/agents-und-rechte.md`, Abschnitt „Benutzerrollen und Mandanten an den API-Routen“). Nicht-Administratoren erhalten 403.
 - Die Job-Art lässt sich nicht ändern. Eine Oberfläche gibt es nicht.
 
 ## Worauf zu achten ist
 
-- **Backup-Ordner:** Er ist nur im Backup-Container eingebunden. Ist er im Worker nicht sichtbar, meldet `backup_check` einen Fehler mit Push, statt still auszusetzen. Pfad bei Bedarf in `config.dir` setzen (muss im AIdeation-Ordner liegen).
-- **pg_restore im Worker:** `backup_check` ruft `pg_restore --list` auf. Das Programm kommt aus `DEV_LOG_PG_RESTORE` in der `worker.env` oder aus dem PATH, nie aus der Datenbank. Es muss mindestens Version 17 haben, wie der Server. Fehlt es, meldet der Job „pg_restore --list nicht gefunden“ und schickt einen Push.
+- **Backup-Ordner:** `./backups` im AIdeation-Ordner; der Worker sieht ihn auf dem Host und im Container (eingebundener AIdeation-Ordner). Ist er nicht sichtbar, meldet `backup_check` einen Fehler mit Push, statt still auszusetzen. Pfad bei Bedarf in `config.dir` setzen (muss im AIdeation-Ordner liegen).
+- **pg_restore im Worker:** `backup_check` ruft `pg_restore --list` auf. Das Programm kommt aus `DEV_LOG_PG_RESTORE` in der `worker.env` oder aus dem PATH, nie aus der Datenbank. Es muss mindestens Version 17 haben, wie der Server. Fehlt es, meldet der Job „pg_restore --list nicht gefunden“ und schickt einen Push. **Worker im Container:** Das Image `aideation-worker` bringt den Postgres-Client 17 mit (`deploy/worker/Dockerfile`).
 - **Restore-Probe:** Sie braucht `docker` im PATH des Workers, `node_modules` im AIdeation-Ordner und `DEV_LOG_SECRET_KEY` in der `worker.env`. Sie läuft nie gegen die Live-Datenbank oder Port 5433. Die E2E-Tests nutzen die Datenbank `dev_log_e2e`; die Probe läuft getrennt davon. Ein Fehlschlag steht mit der letzten Skriptzeile in der Meldung des Jobs.
 - **Sprint-Abschluss** ändert den Status und ist darum standardmässig deaktiviert. Er schliesst nie einen Sprint mit offenen oder laufenden Aufträgen.
   - `completeSprint` ist idempotent: Der Statuswechsel gilt nur für einen aktiven, nicht pausierten Sprint. War der Sprint schon abgeschlossen, entstehen kein zweiter Bericht, kein zweiter Git-Sync und keine zweite Push-Nachricht.
   - `close_old_sprints` prüft das Abbruchsignal vor jedem Abschluss. Nach dem Zeitlimit wird kein weiterer Sprint geschlossen.
-- **Standardjobs** legt `src/db/schema.ts` idempotent an (`CREATE TABLE IF NOT EXISTS`, `ON CONFLICT (key) DO NOTHING`). Änderungen der Administration bleiben bei einem Neustart erhalten.
-- **Abgestürzter Worker:** Die Sperre `locked_until` läuft nach Zeitlimit + 30 s ab, danach ist der Job wieder beanspruchbar.
+- **Standardjobs:** Alle fünf legt `src/db/schema.ts` idempotent an (`CREATE TABLE IF NOT EXISTS`, `ON CONFLICT (key) DO NOTHING`); Migration 22 (`job-restore-probe`) ergänzt `restore_probe` in bestehenden Datenbanken. Änderungen der Administration bleiben bei einem Neustart erhalten.
+- **Abgestürzter Worker:** Die Sperre `locked_until` läuft nach höchstem Zeitlimit + 30 s (330 s, `LOCK_SECONDS`) ab, danach ist der Job wieder beanspruchbar.
 - `watchdog-cli.ts` und `deploy/backup.sh` sind unverändert. `BACKUP_FILE` ist in `watchdog.ts` jetzt exportiert und wird von beiden Stellen genutzt.
 
 ## Geänderte Dateien
@@ -50,7 +67,7 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 ## Tests und offene Punkte
 
 - Typecheck und 56 Tests (`app`, `roles`, `scheduled-jobs`, `scheduler`, `watchdog`) bestanden.
-- Die Abdeckung von `scheduler.ts` und `scheduled-jobs.ts` ist **nicht gemessen** (der Wächter blockiert `--experimental-test-coverage`).
+- Die Abdeckung misst der Worker selbst (`src/runner/measured-coverage.ts`); die CI misst keine.
 - `npm run lint` läuft ohne Fehler durch (Stand 29.10.2026, nur Warnungen); die früher gemeldeten `no-regex-spaces`-Fehler in `src/core/test-results.test.ts` sind behoben.
 - Ein eigener Test für die idempotente Schema-Anlage fehlt; geprüft nur durch Lesen des Codes.
 - `purgeProductionData` (stündliche Aufbewahrung) wurde nicht in den Scheduler verlegt.

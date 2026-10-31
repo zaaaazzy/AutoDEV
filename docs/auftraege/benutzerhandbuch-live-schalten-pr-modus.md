@@ -60,7 +60,7 @@ Ist eine Bedingung nicht erfüllt, bleibt der Ordner unberührt. Es wird nicht d
 
 ## Verweise
 
-- [`workflows.md`](workflows.md), Abschnitt „GitHub-Brücke (`github_mode`)“ und „Sprint-Ablauf: vom Start bis Live“
+- [`workflows.md`](../workflows.md), Abschnitt „GitHub-Brücke (`github_mode`)“ und „Sprint-Ablauf: vom Start bis Live“
 - [`live-schalten-pr-modus-beide-layouts-2026-10-25.md`](live-schalten-pr-modus-beide-layouts-2026-10-25.md): Auftragsdoku mit Ursache und Tests
 - [`benutzerhandbuch-sprint-branch-beim-start.md`](benutzerhandbuch-sprint-branch-beim-start.md): Sprint-Branch beim Start
 - [`benutzerhandbuch-ci-spiegel-vor-pull-request.md`](benutzerhandbuch-ci-spiegel-vor-pull-request.md): CI-Spiegel, der vor dem Push im PR-Modus läuft (ein roter Schritt verhindert den Pull Request)

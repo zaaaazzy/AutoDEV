@@ -83,8 +83,8 @@ test('Migrationen: Basis-Schema ist eingefroren, Änderungen brauchen eine neue 
   );
 });
 
-test('Migration 25: legt nur den Wartungsjob bug_categories an und ändert keine Bugs', () => {
-  const migration = MIGRATIONS.find((step) => step.version === 25);
+test('Migration 26: legt nur den Wartungsjob bug_categories an und ändert keine Bugs', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 26);
   assert.equal(migration?.name, 'bug-kategorien-nachtragen');
   assert.match(
     migration?.sql ?? '',
@@ -99,8 +99,8 @@ test('Migrationen: Budget je Rolle kommt per Migration auch in bestehende Datenb
   assert.match(migration?.sql ?? '', /ADD COLUMN IF NOT EXISTS budget_blocked_role/);
 });
 
-test('Migration 24: Zuordnungstabelle enthält genau die Schreibweisen aus COVERAGE_AREA_ALIASES', () => {
-  const migration = MIGRATIONS.find((step) => step.version === 24);
+test('Migration 25: Zuordnungstabelle enthält genau die Schreibweisen aus COVERAGE_AREA_ALIASES', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 25);
   assert.equal(migration?.name, 'coverage-feste-bereiche');
   const pairs = Object.fromEntries(
     [...(migration?.sql ?? '').matchAll(/\('([^']+)', '([^']+)'\)/g)].map((match) => [match[1], match[2]]),
@@ -112,7 +112,7 @@ test('Migration 24: Zuordnungstabelle enthält genau die Schreibweisen aus COVER
   assert.match(migration?.sql ?? '', /USING coverage_area_aliases/);
 });
 
-test('Migration 24: Bereiche umschreiben, Kollisionen zusammenführen, Altbestand ohne Zuordnung behalten', async (t) => {
+test('Migration 25: Bereiche umschreiben, Kollisionen zusammenführen, Altbestand ohne Zuordnung behalten', async (t) => {
   const admin = await adminPool(t);
   if (!admin) return;
   const name = `devlog_migr_cov_${process.pid}`;
@@ -121,9 +121,12 @@ test('Migration 24: Bereiche umschreiben, Kollisionen zusammenführen, Altbestan
   const pool = new pg.Pool({ connectionString: databaseUrl(name), max: 1 });
   const client = await pool.connect();
   try {
-    // Stand vor Version 24 mit Altbestand: zwei Schreibweisen für backend im selben Bericht, fehlender Zeilenwert,
-    // ein Bereich ohne Zuordnung. Der CHECK aus Migration 23 wird dafür entfernt (Altbestand vor 23 / Fremddaten).
-    await runMigrations(client, MIGRATIONS.filter((step) => step.version < 24));
+    // Stand vor Version 25 mit Altbestand: zwei Schreibweisen für backend im selben Bericht, fehlender Zeilenwert,
+    // ein Bereich ohne Zuordnung. Der CHECK aus Migration 24 wird dafür entfernt (Altbestand vor 23 / Fremddaten).
+    await runMigrations(
+      client,
+      MIGRATIONS.filter((step) => step.version < 25),
+    );
     assert.equal((await client.query(`SELECT to_regclass('coverage_area_aliases') AS t`)).rows[0].t, null);
     await client.query('ALTER TABLE test_coverage_areas DROP CONSTRAINT test_coverage_areas_area_check');
     await client.query(`INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop')`);
@@ -139,7 +142,7 @@ test('Migration 24: Bereiche umschreiben, Kollisionen zusammenführen, Altbestan
       [report],
     );
 
-    assert.deepEqual(await runMigrations(client), [24, 25]);
+    assert.deepEqual(await runMigrations(client), [25, 26]);
     const rows = (
       await client.query(
         `SELECT area, unit_tests AS unit, passed, lines, branches FROM test_coverage_areas
@@ -155,7 +158,7 @@ test('Migration 24: Bereiche umschreiben, Kollisionen zusammenführen, Altbestan
       { area: 'Sonstiges', unit: 2, passed: 2, lines: 90, branches: 90 },
     ]);
     const versions = (await client.query('SELECT version FROM schema_migrations WHERE version = 24')).rowCount;
-    assert.equal(versions, 1, 'Version 24 vermerkt');
+    assert.equal(versions, 1, 'Version 25 vermerkt');
     // Neue Zeilen nur mit festen Namen; der Altbestand ohne Zuordnung bleibt trotzdem stehen.
     await assert.rejects(
       client.query(`INSERT INTO test_coverage_areas (report_id, area) VALUES ($1, 'Neu')`, [report]),
@@ -171,12 +174,12 @@ test('Migration 24: Bereiche umschreiben, Kollisionen zusammenführen, Altbestan
   }
 });
 
-test('Migrationen: Testabdeckung auf feste Bereichsschlüssel (Schritt 23)', () => {
-  const migration = MIGRATIONS.find((step) => step.version === 23);
+test('Migrationen: Testabdeckung auf feste Bereichsschlüssel (Schritt 24)', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 24);
   assert.equal(migration?.name, 'testabdeckung-feste-bereiche');
   // Sicherung vor dem Löschen, CHECK erst nach dem Bereinigen.
   const sql = migration?.sql ?? '';
-  assert.ok(sql.indexOf('test_coverage_areas_backup_23') < sql.indexOf('DELETE FROM test_coverage_areas'));
+  assert.ok(sql.indexOf('test_coverage_areas_backup_24') < sql.indexOf('DELETE FROM test_coverage_areas'));
   assert.ok(sql.lastIndexOf('DELETE FROM') < sql.indexOf('ADD CONSTRAINT test_coverage_areas_area_check'));
 });
 
@@ -202,7 +205,7 @@ const LEGACY_LABELS = [
   'Gesamtprojekt',
 ];
 
-test('Migrationen 23 und 24: Altbestand wird zugeordnet, bereinigt, abgesichert; zweiter Start ändert nichts', async (t) => {
+test('Migrationen 24 und 25: Altbestand wird zugeordnet, bereinigt, abgesichert; zweiter Start ändert nichts', async (t) => {
   const admin = await adminPool(t);
   if (!admin) return;
   const name = `devlog_migr_coverage_${process.pid}`;
@@ -214,7 +217,7 @@ test('Migrationen 23 und 24: Altbestand wird zugeordnet, bereinigt, abgesichert;
     try {
       await runMigrations(
         client,
-        MIGRATIONS.filter((step) => step.version < 23),
+        MIGRATIONS.filter((step) => step.version < 24),
       );
       await client.query(`INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop')`);
       const report = async (summary: string, createdAt: string) =>
@@ -242,15 +245,11 @@ test('Migrationen 23 und 24: Altbestand wird zugeordnet, bereinigt, abgesichert;
       for (const label of LEGACY_LABELS) await area(await report(label, '2026-09-01T10:00:00Z'), label, 50, 50, 50);
 
       // 24 schreibt über die Zuordnungstabelle um; nach 23 ist alles schon zugeordnet, es ändert sich nichts.
-      assert.deepEqual(await runMigrations(client), [23, 24, 25]);
+      assert.deepEqual(await runMigrations(client), [24, 25, 26]);
 
       const rows = async (id: string) =>
-        (
-          await client.query(
-            'SELECT area, lines FROM test_coverage_areas WHERE report_id = $1 ORDER BY area',
-            [id],
-          )
-        ).rows;
+        (await client.query('SELECT area, lines FROM test_coverage_areas WHERE report_id = $1 ORDER BY area', [id]))
+          .rows;
       assert.deepEqual(await rows(older), [
         { area: 'backend', lines: 70 },
         { area: 'contracts', lines: 90 },
@@ -266,7 +265,7 @@ test('Migrationen 23 und 24: Altbestand wird zugeordnet, bereinigt, abgesichert;
           WHERE r.created_at = '2026-09-01T10:00:00Z'`,
       );
       for (const row of mapped.rows) assert.equal(row.area, coverageAreaKey(row.summary), row.summary);
-      const backup = await client.query('SELECT count(*)::int AS n FROM test_coverage_areas_backup_23');
+      const backup = await client.query('SELECT count(*)::int AS n FROM test_coverage_areas_backup_24');
       assert.equal(backup.rows[0].n, 8 + LEGACY_LABELS.length, 'Sicherung mit allen Altzeilen');
 
       // Jede Zeile hat einen festen Schlüssel; jeder Schlüssel aus dem Code besteht den CHECK, andere nicht.
@@ -297,7 +296,10 @@ test('Migrationen 23 und 24: Altbestand wird zugeordnet, bereinigt, abgesichert;
         [50, 50, 50, 70],
         'nur vollständige Läufe, aufsteigend nach Datum',
       );
-      assert.ok(backend.every((point) => !Number.isNaN(new Date(point.createdAt).getTime())), 'Datum je Punkt');
+      assert.ok(
+        backend.every((point) => !Number.isNaN(new Date(point.createdAt).getTime())),
+        'Datum je Punkt',
+      );
 
       // Zweiter Start: keine Migration, Abdeckungsdaten unverändert.
       const before = (await client.query('SELECT * FROM test_coverage_areas ORDER BY report_id, area')).rows;
@@ -385,4 +387,10 @@ test('Migrationen: frische DB = migrierte Bestands-DB, zweiter Start ändert nic
     for (const name of names) await dropDatabase(admin, name);
     await admin.end();
   }
+});
+
+test('Migrationen: Restore-Probe kommt per Migration auch in bestehende Datenbanken', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 22);
+  assert.match(migration?.sql ?? '', /'restore_probe', TRUE, 604800, 'restore_probe'/);
+  assert.match(migration?.sql ?? '', /ON CONFLICT \(key\) DO NOTHING/);
 });

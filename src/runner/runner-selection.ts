@@ -145,13 +145,26 @@ export async function selectItems(pool: Pool, options: RunnerOptions): Promise<W
   return result.rows;
 }
 
+/**
+ * JSON aus einer Umgebungsvariable; ungültig → Warnung und null. Ein Tippfehler darf keinen Auftrag mitten im Start
+ * werfen lassen (der Auftrag stünde sonst bis zum Neustart auf „In Arbeit“).
+ */
+function envJson(name: string, raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    console.warn(`[runner] ${name} ist kein gültiges JSON – Wert wird ignoriert.`);
+    return null;
+  }
+}
+
 export function defaultAgentCommand(environment: NodeJS.ProcessEnv = process.env): string[] | null {
   const raw = environment.DEV_LOG_AGENT_COMMAND?.trim();
   if (!raw) {
     return null;
   }
   if (raw.startsWith('[')) {
-    const parsed: unknown = JSON.parse(raw);
+    const parsed = envJson('DEV_LOG_AGENT_COMMAND', raw);
     return Array.isArray(parsed) && parsed.every((part) => typeof part === 'string') && parsed.length
       ? (parsed as string[])
       : null;
@@ -181,7 +194,7 @@ export async function loadTestCommands(
   const raw = environment.DEV_LOG_TEST_COMMANDS?.trim();
   return (
     parseTestCommands(stored) ??
-    (raw ? parseTestCommands(JSON.parse(raw)) : null) ?? [
+    (raw ? parseTestCommands(envJson('DEV_LOG_TEST_COMMANDS', raw)) : null) ?? [
       ['npm', 'run', 'build'],
       ['npm', 'test'],
     ]

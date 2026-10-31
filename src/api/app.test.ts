@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import { createDevLogApp } from './app.js';
@@ -19,8 +22,16 @@ const boundUser = {
   credential_version: await credentialVersion(auth, 'scrypt$salz$hash'),
 };
 
+// Attrappe der gebauten Oberfläche: Unit-Tests laufen ohne `build:ui` (CI-Job `check`), kein Test liest `dist/ui`.
+const uiDirectory = mkdtempSync(join(tmpdir(), 'aideation-ui-'));
+writeFileSync(
+  join(uiDirectory, 'index.html'),
+  '<!doctype html><html><head><base href="./" /></head><body><app-root></app-root><script src="main-TEST1234.js" type="module"></script></body></html>',
+);
+writeFileSync(join(uiDirectory, 'main-TEST1234.js'), 'export {};');
+
 async function withServer(pool: Pool, action: (baseUrl: string) => Promise<void>): Promise<void> {
-  const server = createDevLogApp(pool, auth).listen(0, '127.0.0.1');
+  const server = createDevLogApp(pool, auth, uiDirectory).listen(0, '127.0.0.1');
   try {
     await new Promise<void>((resolve) => server.once('listening', resolve));
     const address = server.address() as AddressInfo;

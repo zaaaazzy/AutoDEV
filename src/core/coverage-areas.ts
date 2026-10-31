@@ -1,7 +1,7 @@
 /**
  * Die feste Liste der Abdeckungsbereiche – die einzige Stelle im Code. Speicherung, Messung, Tester-Prompt und Anzeige
  * verwenden nur diese Schlüssel; ein neuer Bereich braucht eine Codeänderung (gewollt). „auftrag“ = Abdeckung des vom
- * Auftrag geänderten Codes, „gesamt“ = das ganze Projekt. Die Migration 24 setzt dieselbe Liste als CHECK auf
+ * Auftrag geänderten Codes, „gesamt“ = das ganze Projekt. Die Migration 25 setzt dieselbe Liste als CHECK auf
  * test_coverage_areas.area (ein Test prüft, dass beide übereinstimmen).
  */
 export const COVERAGE_AREA_KEYS = ['backend', 'frontend', 'contracts', 'scripts', 'e2e', 'gesamt', 'auftrag'] as const;
@@ -25,8 +25,8 @@ export function isCoverageAreaKey(value: unknown): value is CoverageAreaKey {
 
 /**
  * Bekannte Schreibweisen (klein geschrieben, ohne Leerraum am Rand) → fester Bereich. Dieselbe Zuordnung füllt
- * Migration 24 (coverage_area_aliases) und benennt die Messung durch AIdeation (areaName). Neue Schreibweisen nur
- * hier und per neuer Migration ergänzen, Migration 24 nicht ändern.
+ * Migration 25 (coverage_area_aliases) und benennt die Messung durch AIdeation (areaName). Neue Schreibweisen nur
+ * hier und per neuer Migration ergänzen, Migration 25 nicht ändern.
  */
 export const COVERAGE_AREA_ALIASES: Readonly<Record<string, CoverageAreaKey>> = {
   backend: 'backend',
@@ -85,8 +85,8 @@ const BACKEND = word('backend|server|api');
 const FRONTEND = word('frontend|web|ui|client');
 
 /**
- * Reihenfolge wie in der Migration 23: zuerst „gesamt“, dann die Einzelbereiche. Wer Backend und Frontend zusammen
- * meldet, meldet ebenfalls „gesamt“. „auftrag“ kam mit Migration 24 dazu und steht deshalb zuletzt.
+ * Reihenfolge wie in der Migration 24: zuerst „gesamt“, dann die Einzelbereiche. Wer Backend und Frontend zusammen
+ * meldet, meldet ebenfalls „gesamt“. „auftrag“ kam mit Migration 25 dazu und steht deshalb zuletzt.
  */
 const RULES: readonly [CoverageAreaKey, (label: string) => boolean][] = [
   ['gesamt', (label) => GESAMT.test(label) || (BACKEND.test(label) && FRONTEND.test(label))],

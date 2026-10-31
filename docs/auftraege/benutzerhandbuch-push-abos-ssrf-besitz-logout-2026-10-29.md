@@ -105,5 +105,5 @@ Ein fehlgeschlagener Schritt beim Push-Abo verhindert die Anmeldung nie. Die Anm
 ## Verwandte Dokumente
 
 - [Entwicklerdoku zur Änderung](push-abos-ssrf-besitz-logout-2026-10-25.md)
-- [Installation, Abschnitt Zugriff von unterwegs](installation.md)
+- [Installation, Abschnitt Zugriff von unterwegs](../installation.md)
 - [Benutzerhandbuch TOTP- und Push-Schlüssel verschlüsselt](benutzerhandbuch-totp-und-vapid-verschluesselt.md)

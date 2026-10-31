@@ -31,7 +31,7 @@ Unit-Tests aus TAP (`parseTapCases`) tragen jetzt die Testdatei aus `location` (
 
 ## Wartungsjob `bug_categories`
 
-- Angelegt per Migration 25 (`scheduled_jobs`, aktiv, Intervall 1 Tag); Code in `src/runner/bug-category-job.ts`.
+- Angelegt per Migration 26 (`scheduled_jobs`, aktiv, Intervall 1 Tag); Code in `src/runner/bug-category-job.ts`.
 - Liest nur Bugs mit `category IS NULL`, in Stapeln zu 50 nach `id`, und schreibt nur mit `WHERE category IS NULL`. Gesetzte oder von Hand korrigierte Kategorien bleiben, auch wenn die Pfade etwas anderes ergäben.
 - Der Stand (`cursor`, `updated`, `skipped`) steht nach jedem Stapel in `scheduled_jobs.state`; ein Abbruch am Zeitlimit setzt beim nächsten Lauf fort. Am Ende steht `state.done = true`, danach ändert kein Lauf mehr etwas (auch nicht an später angelegten Bugs ohne Kategorie).
 - Bugs, die weder Pfade noch Modell einordnen, bleiben ohne Kategorie und werden nicht erneut versucht.

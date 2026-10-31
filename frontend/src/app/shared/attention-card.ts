@@ -1,6 +1,7 @@
 import type { DevelopmentItem } from '../core/models.js';
 import { canRetryDevelopment } from '../../../../src/core/development-transitions.js';
 import { failureParts, orderGuide } from './order-problem.js';
+import { defined } from '../../../../src/core/defined.js';
 
 /**
  * Was eine Karte unter „Aktionen“ als nächsten Schritt anbietet – genau einer je Auftrag:
@@ -112,7 +113,7 @@ export function blockedReason(item: Pick<CardSource, 'failure' | 'analysis' | 'a
     const parts = failureParts(failure);
     const agent = parts.agent || 'Ein Agent';
     if (parts.unmet.length) {
-      const first = parts.unmet[0]!;
+      const first = defined(parts.unmet[0]);
       const others = parts.unmet.length - 1;
       const more = others ? ` (und ${others} ${others === 1 ? 'weiterer Punkt' : 'weitere Punkte'})` : '';
       return short(`${agent}: Abnahme nicht bestanden – ${first.reason || first.criterion}${more}`);

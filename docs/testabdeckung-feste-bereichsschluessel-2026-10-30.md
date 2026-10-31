@@ -26,11 +26,11 @@
 - **Doku:** `docs/benutzerhandbuch-dashboard-agents.md` angepasst.
 - `gesamt` berechnet der Worker nicht. Die Zeile erscheint nur, wenn ein Lauf sie unter diesem Schlüssel meldet.
 
-**Migration (Version 23)**
+**Migration (Version 24)**
 
-Die Migrationsnummer ist **23, nicht 20** wie im Auftrag. Die Nummern sind fortlaufend. Beim Nachziehen von `sprint/sprint-30` waren die Versionen 19–22 schon belegt (`ein-auftrag-je-idee`, `sprints-projekt-index`, `agent-sandbox-arbeitscontainer`, `testnachweise`). Die Coverage-Migration, auf dem Auftrags-Branch zuerst Version 19, ist deshalb jetzt Version 23. Die Kommentare in `coverage-areas.ts` nennen ebenfalls 23.
+Die Migrationsnummer ist **23, nicht 20** wie im Auftrag. Die Nummern sind fortlaufend. Beim Nachziehen von `sprint/sprint-30` waren die Versionen 19–22 schon belegt (`ein-auftrag-je-idee`, `sprints-projekt-index`, `agent-sandbox-arbeitscontainer`, `testnachweise`). Die Coverage-Migration, auf dem Auftrags-Branch zuerst Version 19, ist deshalb jetzt Version 24. Die Kommentare in `coverage-areas.ts` nennen ebenfalls 23.
 
-1. Sicherung: `test_coverage_areas_backup_23` (`CREATE TABLE IF NOT EXISTS … AS TABLE`).
+1. Sicherung: `test_coverage_areas_backup_24` (`CREATE TABLE IF NOT EXISTS … AS TABLE`).
 2. Alten Constraint entfernen (`DROP CONSTRAINT IF EXISTS`), temporäre Zuordnungstabelle `coverage_area_keys` per `CASE` auf `lower(btrim(area))` mit denselben Regeln und Reihenfolge wie `coverageAreaKey`.
 3. Löschen: Zeilen ohne Zuordnung und Zeilen, bei denen Zeilen-, Statement-, Verzweigungs- und Funktionswert alle `NULL` sind.
 4. Duplikate je (`report_id`, Schlüssel): der höchste Zeilenwert bleibt.
@@ -61,10 +61,10 @@ Der Entwickler hat Tests ergänzt oder angepasst für Zuordnung, Verwerfen, Voll
 
 **Worauf zu achten ist**
 
-- Die Schlüsselliste steht dreifach: `coverage-areas.ts`, CHECK in der Migration, Frontend-Union. Ändert sich eine, müssen alle angepasst werden (neue Migration, die Version 23 nicht ändern). Ein Test in `migrations.test.ts` soll prüfen, dass jeder Schlüssel den Constraint besteht.
+- Die Schlüsselliste steht dreifach: `coverage-areas.ts`, CHECK in der Migration, Frontend-Union. Ändert sich eine, müssen alle angepasst werden (neue Migration, die Version 24 nicht ändern). Ein Test in `migrations.test.ts` soll prüfen, dass jeder Schlüssel den Constraint besteht.
 - Die Zuordnung ist eine Heuristik. Bezeichnungen wie „Projekt“ fallen weg, Altdaten mit mehrdeutigen Namen können dem „falschen“ Schlüssel zugeordnet sein; Verlaufsdaten sind nur so gut wie diese Zuordnung.
 - Fehlt einem Lauf ein Prozentwert (z. B. keine Messung, `null`), wird er nicht still ignoriert: Er wird verworfen und der Grund steht im Schritt-Log. In der Übersicht erscheint ein Schlüssel ohne vollständigen Lauf mit „–“.
-- Die Migration löscht Altzeilen; Wiederherstellung über `test_coverage_areas_backup_23`. Ein zweiter Start führt Migration 23 nicht erneut aus.
+- Die Migration löscht Altzeilen; Wiederherstellung über `test_coverage_areas_backup_24`. Ein zweiter Start führt Migration 24 nicht erneut aus.
 - Mehrere Einträge mit demselben Schlüssel im selben Bericht sind nach der Migration nicht mehr möglich; beim Speichern gilt dieselbe Regel (höchster Zeilenwert).
 - `COVERAGE_TARGET` (75 %) und die Zählung der Testarten sind unverändert.
 
@@ -79,12 +79,12 @@ Der Entwickler hat Tests ergänzt oder angepasst für Zuordnung, Verwerfen, Voll
 - Image `aideation-agent` mit dem korrigierten Dockerfile neu bauen, dann den `node_modules`-Volume des Projekts befüllen (nur nötig, wenn spätere Sandbox-Läufe weiter `tsc: not found` oder `EACCES` melden).
 - Abnahme: `npm run typecheck` und `npm test` im Testschritt bestätigen; die Migration auf einer Datenbank mit Altbestand und einen zweiten Start prüfen.
 - Nach der Migration Übersicht und Statistik im Browser ansehen: je Schlüssel eine Zeile, Datum je Zeile, Verlauf je Schlüssel.
-- Optional später: Sicherungstabelle `test_coverage_areas_backup_23` entfernen, wenn die Zuordnung der Altdaten abgenommen ist.
+- Optional später: Sicherungstabelle `test_coverage_areas_backup_24` entfernen, wenn die Zuordnung der Altdaten abgenommen ist.
 
 ## Technische Dokumentation
 
 - Datenfluss: Tester-Block `@@COVERAGE` und Messung (AIdeation) → `coverageAreaKey` → unbekannt oder ohne Prozentwerte: verwerfen und im Schritt-Log nennen; sonst `test_coverage_areas` (CHECK auf sechs Schlüssel) → Übersicht (neuester vollständiger Lauf je Schlüssel) und Statistik (Verlauf je Schlüssel).
 - Tabellen: `test_coverage_reports` (`id`, `project_slug`, `development_id`, `created_at`) 1:n `test_coverage_areas` (`report_id`, `area`, `lines`, `statements`, `branches`, `functions`, Testzählungen).
 - API: `GET /projects/:slug/coverage`, `GET /projects/:slug/coverage/history` (beide `access({ tenant: 'project' })`, nur lesend).
-- Code: `src/core/coverage-areas.ts`, `src/runner/coverage.ts`, `src/runner/measured-coverage.ts`, `src/runner/runner-steps.ts`, `src/api/coverage.ts`, `src/agent/visionary.ts`, `src/db/migrations.ts` (Version 23), `frontend/src/app/features/dashboard/coverage-panel.component.*`, `frontend/src/app/features/stats/`.
+- Code: `src/core/coverage-areas.ts`, `src/runner/coverage.ts`, `src/runner/measured-coverage.ts`, `src/runner/runner-steps.ts`, `src/api/coverage.ts`, `src/agent/visionary.ts`, `src/db/migrations.ts` (Version 24), `frontend/src/app/features/dashboard/coverage-panel.component.*`, `frontend/src/app/features/stats/`.
 - Benutzerhandbuch: `docs/benutzerhandbuch-dashboard-agents.md`.

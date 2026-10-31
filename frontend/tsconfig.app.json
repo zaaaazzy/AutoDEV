@@ -22,7 +22,10 @@
     "../src/core/development-transitions.ts",
     "../src/core/estimate-overrun.ts",
     "../src/core/sprint-rules.ts",
-    "../src/core/coverage-areas.ts"
+    "../src/core/coverage-areas.ts",
+    "../src/core/shared-types.ts",
+    "../src/core/status.ts",
+    "../src/core/defined.ts"
   ],
   "exclude": ["src/**/*.spec.ts"]
 }

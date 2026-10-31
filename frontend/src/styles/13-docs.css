@@ -12,7 +12,7 @@
   margin-bottom: 20px;
   padding: 13px;
   border-radius: 9px;
-  background: #f7f8f5;
+  background: var(--surface-muted);
 }
 .doc-link {
   display: block;
@@ -56,7 +56,7 @@
   font-weight: 650;
 }
 .book-toggle:hover {
-  border-color: #a9c2b1;
+  border-color: var(--success-border);
   background: #f0f5f1;
 }
 .book-toggle svg {
@@ -102,8 +102,8 @@
 }
 .search-hit:hover,
 .search-hit.selected {
-  border-color: #b9d3c3;
-  background: #f6fbf8;
+  border-color: var(--success-border-soft);
+  background: var(--success-surface-faint);
 }
 .search-hit-head {
   justify-content: space-between;
@@ -158,14 +158,14 @@
   height: 8px;
   margin-left: 6px;
   border-radius: 50%;
-  background: #e08a1e;
+  background: var(--accent-orange);
   vertical-align: 1px;
 }
 .revision-card {
   display: grid;
   gap: 8px;
   padding: 14px 16px;
-  border: 1px solid #f1d8b5;
+  border: 1px solid var(--notice-border);
   border-radius: 14px;
   background: #fffaf3;
 }
@@ -206,7 +206,7 @@
   color: #1e5c33;
 }
 .diff-removed {
-  background: #fbe9e6;
+  background: var(--error-soft-alt);
   color: #8a2f1c;
   text-decoration: line-through;
   text-decoration-color: rgb(138 47 28 / 40%);
@@ -246,8 +246,8 @@
   color: var(--green-light);
 }
 .history-rejected .history-status {
-  background: #fbe9e6;
-  color: #a33d26;
+  background: var(--error-soft-alt);
+  color: var(--error-text-deep);
 }
 .history-pending .history-status {
   background: var(--warn-soft);
@@ -379,7 +379,7 @@ a.doc-link {
     padding: 10px 12px;
     border: 1px solid var(--line);
     border-radius: 12px;
-    background: #f7f8f5;
+    background: var(--surface-muted);
     color: var(--ink);
     font-weight: 700;
     text-align: left;

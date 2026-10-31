@@ -118,7 +118,7 @@ Erfüllt der Punkt diese Bedingungen, steht im Hinweis zusätzlich „(Abdeckung
 ### Bereichsnamen ändern oder ergänzen
 
 - Die Liste steht genau einmal in `COVERAGE_AREA_KEYS` (`src/core/coverage-areas.ts`). Ein neuer Bereich braucht eine Codeänderung. Das ist so gewollt.
-- Bekannte Schreibweisen stehen in `COVERAGE_AREA_ALIASES` (gleiche Datei). Eine neue Schreibweise kommt dort hinein und zusätzlich per neuer Migration in die Tabelle `coverage_area_aliases`. Die Migration 24 nicht ändern.
+- Bekannte Schreibweisen stehen in `COVERAGE_AREA_ALIASES` (gleiche Datei). Eine neue Schreibweise kommt dort hinein und zusätzlich per neuer Migration in die Tabelle `coverage_area_aliases`. Die Migration 25 nicht ändern.
 
 ## Fehlerbehebung
 
@@ -145,7 +145,7 @@ Diese Punkte sind im Code noch nicht eindeutig entschieden:
 
 1. **Teilmeldungen:** Die Anforderung verlangt Werte für alle Bereiche. Der Validator prüft aber nur die Bereiche, die gemeldet werden. Heute werden Berichte mit nur einem gemessenen Bereich gespeichert. Entscheidung nötig: Pflicht für alle Bereiche, oder nur gemessene Bereiche.
 2. **Anzahl der Bereiche:** Der Auftrag nennt sechs Bereiche, der Code führt sieben (mit `contracts`). Entscheidung nötig: `contracts` bleibt, oder der Auftrag und diese Anleitung werden auf sechs angepasst.
-3. **Migrationsnummer:** Der Auftrag nennt Version 20. Die Versionen 20 bis 23 sind im Code belegt; die Migration für Bereichsnamen und Zuordnung ist Version 24 (`coverage_area_aliases`). Der Auftragstext sollte angepasst werden.
+3. **Migrationsnummer:** Der Auftrag nennt Version 20. Die Versionen 20 bis 24 sind im Code belegt; die Migration für Bereichsnamen und Zuordnung ist Version 25 (`coverage_area_aliases`). Der Auftragstext sollte angepasst werden.
 4. **Oberflächentest:** `full-ui.check.ts` prüft die neue Statistik-Ansicht (geladen, kein Ladefehler, kein Filterhinweis im Leertext). Der Lauf selbst ist noch nicht bestätigt, weil die Umgebung keinen Browser hat.
 5. **Testlauf:** Typecheck und Tests konnten in der Agent-Umgebung nicht laufen (`tsc`/`tsx` nicht gefunden, npm-Cache nicht beschreibbar). Vor dem Mergen `npm run typecheck` und `npm test` in einer Umgebung mit installierten Abhängigkeiten ausführen.
 6. **Ladezustand ohne Projekt (im Code geprüft, nicht im Browser gesehen):** Ohne aktives Projekt zeigt die Ansicht „Kein Projekt ausgewählt.“ und lädt nichts.

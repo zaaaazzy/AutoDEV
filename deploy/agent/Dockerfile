@@ -62,7 +62,8 @@ COPY --from=guard /out/agent-guard.mjs /out/egress-proxy.mjs /out/visual-capture
 # ESM-Bündel lösen „playwright“ über node_modules neben sich auf: dort liegen die global installierten Pakete.
 RUN ln -s /usr/local/lib/node_modules /opt/aideation/node_modules
 # Ohne root: Der Container läuft mit der UID des Worker-Benutzers (--user), die hier keinen Eintrag hat. Home und
-# Arbeitsordner sind darum für alle beschreibbar; der Container ist kurzlebig (--rm), nichts bleibt liegen.
+# Arbeitsordner sind darum für alle beschreibbar. Nichts darin darf root gehören (der globale npm install oben legte
+# sonst ~/.npm als root an, und jedes npm der Agents scheiterte mit EACCES).
 RUN mkdir -p /home/agent /workspace && chmod 1777 /home/agent /workspace
 USER pwuser
 WORKDIR /workspace

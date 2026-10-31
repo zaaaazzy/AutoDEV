@@ -95,6 +95,25 @@ export const ENVIRONMENT_TODO =
  */
 export const GIT_FOLDER_TODO = 'Arbeitsordner aufräumen (Git)';
 
+/**
+ * Arbeitscontainer bzw. Sandbox kaputt (npm-Cache gehört root, Abhängigkeiten nicht installierbar, Befehl fehlt im
+ * Image, Container unter dem Lauf erneuert): kein Fehler im Auftrag. Jeder weitere Auftrag des Projekts liefe in dieselbe
+ * Wand – Bug-Berichte, Problemanalysen und Wiederholungen kosten dann nur Tokens.
+ */
+const SANDBOX_PATTERNS = [
+  /^(?:Sandbox|Arbeitscontainer): /m,
+  /Your cache folder contains root-owned files/,
+  /npm error Log files were not written due to an error writing to the directory/,
+  /Error response from daemon: (?:No such (?:exec instance|container)|Container \S+ is not running)/i,
+];
+export const SANDBOX_TODO =
+  'Arbeitscontainer bzw. Sandbox defekt – reparieren, dann den Auftrag erneut starten (kein Fehler im Code)';
+
+export function isSandboxFailure(output: string): boolean {
+  const tail = output.slice(-3000);
+  return SANDBOX_PATTERNS.some((pattern) => pattern.test(tail));
+}
+
 /** Ein Agent hat wegen einer Projektregel (Do's and Don'ts) abgelehnt: „@@REGEL: <Regel>“. */
 export function ruleRefusal(output: string): string | null {
   return output.match(/^\s*@@REGEL:\s*(.+)$/m)?.[1]?.trim() || null;
@@ -129,12 +148,16 @@ export function failureDetail(output: string): string | null {
 export async function registerFailure(pool: Pool, item: FailedItem, agentName: string, output: string): Promise<void> {
   const tail = output.trim().slice(-3000) || 'Keine Ausgabe vorhanden.';
   const detail = failureDetail(output) ?? tail;
-  // Umgebung (Laufwerk weg) und Projektregeln sind keine Code-Fehler: kein Bug-Auftrag, sondern „Aktion notwendig“.
+  // Umgebung (Laufwerk weg, Arbeitscontainer defekt) und Projektregeln sind keine Code-Fehler: kein Bug-Auftrag und
+  // keine Problemanalyse, sondern „Aktion notwendig“.
   const rule = ruleRefusal(output);
-  if (rule || isEnvironmentFailure(tail)) {
+  const sandbox = !rule && isSandboxFailure(tail);
+  if (rule || sandbox || isEnvironmentFailure(tail)) {
     const todo = rule
       ? `Projektregel verhindert den Auftrag: ${rule} – Auftrag anpassen oder verwerfen`
-      : ENVIRONMENT_TODO;
+      : sandbox
+        ? SANDBOX_TODO
+        : ENVIRONMENT_TODO;
     // Verstoss gegen eine Projektregel: Status „abgelehnt“ (ein Bug-Auftrag lehnt per Trigger auch den Bug ab).
     await pool.query(
       `UPDATE development_items SET failure = $2, auto_run = FALSE${rule ? `, status = '${DEVELOPMENT_STATUS.rejected}'` : ''} WHERE id = $1`,

@@ -15,7 +15,7 @@ Die Liste zeigt **jeden Agent des Projekts genau einmal**, aktiv oder inaktiv. J
 | **Rollen-Icon** | Symbol passend zur Rolle. Der Alternativtext (Tooltip) nennt die Rolle, z. B. „Rolle: Entwickler“. |
 | **Name** | Name des Agents. Bei eingebauten Rollen steht die Rolle nicht doppelt daneben. |
 | **Rolle** | Deutsche Bezeichnung, z. B. „Entwickler“, „Tester“, „Eigene Rolle“. Dashboard-Assistent und Visionär tragen ihre eigene Bezeichnung. |
-| **Rechte-Chips** | „Dateien ändern: ja/nein“ und „Befehle: ja/nein“. Sie stammen aus der Rechte-Tabelle in [`agents-und-rechte.md`](agents-und-rechte.md), Abschnitt 3. |
+| **Rechte-Chips** | „Dateien ändern: ja/nein“ und „Befehle: ja/nein“. Sie stammen aus der Rechte-Tabelle in [`agents-und-rechte.md`](../agents-und-rechte.md), Abschnitt 3. |
 | **Hinweis „je nach Befehl“** | Erscheint nur, wenn die Rechte vom Befehl abhängen (Claude-CLI oder lokales Modell). Der Chip zeigt dann den Standardwert der Rolle. |
 | **Aufgabe** | Kurze Zeile unter dem Namen (siehe Abschnitt 1.1). |
 | **■ Abbrechen** | Erscheint nur bei einem **aktiven** Agent (außer beim Dashboard-Assistenten). Bricht den laufenden Lauf ab. |
@@ -148,7 +148,7 @@ Der zweite und dritte Zustand sind verschieden. „Keine offenen Aufträge“ he
   - **Neubau:** Danach `docker compose up -d --build`. Scheitert er, läuft AIdeation mit dem bisherigen Stand weiter.
   - **Gesundheitsprüfung:** Nach dem Neubau prüft der Worker bis zu 2 Minuten, ob AIdeation antwortet. Wenn nicht, kehrt er auf das vorherige Abbild zurück und schickt eine Push-Nachricht. Der Worker startet sich dann nicht neu.
   - **Erfolg:** Der Worker startet neu und lädt dabei den neuen Code und die neuen Agents. Das Menü zeigt danach den Abschluss des Neustarts.
-  - **Unter Windows:** Der Worker startet über `scripts\run-with-env.ps1` neu, das nach dem Beenden 5 Sekunden wartet und dann weiterläuft. Bewusste Stopps und Fehler starten den Worker nicht neu. Ob der Worker nach einem Neustart innerhalb von 30 Sekunden wieder läuft, ist auf einem echten Windows-Rechner noch nicht geprüft. Ältere Installationen brauchen einmal `scripts\install-worker.ps1` (siehe [`installation.md`](installation.md), Abschnitt „Neustart unter Windows“).
+  - **Unter Windows:** Der Worker startet über `scripts\run-with-env.ps1` neu, das nach dem Beenden 5 Sekunden wartet und dann weiterläuft. Bewusste Stopps und Fehler starten den Worker nicht neu. Ob der Worker nach einem Neustart innerhalb von 30 Sekunden wieder läuft, ist auf einem echten Windows-Rechner noch nicht geprüft. Ältere Installationen brauchen einmal `scripts\install-worker.ps1` (siehe [`installation.md`](../installation.md), Abschnitt „Neustart unter Windows“).
   - **Neustart hängt:** Bleibt der Status auf „restarting“, kommt der Worker nicht zurück. Ein neuer Neustart ist erst 10 Minuten nach dem Beginn möglich. Bis dahin meldet AIdeation „Ein Neustart läuft bereits.“
 
 ---
@@ -157,7 +157,7 @@ Der zweite und dritte Zustand sind verschieden. „Keine offenen Aufträge“ he
 
 | Beobachtung | Ursache und was zu tun ist |
 | --- | --- |
-| Agent zeigt „Worker offline“ | Der Worker läuft nicht. Prüfe den Worker-Dienst auf dem Host (siehe [`laufzeit.md`](laufzeit.md)). |
+| Agent zeigt „Worker offline“ | Der Worker läuft nicht. Prüfe den Worker-Dienst auf dem Host (siehe [`laufzeit.md`](../laufzeit.md)). |
 | Ein Agent fehlt in der Liste | Der Agent gehört zu einem anderen Projekt oder ist nicht angelegt. Prüfe, ob das richtige Projekt aktiv ist. |
 | Rechte-Chip zeigt „nein“, der Agent darf aber Befehle ausführen | Das Chip zeigt den Standardwert der Rolle. Der Befehl des Agents (Claude-CLI oder lokales Modell) kann abweichen. Der Hinweis „je nach Befehl“ weist darauf hin. |
 | Agent-Lauf meldet „ist für Agents gesperrt – Dateien mit den Datei-Werkzeugen anlegen und ändern, mit „git rm <pfad>“ löschen …“ | Der Befehl enthält einen Dateibefehl wie `rm`, `mv`, `cp`, `sed` oder `touch` (siehe Abschnitt 3). Der Agent muss die Änderung über die Datei-Werkzeuge machen, Löschen über `git rm` und Umbenennen über `git mv`. Ändert sich ein eigener Agent-Befehl oder eine Routine, den Befehl umstellen oder den Schritt entfernen. Die Meldung nennt den Teilbefehl, der gesperrt ist. |
@@ -169,7 +169,7 @@ Der zweite und dritte Zustand sind verschieden. „Keine offenen Aufträge“ he
 | „AIdeation neu starten“ endet mit „fehlgeschlagen“ und dem Hinweis „Nicht neu gebaut: … Nicht committete Änderungen …“ oder „Im AIdeation-Ordner ist „…“ ausgecheckt, live gehen darf nur „…““ | Der AIdeation-Ordner ist nicht bereit für den Live-Stand. Änderungen committen oder verwerfen bzw. den erlaubten Branch auschecken (`main` oder der Branch in `DEV_LOG_RESTART_BRANCH`). Danach den Neustart erneut anfordern. |
 | „AIdeation neu starten“ steht auf „restarting“, und der Worker läuft nicht wieder (Windows) | Die Aufgabe `AIdeationWorker` startet den Worker nach dem Beenden nur über `run-with-env.ps1`. Ist dieses Skript nicht mehr die Startdatei der Aufgabe (ältere Installation), führe `scripts\install-worker.ps1` einmal erneut aus. Ein Stopp per Hand oder ein Fehler startet den Worker nicht neu, dann die Aufgabe in der Aufgabenplanung manuell starten. Nach 10 Minuten lässt sich der Neustart erneut anfordern. |
 | Agent-Start, Freigabe oder Sprint-Sync per API endet mit 403, obwohl die Adresse stimmt (auch mit Schrägstrich am Ende) | Die Sitzung hat nur die Rolle „Planung“. Starten, Freigeben und Git-Sync brauchen „Ausführen“ (siehe `agents-und-rechte.md`, Abschnitt 6.1). Ein anderer Pfad oder ein Schrägstrich hilft nicht. |
-| Review-Slot zeigt „failed“ mit der Meldung „Kein Review-DB-User eingerichtet (DEV_LOG_REVIEW_DATABASE_URL …)“ | Nur für Administratoren. Der Review-Container bekommt keine Haupt-Zugänge. Ohne eigenen Review-DB-User startet er nicht. Lösung: `bash scripts/setup-review-db.sh` ausführen, den ausgegebenen Wert als `DEV_LOG_REVIEW_DATABASE_URL` setzen und den Worker neu installieren (siehe [`laufzeit.md`](laufzeit.md)). |
+| Review-Slot zeigt „failed“ mit der Meldung „Kein Review-DB-User eingerichtet (DEV_LOG_REVIEW_DATABASE_URL …)“ | Nur für Administratoren. Der Review-Container bekommt keine Haupt-Zugänge. Ohne eigenen Review-DB-User startet er nicht. Lösung: `bash scripts/setup-review-db.sh` ausführen, den ausgegebenen Wert als `DEV_LOG_REVIEW_DATABASE_URL` setzen und den Worker neu installieren (siehe [`laufzeit.md`](../laufzeit.md)). |
 | Review-Slot zeigt „failed“ mit „Der Review-DB-User muss ein eigener User …“ oder „DEV_LOG_REVIEW_DATABASE_URL braucht User, Passwort …“ | Nur für Administratoren. Die Review-URL zeigt auf die Haupt-Datenbank oder ist unvollständig. Eine eigene Basis-Datenbank (z. B. `aideation_review`) mit eigenem User und Passwort eintragen. |
 | Test- oder Coverage-Schritt zeigt „Abdeckung nicht gemessen: Vorbereitungsschritt „…“ im test-Skript … ist nicht erlaubt“ | Die Tests laufen trotzdem. Nur die Messung entfällt, weil das `test`-Skript einen Vorbereitungsschritt enthält, der nicht erlaubt ist (erlaubt: `npm run`, `npm ci`, `tsc`, `ng build`, `vite build`). Kein Fehler des Auftrags. Abhilfe: Testbefehl je Auftrag mit `npx tsx --test <Dateien>` verwenden, dann misst AIdeation direkt. |
 | Tester-Schritt zeigt „Abnahme nicht bestanden“ mit „DoD … : nicht geprüft“, obwohl alle Tests grün sind | Der Tester hat diesen Punkt der Definition of Done in seinem Ergebnis ausgelassen. Ein ausgelassener Punkt zählt nie als erfüllt. Die Anweisung an den Tester nennt deshalb die Zahl der Punkte und ein Beispiel mit jeder Nummer. Punkte, die nur ein Mensch erledigen kann (z. B. „Abgenommen wird per Freigabe in der Vorschau“), meldet der Tester als manuell. Sie blockieren den Auftrag nicht und erscheinen unter „Von dir zu prüfen“. Abhilfe: Auftrag erneut versuchen. |
@@ -207,8 +207,8 @@ Dieser Abschnitt betrifft keinen Bildschirm, sondern das Verhalten des Workers b
 **Testabdeckung, feste Bereiche:**
 - `gesamt` rechnet AIdeation nicht aus den anderen Bereichen zusammen. Die Zeile erscheint, wenn ein Lauf sie meldet oder die eigene Messung im Projektordner sie liefert. Die frühere Summenzeile (Mittelwert) gibt es nicht mehr.
 - **Dashboard und Statistik:** Anzeige, Bedienung und Fehlerbehebung stehen in Abschnitt 5.6.
-- **Altbestand, Migration 23:** ordnet bestehende Einträge einmalig per Ganzwort-Heuristik den Schlüsseln zu. Einträge ohne Prozentwerte oder ohne Zuordnung werden gelöscht. Gibt es in einem Bericht mehrere Einträge für denselben Schlüssel, bleibt der mit dem höchsten Zeilenwert. Vorher sichert sie die Tabelle in `test_coverage_areas_backup_23`.
-- **Altbestand, Migration 24:** legt die Zuordnungstabelle `coverage_area_aliases` mit den bekannten Schreibweisen an, schreibt Bereichsnamen darüber um und führt Einträge desselben Berichts für denselben Bereich zusammen (Tests summiert, Prozentwerte gemittelt, fehlende Werte bleiben fehlend). Einträge ohne Zuordnung bleiben unverändert; gelöscht wird nichts. Neue Einträge sind nur noch mit festem Bereich möglich.
+- **Altbestand, Migration 24:** ordnet bestehende Einträge einmalig per Ganzwort-Heuristik den Schlüsseln zu. Einträge ohne Prozentwerte oder ohne Zuordnung werden gelöscht. Gibt es in einem Bericht mehrere Einträge für denselben Schlüssel, bleibt der mit dem höchsten Zeilenwert. Vorher sichert sie die Tabelle in `test_coverage_areas_backup_24`.
+- **Altbestand, Migration 25:** legt die Zuordnungstabelle `coverage_area_aliases` mit den bekannten Schreibweisen an, schreibt Bereichsnamen darüber um und führt Einträge desselben Berichts für denselben Bereich zusammen (Tests summiert, Prozentwerte gemittelt, fehlende Werte bleiben fehlend). Einträge ohne Zuordnung bleiben unverändert; gelöscht wird nichts. Neue Einträge sind nur noch mit festem Bereich möglich.
 
 **Testläufe mit eigenem Datenbank-Passwort:** Ein Testlauf, den du unter **Testläufe** anforderst, und der Komplettlauf (`npm run test:full`) funktionieren auch dann, wenn du in der `.env` ein eigenes `DEV_LOG_DB_PASSWORD` hast, zum Beispiel vom Einrichtungs-Assistenten erzeugt.
 - Der Worker gibt diesen Befehlen nur `DEV_LOG_DATABASE_URL` mit, dazu das Admin-Ziel `E2E_ADMIN_DATABASE_URL` (Datenbank `postgres`, gleicher Zugang). Secret Key und alle anderen `DEV_LOG_*`-Werte fehlen dort.
@@ -278,7 +278,7 @@ Die Testabdeckung zeigt, wie viel des Codes die Tests erreichen. Sie wird je **B
 - **Vollständiger Lauf:** Für Dashboard und „Testabdeckung-Verlauf“ müssen zusätzlich die Funktionsabdeckung gesetzt sein. Ein Bereich ohne Funktionsabdeckung wird gespeichert, erscheint im Dashboard aber als „kein vollständiger Lauf“. In „Testabdeckung im Verlauf“ (Zeilen und Zweige) erscheint er.
 - **Verworfene Berichte:** Unbekannte Bereiche (z. B. „Projekt“ oder „Backend (Express)“), doppelte Bereiche, `null`-Werte und Bereiche ohne Tests verwerfen den Bericht des Testers. Der Verlauf des Schritts nennt den Grund, etwa „Testabdeckung des Testers verworfen: Bereich „Projekt“ unbekannt (erlaubt: backend, frontend, contracts, scripts, e2e, gesamt, auftrag).“ Die eigene Messung von AIdeation wird trotzdem gespeichert.
 - **Zuordnung ist ganzwortbasiert:** „builder“ ist kein „ui“. Gesamt hat Vorrang: Wer Backend und Frontend zusammen meldet, bekommt `gesamt`.
-- **Altbestand:** Die Migrationen 23 und 24 haben bestehende Einträge einmalig den Bereichen zugeordnet (siehe Abschnitt 5). Der Verlauf älterer Läufe ist nur so gut wie diese Zuordnung. Die Originaldaten vor Migration 23 bleiben in der Tabelle `test_coverage_areas_backup_23` erhalten.
+- **Altbestand:** Die Migrationen 25 und 25 haben bestehende Einträge einmalig den Bereichen zugeordnet (siehe Abschnitt 5). Der Verlauf älterer Läufe ist nur so gut wie diese Zuordnung. Die Originaldaten vor Migration 24 bleiben in der Tabelle `test_coverage_areas_backup_24` erhalten.
 - **Keine Neuberechnung:** Die Zählungen alter Läufe werden nicht neu berechnet. Fehlende Werte werden nicht nachgeholt.
 - **Ziel bleibt bei 75 %:** Das Ziel ist unverändert. Es beeinflusst nur die Farben und die Ziellinie, nicht das Speichern.
 
@@ -626,7 +626,7 @@ Die Analyse läuft im Chat-Takt des Workers (etwa alle 1,5 s). Sie nimmt jeweils
 | Ergebnis der Analyse | Folge |
 | --- | --- |
 | Antwort mit Titel und Ursache, kein Bug-Bericht zum Auftrag vorhanden | Ein Bug mit Schwere „hoch“ und Quelle „Agent“ wird angelegt. Gibt es im Projekt schon einen Bug mit demselben Titel, entsteht kein zweiter. Die Analyse steht im Auftrag unter „Analyse“. Ein Behebungsauftrag entsteht hier nicht. |
-| Antwort mit Titel und Ursache, Bug-Bericht zum Auftrag existiert schon (vom gescheiterten Agent) | Die Analyse ergänzt diesen Bug in den Fix-Notizen und legt keinen zweiten an. Ist die Zeile „AKTION“ leer („keine“), wird der Bug an die Behebung delegiert: Der Bug-Auftrag entsteht nur, wenn `auto_bugfix` am Projekt aktiv ist (siehe [`workflows.md`](workflows.md)). |
+| Antwort mit Titel und Ursache, Bug-Bericht zum Auftrag existiert schon (vom gescheiterten Agent) | Die Analyse ergänzt diesen Bug in den Fix-Notizen und legt keinen zweiten an. Ist die Zeile „AKTION“ leer („keine“), wird der Bug an die Behebung delegiert: Der Bug-Auftrag entsteht nur, wenn `auto_bugfix` am Projekt aktiv ist (siehe [`workflows.md`](../workflows.md)). |
 | Zeile „AKTION: …“ mit einem Menschen-Schritt (z. B. „API-Schlüssel in .env eintragen“) | Der Auftrag zeigt „Aktion notwendig“ mit dem Schritt und wartet darauf. Gibt es einen Bug-Bericht zum Auftrag, bekommt er den Vermerk „Kein Code-Fehler“. Es entsteht in jedem Fall kein Behebungsauftrag. |
 | Antwort zu kurz (unter 60 Zeichen) oder Analyse mit Fehler | Die Analyse gilt als fehlgeschlagen. Der Text „Analyse fehlgeschlagen: …“ erscheint unter der Analyse, es entsteht kein Bug. Danach kannst du erneut analysieren lassen. |
 | Worker wird während der Analyse beendet | Die Analyse wird wieder als „angefordert“ eingetragen und beim nächsten Start neu ausgeführt. |
@@ -678,14 +678,14 @@ Auf der Sprintseite lassen sich offene und abgebrochene Aufträge in den Sprint 
 - **Mehrere:** Haken setzen. Oben erscheint „N ausgewählt“ mit „→ In den Sprint (N)“ und „Auswahl aufheben“.
 - **Nach der Übernahme:** Der Auftrag verschwindet aus der Liste. Die übrige Auswahl bleibt markiert.
 - **Sperre:** Während eine Aktion läuft, sind die Schaltflächen gesperrt.
-- **Wohin:** Ein übernommener Auftrag landet in der Auftragsliste des Sprints als „geplant“. Er wird in der angezeigten Reihenfolge abgearbeitet. Ob er sofort startet, hängt davon ab, ob der Sprint aktiv ist (siehe [`laufzeit.md`](laufzeit.md)).
+- **Wohin:** Ein übernommener Auftrag landet in der Auftragsliste des Sprints als „geplant“. Er wird in der angezeigten Reihenfolge abgearbeitet. Ob er sofort startet, hängt davon ab, ob der Sprint aktiv ist (siehe [`laufzeit.md`](../laufzeit.md)).
 
 [Bild 13: Sprint mit geöffneter Liste, zwei markierten Aufträgen und Leiste „2 ausgewählt“]
 
 ### 11.4 Grenzen
 
 - **Nur der Sprint in der Ansicht:** Die Liste bietet Aufträge für den Sprint an, den du gerade öffnest.
-- **Keine Filter nach Status:** Die Liste zeigt alle verfügbaren Aufträge. Aufträge im Status „Freigabe“ ohne Sprint erscheinen ebenfalls, lassen sich aber nicht übernehmen, weil laufende Arbeit nicht umgehängt wird. Ein Filter fehlt noch (siehe [`workflows.md`](workflows.md)).
+- **Keine Filter nach Status:** Die Liste zeigt alle verfügbaren Aufträge. Aufträge im Status „Freigabe“ ohne Sprint erscheinen ebenfalls, lassen sich aber nicht übernehmen, weil laufende Arbeit nicht umgehängt wird. Ein Filter fehlt noch (siehe [`workflows.md`](../workflows.md)).
 - **Inzwischen eingeplant:** Ein Auftrag, der nach dem Markieren schon in einem Sprint gelandet ist, fällt aus der Auswahl heraus.
 
 ### 11.5 Fehlerbehebung
@@ -1741,9 +1741,9 @@ Einzelheiten stehen im Entwicklerbericht [`bugs-sprintzuordnung-laufende-auftrae
 - [`befehlsregeln-allowlist-wrapper-2026-10-25.md`](befehlsregeln-allowlist-wrapper-2026-10-25.md): Entwicklerbericht zu Abschnitt 20 (Allowlist, Wrapper, Builtins)
 - [`auftrag-anlegen-nur-backlog-planned-2026-10-25.md`](auftrag-anlegen-nur-backlog-planned-2026-10-25.md): Entwicklerbericht zu Abschnitt 23 (Anlegen nur mit Backlog oder Geplant, offene Tests)
 - [`erneut-versuchen-nur-planbare-sprints-2026-10-25.md`](erneut-versuchen-nur-planbare-sprints-2026-10-25.md): Entwicklerbericht zu Abschnitt 24 (Ziel-Sprint, Umbuchen in einem Schritt, offene Tests)
-- [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
-- [`workflows.md`](workflows.md): Ablauf der Agents im Auftrag
-- [`laufzeit.md`](laufzeit.md): Worker und Betrieb
-- [`installation.md`](installation.md): HTTPS und Push-Dienste bei eigener Domain
+- [`agents-und-rechte.md`](../agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
+- [`workflows.md`](../workflows.md): Ablauf der Agents im Auftrag
+- [`laufzeit.md`](../laufzeit.md): Worker und Betrieb
+- [`installation.md`](../installation.md): HTTPS und Push-Dienste bei eigener Domain
 - [`push-abos-ssrf-besitz-logout-2026-10-25.md`](push-abos-ssrf-besitz-logout-2026-10-25.md): Entwicklerbericht zu Abschnitt 18 (Ursache, Umsetzung, offener Test)
 - [`fremdtexte-ingest-chat-verweise-untrusted-2026-10-25.md`](fremdtexte-ingest-chat-verweise-untrusted-2026-10-25.md): Entwicklerbericht zu Abschnitt 21 (Fremdtext im Prompt, Chat-Verweise, offene Tests)

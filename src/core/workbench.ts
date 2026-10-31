@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
 import {
@@ -32,6 +32,7 @@ import {
   sandboxProblem,
   sandboxUser,
 } from './sandbox.js';
+import { defined } from './defined.js';
 
 /**
  * Arbeitscontainer je Projekt (Schalter DEV_LOG_AGENT_SANDBOX bzw. projects.agent_sandbox = „workbench“, Standard):
@@ -146,7 +147,7 @@ export function mainCheckout(worktree: string): string {
   try {
     const text = readFileSync(marker, 'utf8');
     const match = /^gitdir:\s*(.+?)[\\/]\.git[\\/]worktrees[\\/][^\\/]+\s*$/m.exec(text);
-    return match ? match[1]! : worktree;
+    return match ? defined(match[1]) : worktree;
   } catch {
     return worktree;
   }
@@ -287,11 +288,20 @@ export function workbenchHash(compose: Record<string, unknown>): string {
 
 /** Ablage der Compose-Dateien (Konfiguration des Workers, nicht im Projekt und nicht für Agents erreichbar). */
 export function workbenchDirectory(environment: NodeJS.ProcessEnv = process.env): string {
-  return environment.DEV_LOG_WORKBENCH_DIR?.trim() || join(homedir(), '.config', 'aideation', 'workbench');
+  const configured = environment.DEV_LOG_WORKBENCH_DIR?.trim();
+  if (configured) return configured;
+  // Tests schreiben nie in die echte Konfiguration des Workers.
+  if (environment.NODE_TEST_CONTEXT) return join(tmpdir(), 'aideation-workbench-test');
+  return join(homedir(), '.config', 'aideation', 'workbench');
 }
 
 const failed = (error: unknown): CommandResult => ({ exitCode: 1, durationMs: 0, output: String(error) });
-const ready = new Map<string, Promise<string | null>>();
+/**
+ * Zuletzt gestarteter Fingerabdruck je Projekt. Je Projekt gibt es nur einen Stapel: Ein Schlüssel „Name:Hash“ hielte
+ * einen früheren Stand (z. B. den Agent-Worktree) für bereit, nachdem das Merge-Gate den Stapel mit dem Ordner der
+ * Menschen neu erstellt hat – der nächste Agent hätte dann dort gearbeitet.
+ */
+const ready = new Map<string, { hash: string; pending: Promise<string | null> }>();
 
 /**
  * Startet den Stapel, falls er fehlt oder seine Konfiguration veraltet ist (Label mit dem Fingerabdruck). Liefert ein
@@ -305,16 +315,17 @@ export function ensureWorkbench(
   const compose = workbenchCompose(worktree, options);
   const hash = workbenchHash(compose);
   const name = workbenchName(options.project);
-  const key = `${name}:${hash}`;
-  let pending = ready.get(key);
-  if (!pending) {
-    pending = startWorkbench(docker, worktree, options, compose, hash).then((problem) => {
-      if (problem) ready.delete(key);
+  const cached = ready.get(name);
+  if (cached?.hash === hash) return cached.pending;
+  const entry = {
+    hash,
+    pending: startWorkbench(docker, worktree, options, compose, hash).then((problem) => {
+      if (problem && ready.get(name) === entry) ready.delete(name);
       return problem;
-    });
-    ready.set(key, pending);
-  }
-  return pending;
+    }),
+  };
+  ready.set(name, entry);
+  return entry.pending;
 }
 
 /** Nur für Tests: vergisst gestartete Stapel. */
@@ -349,7 +360,8 @@ async function startWorkbench(
   try {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const labelled = structuredClone(compose) as { services: Record<string, { labels?: Record<string, string> }> };
-    labelled.services.workbench!.labels = { ...labelled.services.workbench!.labels, [WORKBENCH_HASH_LABEL]: hash };
+    const service = defined(labelled.services.workbench, 'Dienst workbench');
+    service.labels = { ...service.labels, [WORKBENCH_HASH_LABEL]: hash };
     writeFileSync(file, `${JSON.stringify(labelled, null, 2)}\n`, { mode: 0o600 });
   } catch (error) {
     return `Arbeitscontainer: Compose-Datei liess sich nicht schreiben (${file}). ${String(error)}`;
@@ -477,7 +489,7 @@ export async function runInWorkbench(
       const installed = await install;
       if (installed.exitCode !== 0) {
         const message = `Arbeitscontainer: Abhängigkeiten liessen sich nicht installieren (Exit-Code ${installed.exitCode}). Befehl nicht gestartet.\n${installed.output.trim().slice(-800)}`;
-        noteProblem(options.project, message.split('\n')[0]!);
+        noteProblem(options.project, defined(message.split('\n')[0]));
         return blocked(message, redactWith);
       }
     }
@@ -496,7 +508,7 @@ export async function runInWorkbench(
         name,
         'sh',
         '-c',
-        `p=$(cat ${file} 2>/dev/null) && kill -TERM -- -"$p" 2>/dev/null; rm -f ${file}`,
+        `p=$(cat ${file} 2>/dev/null) && kill -TERM -"$p" 2>/dev/null; rm -f ${file}`,
       ],
       worktree,
       { timeoutMs: KILL_TIMEOUT_MS, env },
@@ -525,17 +537,47 @@ export async function runInWorkbench(
   };
 }
 
-/** Beendet den Stapel eines Projekts (Compose-Projekt aus der abgelegten Datei); Volumes bleiben. */
-export async function stopWorkbench(
-  project: string,
-  worktree: string,
+/**
+ * Beendet alle Läufe eines Vorgängers in den Arbeitscontainern (Prozessgruppen aus den pid-Dateien), zuerst mit TERM,
+ * nach ein paar Sekunden mit KILL. Nötig beim Start des Workers: killPreviousProcesses beendet nur den Client von
+ * „docker exec“ auf dem Rechner, der Prozess im Container (Agent, Test, npm) liefe sonst neben dem neu eingeplanten
+ * Lauf im selben Worktree weiter. Gruppe 1 (sleep infinity, hält den Container) wird nie angefasst.
+ */
+export async function stopLeftoverWorkbenchRuns(
   docker: CommandExecutor = runCommand,
-): Promise<CommandResult> {
-  const name = workbenchName(project);
-  const file = join(workbenchDirectory(), `${name}.json`);
-  if (!existsSync(file)) return { exitCode: 0, durationMs: 0, output: 'Kein Arbeitscontainer.\n' };
-  return docker(['docker', 'compose', '-f', file, '-p', name, 'down'], worktree, {
-    timeoutMs: COMPOSE_TIMEOUT_MS,
-    env: dockerClientEnvironment(),
-  }).catch(failed);
+  cwd: string = process.cwd(),
+): Promise<number> {
+  const env = dockerClientEnvironment();
+  const list = await docker(['docker', 'ps', '--filter', `label=${WORKBENCH_LABEL}`, '--format', '{{.Names}}'], cwd, {
+    timeoutMs: CHECK_TIMEOUT_MS,
+    env,
+  }).catch(() => null);
+  if (!list || list.exitCode !== 0) return 0;
+  const containers = list.output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^agents_[a-z0-9-]+_workbench$/.test(line));
+  const script = [
+    'groups=""',
+    'for f in /tmp/aideation-run-*.pid; do',
+    '  [ -f "$f" ] || continue',
+    '  p=$(cat "$f" 2>/dev/null); rm -f "$f"',
+    '  case "$p" in ""|*[!0-9]*) continue;; esac',
+    '  [ "$p" -gt 1 ] || continue',
+    '  kill -TERM -"$p" 2>/dev/null && groups="$groups $p"',
+    'done',
+    '[ -n "$groups" ] || exit 0',
+    'sleep 3',
+    'for p in $groups; do kill -KILL -"$p" 2>/dev/null; done',
+    'echo $groups | wc -w',
+  ].join('\n');
+  let stopped = 0;
+  for (const container of containers) {
+    const result = await docker(['docker', 'exec', container, 'sh', '-c', script], cwd, {
+      timeoutMs: KILL_TIMEOUT_MS + 5_000,
+      env,
+    }).catch(() => null);
+    if (result?.exitCode === 0) stopped += Number.parseInt(result.output.trim(), 10) || 0;
+  }
+  return stopped;
 }

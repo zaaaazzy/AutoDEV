@@ -57,7 +57,9 @@ export function orderAttention(
       if (item.removedFromSprintAt && !isFinished(item.status)) {
         reasons.push({ label: `Aus Sprint „${item.removedFromSprint ?? '?'}“ genommen`, tone: 'info' });
       }
-      const checks = manual.get(item.id) ?? [];
+      // Von Hand prüfen lässt sich erst, was umgesetzt ist: geplante oder laufende Aufträge warten noch nicht auf dich.
+      const testable = item.status === 'done' || (item.status === 'approval' && !item.reviewApprovedAt);
+      const checks = testable ? (manual.get(item.id) ?? []) : [];
       if (checks.length && !item.actionTodo) {
         const open = checks.length;
         reasons.push({ label: `${open} Punkt${open === 1 ? '' : 'e'} von dir zu prüfen`, tone: 'warn' });

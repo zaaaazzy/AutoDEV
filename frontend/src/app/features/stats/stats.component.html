@@ -47,7 +47,13 @@
               role="img"
               [attr.aria-label]="'Verlauf der Zeilenabdeckung ' + series.label"
             >
-              <line class="coverage-history-target" x1="0" [attr.x2]="chart.width" [attr.y1]="chart.target" [attr.y2]="chart.target" />
+              <line
+                class="coverage-history-target"
+                x1="0"
+                [attr.x2]="chart.width"
+                [attr.y1]="chart.target"
+                [attr.y2]="chart.target"
+              />
               <path class="coverage-history-line" [attr.d]="series.path" />
               @for (point of series.points; track point.createdAt) {
                 <circle class="coverage-history-point" [attr.cx]="point.x" [attr.cy]="point.y" r="4.5">
@@ -190,7 +196,9 @@
     <div class="section-heading">
       <div>
         <h2>Schätzfehler je Sprint</h2>
-        <p class="muted">Median Ist ÷ Schätzung der erledigten Aufträge, ältester Sprint zuerst (1× = genau geschätzt)</p>
+        <p class="muted">
+          Median Ist ÷ Schätzung der erledigten Aufträge, ältester Sprint zuerst (1× = genau geschätzt)
+        </p>
       </div>
     </div>
     @for (row of estimateTrend(); track $index) {
@@ -202,8 +210,8 @@
         <div class="bar-track"><span [style.width.%]="row.width"></span></div>
         <small class="muted">
           @if (row.errorSamples) {
-            Laufzeit {{ errorText(row.hourError) }} · Tokens {{ errorText(row.tokenError) }} ·
-            {{ row.errorSamples }} {{ row.errorSamples === 1 ? 'Auftrag' : 'Aufträge' }} gemessen
+            Laufzeit {{ errorText(row.hourError) }} · Tokens {{ errorText(row.tokenError) }} · {{ row.errorSamples }}
+            {{ row.errorSamples === 1 ? 'Auftrag' : 'Aufträge' }} gemessen
           } @else {
             Kein Schätzfehler: noch keine erledigten Aufträge mit Messung
           }

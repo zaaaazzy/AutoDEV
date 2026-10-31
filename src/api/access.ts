@@ -2,6 +2,7 @@ import type { NextFunction, RequestHandler, Router } from 'express';
 import type { Pool } from 'pg';
 import { missingRole, ROLE_INFO, type Principal, type RoleRule } from './roles.js';
 import { allowedProjects, projectOfTenant, type Tenant } from './tenancy.js';
+import { defined } from '../core/defined.js';
 
 /**
  * Rechte einer Route, deklariert direkt bei der Route:
@@ -59,7 +60,7 @@ function compile(path: string, strict: boolean): RouteEntry['match'] | null {
   const parts = path.split('/').map((part) => {
     const param = /^:([A-Za-z_]\w*)$/.exec(part);
     if (param) {
-      keys.push(param[1]!);
+      keys.push(defined(param[1]));
       return '([^/]+)';
     }
     return /^[\w.-]*$/.test(part) ? part.replace(/\./g, '\\.') : null;
@@ -70,7 +71,7 @@ function compile(path: string, strict: boolean): RouteEntry['match'] | null {
   return (candidate) => {
     const found = pattern.exec(candidate);
     if (!found) return null;
-    return Object.fromEntries(keys.map((key, index) => [key, found[index + 1]!]));
+    return Object.fromEntries(keys.map((key, index) => [key, defined(found[index + 1])]));
   };
 }
 

@@ -444,11 +444,22 @@ export const MIGRATIONS: readonly Migration[] = [
         CHECK (agent_sandbox IN ('off', 'docker', 'workbench'));
     `,
   },
+  // Wöchentliche Restore-Probe: der Job stand nur im Basis-Schema (Version 1) und fehlte deshalb in bestehenden
+  // Datenbanken; die Probe lief dort nie (Logikprüfung vom 30.10.2026).
+  {
+    version: 22,
+    name: 'job-restore-probe',
+    sql: `
+      INSERT INTO scheduled_jobs (key, enabled, interval_seconds, job_kind, config)
+        VALUES ('restore_probe', TRUE, 604800, 'restore_probe', '{"dir": "backups"}')
+        ON CONFLICT (key) DO NOTHING;
+    `,
+  },
   // Offene Testnachweise (@@NACHWEIS von Tester und Dokumentierer): je Auftrag und Befehl eine Zeile. Ein Mensch
   // startet den Befehl unter „Aktion notwendig“ als Projekttestlauf (test_requests mit Umfang „befehl“). Die Prüfung
   // des Umfangs behält jeden Wert, den der Code schreibt ('full', 'ui'), sonst scheitert sie an bestehenden Zeilen.
   {
-    version: 22,
+    version: 23,
     name: 'testnachweise',
     sql: `
       CREATE TABLE IF NOT EXISTS test_evidence (
@@ -476,12 +487,12 @@ export const MIGRATIONS: readonly Migration[] = [
   // zeigte fast gleiche Namen mit widersprüchlichen Werten. Zuordnung wie coverageAreaKey (Ganzwort, „gesamt“ zuerst);
   // Zeilen ohne Prozentwerte oder ohne Zuordnung fallen weg, je Bericht und Schlüssel bleibt der höchste Zeilenwert.
   // Vorher eine Sicherung der Tabelle; die Berichte selbst bleiben als Verlauf erhalten. Im Auftrag als Version 20
-  // geplant; die Versionen 19–22 belegte inzwischen Sprint 30, darum Version 23.
+  // geplant; die Versionen 19–22 belegte inzwischen Sprint 30, darum Version 24.
   {
-    version: 23,
+    version: 24,
     name: 'testabdeckung-feste-bereiche',
     sql: `
-      CREATE TABLE IF NOT EXISTS test_coverage_areas_backup_23 AS TABLE test_coverage_areas;
+      CREATE TABLE IF NOT EXISTS test_coverage_areas_backup_24 AS TABLE test_coverage_areas;
       ALTER TABLE test_coverage_areas DROP CONSTRAINT IF EXISTS test_coverage_areas_area_check;
 
       CREATE TEMP TABLE coverage_area_keys ON COMMIT DROP AS
@@ -515,14 +526,14 @@ export const MIGRATIONS: readonly Migration[] = [
         CHECK (area IN ('backend', 'frontend', 'contracts', 'scripts', 'e2e', 'gesamt'));
     `,
   },
-  // Auftrag „Feste Coverage-Bereiche mit Pflichtwerten“ (geplant als Version 20; 20–23 belegte inzwischen Sprint 30):
+  // Auftrag „Feste Coverage-Bereiche mit Pflichtwerten“ (geplant als Version 20; 20–24 belegte inzwischen Sprint 30 bzw. main):
   // Zuordnungstabelle der bekannten Schreibweisen (COVERAGE_AREA_ALIASES in src/core/coverage-areas.ts) und neuer
   // Bereich „auftrag“. Bestehende Bereichsnamen werden über die Zuordnung umgeschrieben; mehrere Einträge eines
   // Berichts, die auf denselben Bereich zeigen, werden vorher zusammengeführt (Testzahlen summiert, Prozentwerte
   // gemittelt, NULL bleibt NULL), damit der Primärschlüssel (report_id, area) nicht kollidiert. Einträge ohne Zuordnung
   // bleiben unverändert; nichts wird gelöscht. Der CHECK gilt deshalb nur für neue Zeilen (NOT VALID).
   {
-    version: 24,
+    version: 25,
     name: 'coverage-feste-bereiche',
     sql: `
       ALTER TABLE test_coverage_areas DROP CONSTRAINT IF EXISTS test_coverage_areas_area_check;
@@ -572,7 +583,7 @@ export const MIGRATIONS: readonly Migration[] = [
   // Wartungsjob bug_categories (src/runner/bug-category-job.ts): trägt einmalig die Kategorie bei Bugs ohne Kategorie
   // nach (nur category IS NULL) und merkt sich in state.done, dass er fertig ist. Ändert keine Bugs selbst.
   {
-    version: 25,
+    version: 26,
     name: 'bug-kategorien-nachtragen',
     sql: `
       INSERT INTO scheduled_jobs (key, enabled, interval_seconds, job_kind, config)

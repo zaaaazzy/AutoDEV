@@ -41,6 +41,7 @@ import {
   loadWorkflow,
   type RunnerOptions,
 } from '../runner/runner.js';
+import { defined } from '../core/defined.js';
 
 const MIN_REQUIREMENT_CHARS = 80;
 const PROMPT_LOG_CHARS = 30_000;
@@ -83,7 +84,7 @@ function permissionRole(role: string, agentId: string | null | undefined, author
 export function splitTitle(output: string): { title: string | null; text: string } {
   const match = TITLE_LINE.exec(output);
   if (!match) return { title: null, text: output };
-  const title = shortTitle(match[1]!.replace(/^["„“]+|["„“]+$/g, ''), TITLE_MAX);
+  const title = shortTitle(defined(match[1]).replace(/^["„“]+|["„“]+$/g, ''), TITLE_MAX);
   return {
     title: title || null,
     text: (output.slice(0, match.index) + output.slice(match.index + match[0].length)).trim(),
@@ -138,7 +139,10 @@ export function buildRequirementPrompt(
   ].join('\n\n');
 }
 
-/** Runs the project's agent of the given role (default: author) (own command, default command or local model) and returns its redacted output. */
+/**
+ * Runs the project's agent of the given role (default: author) (own command, the agent chosen on the dashboard,
+ * default command or local model) and returns its redacted output.
+ */
 export async function runAuthorAgent(
   pool: Pool,
   options: Pick<RunnerOptions, 'project' | 'cwd' | 'timeoutMs'>,
@@ -202,7 +206,8 @@ export async function runAuthorAgent(
   const permissions = await loadProjectPermissions(pool, options.project);
   // Rechte einer lesenden Rolle: keine Datei-Werkzeuge, keine Shell, auch kein voller Zugriff.
   const rightsRole = readOnly ? READ_ONLY_PERMISSION_ROLE : permissionRole(role, agentId, author);
-  // Docker-Sandbox (Standard): die CLI läuft in einem eigenen Container; lesende Läufe sehen den Ordner nur als :ro.
+  // Sandbox (Standard workbench): schreibende Läufe gehen in den Arbeitscontainer des Projekts, lesende in einen
+  // kurzlebigen Container, der den Ordner nur als :ro sieht.
   // Beim lokalen Modell laufen nur dessen Shell-Befehle im Container, die Datei-Werkzeuge im Worker (wie im Runner).
   const mode = sandboxMode(await projectSandbox(pool, options.project));
   const inSandbox = usesSandbox(mode);

@@ -1,12 +1,19 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { existsSync, lstatSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { runCommand } from '../../core/command.js';
-import { diffTargetPath, filesWithSecrets, gitHelpers, isPlaceholderToken, stageAll } from './git-helpers.js';
+import {
+  diffTargetPath,
+  filesWithSecrets,
+  gitHelpers,
+  isPlaceholderToken,
+  setAsideFiles,
+  stageAll,
+} from './git-helpers.js';
 import { enterOrderBranch, finishOrderBranch } from './order-branch.js';
 
 test('diffTargetPath liest Tab-Suffix und C-Escapes', () => {
@@ -122,4 +129,37 @@ test('finishOrderBranch: zurückgehaltene Dateien verhindern den Merge, blockier
   assert.ok(folder && existsSync(join(cwd, folder, 'redact.test.ts')));
   assert.equal(run('status', '--porcelain'), '');
   assert.ok(await enterOrderBranch(cwd, { id: '5e6f7a8b-0000', title: 'Profil' }, 'Sprint 1'));
+});
+
+// Vorher kopierte setAsideFiles mit copyFile, das Links folgt: Host-Dateien landeten in der Sicherung im Projekt.
+test('setAsideFiles sichert einen zurückgehaltenen Symlink nicht mit dem Inhalt seines Ziels', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'secret-symlink-'));
+  const outside = await mkdtemp(join(tmpdir(), 'secret-host-'));
+  await writeFile(join(outside, 'id_ed25519'), 'HOST-SCHLUESSEL\n');
+  const run = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  run('init', '-q', '-b', 'main');
+  run('-c', 'user.name=T', '-c', 'user.email=t@x', 'commit', '-q', '--allow-empty', '-m', 'Start');
+  // Zugangsdaten-Muster im Linkziel: git diff zeigt bei Symlinks das Ziel als Inhalt, stageAll hält ihn zurück.
+  const key = 'AKIA' + 'QWERTYUIOPLKJHGF';
+  await mkdir(join(cwd, key));
+  await symlink(`${key}/../${'../'.repeat(12)}${outside.slice(1)}/id_ed25519`, join(cwd, 'leak'));
+  await writeFile(join(cwd, 'normal.txt'), `aws ${key}\n`);
+  assert.equal(
+    await readFile(join(cwd, 'leak'), 'utf8'),
+    'HOST-SCHLUESSEL\n',
+    'Gegenprobe: der Link erreicht die Host-Datei',
+  );
+  const { git, must } = gitHelpers(runCommand, cwd);
+  const held = await stageAll(git, must, []);
+  assert.deepEqual(held.sort(), ['leak', 'normal.txt']);
+  const folder = await setAsideFiles(git, cwd, held, 'zurueckgehalten-test');
+  const saved = await readdir(join(cwd, folder));
+  assert.deepEqual(saved, ['normal.txt']);
+  assert.equal(await readFile(join(cwd, folder, 'normal.txt'), 'utf8'), `aws ${key}\n`);
+  assert.equal(
+    lstatSync(join(cwd, 'leak'), { throwIfNoEntry: false }),
+    undefined,
+    'Der Link bleibt nicht im Arbeitsordner',
+  );
+  assert.equal(await readFile(join(outside, 'id_ed25519'), 'utf8'), 'HOST-SCHLUESSEL\n');
 });

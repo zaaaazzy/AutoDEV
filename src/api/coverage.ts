@@ -89,9 +89,7 @@ export async function coverageOverview(pool: Queryable, slug: string) {
     )
   ).rows as { area: string; complete: boolean; [key: string]: unknown }[];
   const areas = rows
-    .map((row) =>
-      row.complete ? row : { ...row, lines: null, statements: null, branches: null, functions: null },
-    )
+    .map((row) => (row.complete ? row : { ...row, lines: null, statements: null, branches: null, functions: null }))
     .sort((a, b) => order(a.area) - order(b.area));
   return { ...report, areas };
 }

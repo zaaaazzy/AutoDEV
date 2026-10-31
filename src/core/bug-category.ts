@@ -1,3 +1,5 @@
+import { defined } from './defined.js';
+
 /**
  * Kategorie eines Bugs aus den betroffenen Dateipfaden (rein, deterministisch). Pfade unter `frontend/` gelten als
  * Frontend, unter `src/` als Backend, beides zusammen als Fullstack. Nur Pfade des Agent-Wächters, der Pfadregeln und
@@ -44,7 +46,7 @@ function areaOf(raw: string): Area | null {
     const module = third?.split('.')[0];
     return second === 'agent' && module && SECURITY_MODULE.test(module) ? 'security' : 'backend';
   }
-  if (root === 'deploy' || root === '.github' || ROOT_FILES.has(root!)) return 'infrastructure';
+  if (root === 'deploy' || root === '.github' || ROOT_FILES.has(defined(root))) return 'infrastructure';
   if (root === 'docs' || root === 'readme.md') return 'docs';
   return null;
 }
@@ -54,7 +56,12 @@ function areaOf(raw: string): Area | null {
  * Sicherheitsmodule → Sicherheit; Doku zählt neben Code nicht mit. Code zusammen mit Betrieb ist nicht eindeutig.
  */
 export function categoryFromPaths(paths: readonly string[]): BugCategory | null {
-  const areas = new Set(paths.slice(0, MAX_PATHS).map(areaOf).filter((area): area is Area => area !== null));
+  const areas = new Set(
+    paths
+      .slice(0, MAX_PATHS)
+      .map(areaOf)
+      .filter((area): area is Area => area !== null),
+  );
   const frontend = areas.has('frontend');
   const backend = areas.has('backend') || areas.has('security');
   if (areas.has('infrastructure')) return frontend || backend ? null : 'infrastructure';
@@ -100,6 +107,9 @@ export function parseModelCategory(answer: string): BugCategory | null {
   } catch {
     // Klartext
   }
-  const value = text.trim().toLowerCase().replace(/^["'`]+|["'`.]+$/g, '');
+  const value = text
+    .trim()
+    .toLowerCase()
+    .replace(/^["'`]+|["'`.]+$/g, '');
   return isBugCategory(value) ? value : null;
 }

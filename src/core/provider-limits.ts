@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { defined } from './defined.js';
 
 /**
  * Nutzungslimit des Agent-Kontos (Claude-CLI): „You've hit your session limit · resets 12:40am (Europe/Zurich)“,
@@ -52,7 +53,12 @@ export function usageLimitReset(output: string, now = new Date()): Date | null {
   const offset = offsetAt(now);
   const wallNow = now.getTime() + offset;
   const wall = new Date(wallNow);
-  wall.setUTCHours((Number(hour) % 12) + (meridiem!.toLowerCase() === 'pm' ? 12 : 0), Number(minute ?? 0), 0, 0);
+  wall.setUTCHours(
+    (Number(hour) % 12) + (defined(meridiem).toLowerCase() === 'pm' ? 12 : 0),
+    Number(minute ?? 0),
+    0,
+    0,
+  );
   const monthIndex = month ? MONTHS.indexOf(month.toLowerCase()) : -1;
   if (monthIndex >= 0 && day) {
     wall.setUTCMonth(monthIndex, Number(day));

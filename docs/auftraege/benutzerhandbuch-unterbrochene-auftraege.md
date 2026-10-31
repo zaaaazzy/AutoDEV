@@ -14,7 +14,7 @@ Wurde ein Auftrag unterbrochen, setzte AIdeation ihn zurück auf „Geplant“, 
 
 ### 2.1 Bei einer Unterbrechung
 
-Unterbrochen wird ein Lauf z. B. durch Worker-Stopp, Nutzungslimit, Neustart oder einen nicht erreichbaren Projektordner (siehe [`workflows.md`](workflows.md)). Dann passiert Folgendes:
+Unterbrochen wird ein Lauf z. B. durch Worker-Stopp, Nutzungslimit, Neustart oder einen nicht erreichbaren Projektordner (siehe [`workflows.md`](../workflows.md)). Dann passiert Folgendes:
 
 | Zustand im Arbeitsordner | Was AIdeation tut | Ergebnis |
 | --- | --- | --- |
@@ -49,4 +49,4 @@ Unterbrochen wird ein Lauf z. B. durch Worker-Stopp, Nutzungslimit, Neustart ode
 - Der Testlauf ist im Entwicklerbericht mit `npm test` (1530 von 1530 grün) belegt. Für dieses Kapitel habe ich die Tests nicht selbst gestartet.
 - Der Fall „Sprint-Pause“ ist im Auftrag genannt. Ich habe nicht nachgelesen, ob eine Sprint-Pause immer als Unterbrechung im Sinne von 2.1 endet. Wer das wissen muss, sollte es im Lauf beobachten.
 - Die Beschreibung sagt nicht, wann genau ein Auftrag erneut startet; das richtet sich nach dem Worker-Durchgang, den dieses Kapitel nicht beschreibt.
-- Verweise: Abschnitt „Unterbrechung ist keine Ablehnung“ und die Sicherungsregeln in [`workflows.md`](workflows.md); die Entwicklerdoku steht in [`unterbrochener-auftrag-verlaesst-auftrags-branch-2026-10-25.md`](unterbrochener-auftrag-verlaesst-auftrags-branch-2026-10-25.md).
+- Verweise: Abschnitt „Unterbrechung ist keine Ablehnung“ und die Sicherungsregeln in [`workflows.md`](../workflows.md); die Entwicklerdoku steht in [`unterbrochener-auftrag-verlaesst-auftrags-branch-2026-10-25.md`](unterbrochener-auftrag-verlaesst-auftrags-branch-2026-10-25.md).
