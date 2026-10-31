@@ -5,7 +5,13 @@ import { EXTERNAL_TEXT_END, EXTERNAL_TEXT_START } from '../core/bug-trust.js';
 import { withMigratedDatabase } from '../db/test-database.test.js';
 import { registerBugRoutes, reportAgentBug, syncBugOrder } from './bugs.js';
 import type { Principal } from './roles.js';
-import { requiredRole } from './route-table.test.js';
+import { declaredAccess, requiredRole } from './route-table.test.js';
+import {
+  backlogStatus,
+  settledBacklogCategorization,
+  startBacklogCategorization,
+  suggestBugCategoryLater,
+} from '../agent/bug-category.js';
 import { serveRoutes } from './serve-routes.test.js';
 
 const admin: Principal = { id: null, username: 'admin', displayName: 'Admin', roles: ['admin'] };
@@ -17,6 +23,279 @@ test('Bugs: Freigabe braucht „Ausführen“, Bearbeiten und Löschen „Planen
   assert.equal(requiredRole('PATCH', `/api/bugs/${MISSING}`, {}), 'plan');
   assert.equal(requiredRole('DELETE', `/api/bugs/${MISSING}`, {}), 'plan');
   assert.equal(requiredRole('POST', '/api/projects/shop/bugs', {}), 'plan');
+});
+
+test('Bug-Kategorie: Bestätigen und Altbestandslauf brauchen serverseitig „Planen“', () => {
+  assert.equal(requiredRole('POST', `/api/bugs/${MISSING}/category/confirm`, {}), 'plan');
+  assert.equal(requiredRole('POST', '/api/projects/shop/bugs/category/confirm', { ids: [] }), 'plan');
+  assert.equal(requiredRole('POST', '/api/projects/shop/bugs/categorize-backlog', {}), 'plan');
+  assert.equal(requiredRole('DELETE', '/api/projects/shop/bugs/categorize-backlog', {}), 'plan');
+  assert.equal(declaredAccess('GET', '/api/projects/shop/bugs/categorize-backlog')?.tenant, 'project');
+});
+
+/** Fake-Ollama: antwortet mit `content`; gate hält jede Antwort an, bis release() gerufen wird. */
+function ollama(content: string, gated = false) {
+  let open: () => void = () => undefined;
+  const gate = gated ? new Promise<void>((resolve) => (open = resolve)) : Promise.resolve();
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls += 1;
+    await gate;
+    return new Response(JSON.stringify({ message: { content } }), { status: 200 });
+  }) as unknown as typeof fetch;
+  return { fetchImpl, release: () => open(), calls: () => calls };
+}
+
+test('Bug-Kategorie auf PostgreSQL: Anlegen, Vorschlag, Bestätigen, Korrektur und Altbestand', async (t) => {
+  await withMigratedDatabase(t, 'devlog_bugcat', async (db) => {
+    const pool = db as unknown as Pool;
+    await pool.query(
+      `INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop'), ('other', 'Other', '/tmp/o')`,
+    );
+    const state = async (id: string) =>
+      (
+        await pool.query<{ bugCategory: string | null; suggested: string | null; state: string | null }>(
+          `SELECT bug_category AS "bugCategory", bug_category_suggested AS suggested, bug_category_state AS state
+             FROM bugs WHERE id = $1`,
+          [id],
+        )
+      ).rows[0];
+    const plain = async (title: string, project = 'shop'): Promise<string> =>
+      (
+        await pool.query<{ id: string }>(
+          `INSERT INTO bugs (project_slug, title, description) VALUES ($1, $2, 'Beim Speichern im Formular passiert nichts.')
+           RETURNING id`,
+          [project, title],
+        )
+      ).rows[0]!.id;
+    const api = await serveRoutes(admin, (router) => registerBugRoutes(router, pool));
+    try {
+      await t.test('Anlegen mit gültiger Kategorie: gesetzt und bestätigt; ungültige abgelehnt', async () => {
+        const created = await api.call('POST', '/projects/shop/bugs', { title: 'Knopf', bugCategory: 'ui' });
+        assert.equal(created.status, 201);
+        assert.equal(created.body.bug.bugCategory, 'ui');
+        assert.equal(created.body.bug.bugCategoryState, 'confirmed');
+        // Bereich und Bug-Kategorie sind getrennt: Der Bereich bleibt bei seinen Werten.
+        assert.equal(created.body.bug.category, null);
+        for (const bugCategory of ['frontend', 'git', 'UI', 42]) {
+          const response = await api.call('POST', '/projects/shop/bugs', { title: 'Falsch', bugCategory });
+          assert.equal(response.status, 400, String(bugCategory));
+          assert.equal(response.body.field, 'bugCategory');
+        }
+        assert.equal((await api.call('POST', '/projects/shop/bugs', { title: 'Bereich', category: 'git-sync' })).status, 400);
+      });
+
+      await t.test('Anlegen ohne Kategorie: angelegt ohne Vorschlag (Modell unter dem Test-Runner aus)', async () => {
+        const created = await api.call('POST', '/projects/shop/bugs', { title: 'Ohne', description: 'Geht nicht.' });
+        assert.equal(created.status, 201);
+        assert.deepEqual(await state(created.body.bug.id), { bugCategory: null, suggested: null, state: null });
+      });
+
+      await t.test('Vorschlag des Modells: Zustand „vorgeschlagen“, bug_category bleibt leer', async () => {
+        const id = await plain('Vorschlag');
+        await suggestBugCategoryLater(pool, id, { title: 'Vorschlag', description: 'Formular speichert nicht.' }, {
+          fetchImpl: ollama('{"category": "ui"}').fetchImpl,
+        });
+        assert.deepEqual(await state(id), { bugCategory: null, suggested: 'ui', state: 'suggested' });
+        // Ein zweiter Vorschlag überschreibt nichts.
+        await suggestBugCategoryLater(pool, id, { title: 'Vorschlag', description: 'x'.repeat(40) }, {
+          fetchImpl: ollama('{"category": "api"}').fetchImpl,
+        });
+        assert.equal((await state(id))?.suggested, 'ui');
+      });
+
+      await t.test('Ollama nicht erreichbar oder Antwort ausserhalb der Liste: kein Vorschlag, Bug bleibt', async () => {
+        const unreachable = (async () => {
+          throw new TypeError('fetch failed');
+        }) as unknown as typeof fetch;
+        const id = await plain('Unerreichbar');
+        await suggestBugCategoryLater(pool, id, { title: 'Unerreichbar', description: 'Formular speichert nicht.' }, {
+          fetchImpl: unreachable,
+        });
+        assert.deepEqual(await state(id), { bugCategory: null, suggested: null, state: null });
+        for (const answer of ['{"category": "frontend"}', '{"category": "rm -rf /"}', 'ui; DROP TABLE bugs']) {
+          await suggestBugCategoryLater(pool, id, { title: 'Ungültig', description: 'Formular speichert nicht.' }, {
+            fetchImpl: ollama(answer).fetchImpl,
+          });
+          assert.deepEqual(await state(id), { bugCategory: null, suggested: null, state: null }, answer);
+        }
+      });
+
+      await t.test('Bestätigen: Vorschlag übernehmen oder korrigieren; ohne Vorschlag 409', async () => {
+        const id = await plain('Bestätigen');
+        await pool.query(`UPDATE bugs SET bug_category_suggested = 'api', bug_category_state = 'suggested' WHERE id = $1`, [
+          id,
+        ]);
+        const confirmed = await api.call('POST', `/bugs/${id}/category/confirm`, {});
+        assert.equal(confirmed.status, 200);
+        assert.equal(confirmed.body.bug.bugCategory, 'api');
+        assert.equal(confirmed.body.bug.bugCategoryState, 'confirmed');
+        const corrected = await api.call('POST', `/bugs/${id}/category/confirm`, { category: 'security' });
+        assert.deepEqual(await state(id), { bugCategory: 'security', suggested: 'api', state: 'confirmed' });
+        assert.equal(corrected.status, 200);
+
+        const empty = await plain('Ohne Vorschlag');
+        assert.equal((await api.call('POST', `/bugs/${empty}/category/confirm`, {})).status, 409);
+        assert.equal((await api.call('POST', `/bugs/${empty}/category/confirm`, { category: 'ci' })).status, 200);
+        assert.equal((await api.call('POST', `/bugs/${empty}/category/confirm`, { category: 'quatsch' })).status, 400);
+        assert.equal((await api.call('POST', `/bugs/${MISSING}/category/confirm`, { category: 'ci' })).status, 404);
+        assert.equal((await api.call('POST', '/bugs/keine-uuid/category/confirm', {})).status, 404);
+      });
+
+      await t.test('Gesammelt bestätigen: nur Vorschläge der genannten Bugs dieses Projekts', async () => {
+        const [first, second, untouched, foreign] = [
+          await plain('Sammel 1'),
+          await plain('Sammel 2'),
+          await plain('Sammel 3'),
+          await plain('Fremd', 'other'),
+        ];
+        await pool.query(
+          `UPDATE bugs SET bug_category_suggested = 'docs', bug_category_state = 'suggested' WHERE id = ANY($1::uuid[])`,
+          [[first, second, untouched, foreign]],
+        );
+        const response = await api.call('POST', '/projects/shop/bugs/category/confirm', {
+          ids: [first, second, foreign],
+        });
+        assert.equal(response.status, 200);
+        assert.deepEqual(
+          (response.body.bugs as { id: string }[]).map((bug) => bug.id).sort(),
+          [first, second].sort(),
+        );
+        assert.equal((await state(untouched))?.state, 'suggested');
+        assert.equal((await state(foreign))?.state, 'suggested', 'Bug eines anderen Projekts bleibt');
+        for (const ids of [[], ['keine-uuid'], undefined]) {
+          assert.equal((await api.call('POST', '/projects/shop/bugs/category/confirm', { ids })).status, 400);
+        }
+      });
+
+      await t.test('PATCH bugCategory: bestätigt; geleert zurück zum Vorschlag', async () => {
+        const id = await plain('Patch');
+        await pool.query(`UPDATE bugs SET bug_category_suggested = 'ci', bug_category_state = 'suggested' WHERE id = $1`, [
+          id,
+        ]);
+        const patched = await api.call('PATCH', `/bugs/${id}`, { bugCategory: 'git-sync' });
+        assert.equal(patched.status, 200);
+        assert.deepEqual(await state(id), { bugCategory: 'git-sync', suggested: 'ci', state: 'confirmed' });
+        await api.call('PATCH', `/bugs/${id}`, { bugCategory: null });
+        assert.deepEqual(await state(id), { bugCategory: null, suggested: 'ci', state: 'suggested' });
+        const without = await plain('Patch ohne');
+        await api.call('PATCH', `/bugs/${without}`, { bugCategory: '' });
+        assert.deepEqual(await state(without), { bugCategory: null, suggested: null, state: null });
+        assert.equal((await api.call('PATCH', `/bugs/${id}`, { bugCategory: 'frontend' })).body.field, 'bugCategory');
+      });
+
+      await t.test('reportAgentBug: gewählte Kategorie bestätigt, unbekannte verworfen', async () => {
+        const guard = await reportAgentBug(pool, {
+          projectSlug: 'shop',
+          title: 'Entwickler: gesperrt',
+          description: 'AIdeation-Wächter: gesperrt',
+          bugCategory: 'agent-guard',
+        });
+        assert.deepEqual(await state(guard), { bugCategory: 'agent-guard', suggested: null, state: 'confirmed' });
+        const unknown = await reportAgentBug(pool, {
+          projectSlug: 'shop',
+          title: 'Entwickler: fremd',
+          description: 'x',
+          bugCategory: 'frontend' as never,
+        });
+        assert.deepEqual(await state(unknown), { bugCategory: null, suggested: null, state: null });
+      });
+
+      await t.test('Altbestand: je Bug ohne Kategorie genau ein Vorschlag, bug_category unverändert, kein 2. Lauf', async () => {
+        const fresh = async (project: string) =>
+          (
+            await pool.query<{ id: string }>(
+              `SELECT id FROM bugs WHERE project_slug = $1 AND bug_category_state IS NULL ORDER BY id`,
+              [project],
+            )
+          ).rows.map((row) => row.id);
+        await plain('Altbestand Fremd', 'other');
+        const before = await fresh('shop');
+        assert.ok(before.length >= 3, 'mehrere Bugs ohne Kategorie');
+        const confirmedBefore = (
+          await pool.query(`SELECT id, bug_category FROM bugs WHERE bug_category IS NOT NULL ORDER BY id`)
+        ).rows;
+
+        const model = ollama('{"category": "api"}', true);
+        const first = await startBacklogCategorization(pool, 'shop', { fetchImpl: model.fetchImpl });
+        assert.equal(first.started, true);
+        assert.equal(first.status.total, before.length);
+        // Läuft schon: kein zweiter Lauf, auch nicht für ein anderes Projekt oder über die Route.
+        assert.equal((await startBacklogCategorization(pool, 'shop', { fetchImpl: model.fetchImpl })).started, false);
+        assert.equal((await startBacklogCategorization(pool, 'other', { fetchImpl: model.fetchImpl })).started, false);
+        assert.equal(backlogStatus().running, true);
+        const status = await api.call('GET', '/projects/other/bugs/categorize-backlog');
+        assert.deepEqual([status.body.running, status.body.busy, status.body.total], [false, true, 0]);
+        model.release();
+        await settledBacklogCategorization();
+
+        assert.equal(model.calls(), before.length, 'genau eine Anfrage je Bug');
+        assert.deepEqual(await fresh('shop'), []);
+        const rows = (
+          await pool.query<{ suggested: string; bugCategory: string | null }>(
+            `SELECT bug_category_suggested AS suggested, bug_category AS "bugCategory" FROM bugs WHERE id = ANY($1::uuid[])`,
+            [before],
+          )
+        ).rows;
+        assert.equal(rows.length, before.length);
+        assert.ok(rows.every((row) => row.suggested === 'api' && row.bugCategory === null));
+        assert.deepEqual(
+          (await pool.query(`SELECT id, bug_category FROM bugs WHERE bug_category IS NOT NULL ORDER BY id`)).rows,
+          confirmedBefore,
+          'bestätigte Kategorien bleiben',
+        );
+        assert.equal((await fresh('other')).length, 1, 'anderes Projekt unberührt');
+        assert.deepEqual(backlogStatus(), {
+          running: false,
+          projectSlug: 'shop',
+          total: before.length,
+          done: before.length,
+          suggested: before.length,
+          cancelled: false,
+        });
+        // Zweiter Lauf danach: nichts mehr offen, kein weiterer Vorschlag.
+        const again = await startBacklogCategorization(pool, 'shop', { fetchImpl: model.fetchImpl });
+        await settledBacklogCategorization();
+        assert.equal(again.status.total, 0);
+        assert.equal(model.calls(), before.length);
+      });
+
+      await t.test('Altbestand: abbrechbar; ein Fehler bei einem Bug stoppt den Lauf nicht', async () => {
+        const ids = [await plain('Abbruch 1'), await plain('Abbruch 2'), await plain('Abbruch 3')];
+        let calls = 0;
+        const flaky = (async () => {
+          calls += 1;
+          if (calls === 1) throw new TypeError('fetch failed');
+          return new Response(JSON.stringify({ message: { content: '{"category": "ci"}' } }), { status: 200 });
+        }) as unknown as typeof fetch;
+        await startBacklogCategorization(pool, 'shop', { fetchImpl: flaky });
+        await settledBacklogCategorization();
+        assert.deepEqual(
+          await Promise.all(ids.map(async (id) => (await state(id))?.suggested)),
+          [null, 'ci', 'ci'],
+        );
+
+        const late = [await plain('Abbruch 4'), await plain('Abbruch 5')];
+        const model = ollama('{"category": "ui"}', true);
+        await startBacklogCategorization(pool, 'shop', { fetchImpl: model.fetchImpl });
+        assert.equal((await api.call('DELETE', '/projects/other/bugs/categorize-backlog')).status, 409);
+        assert.equal((await api.call('DELETE', '/projects/shop/bugs/categorize-backlog')).status, 202);
+        model.release();
+        await settledBacklogCategorization();
+        assert.equal(backlogStatus().cancelled, true);
+        assert.ok(
+          (await Promise.all(late.map(async (id) => (await state(id))?.state))).every((value) => value === null),
+          'nach dem Abbruch kein Vorschlag mehr',
+        );
+      });
+
+      await t.test('Route: Altbestandslauf ohne eingeschaltetes Modell startet nicht', async () => {
+        assert.equal((await api.call('POST', '/projects/shop/bugs/categorize-backlog', {})).status, 503);
+      });
+    } finally {
+      await api.close();
+    }
+  });
 });
 
 test('Bugs auf PostgreSQL: Eingaben, Freigabe fremder Bugs und Löschen', async (t) => {

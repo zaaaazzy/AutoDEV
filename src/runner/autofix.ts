@@ -7,6 +7,7 @@ import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { shortTitle } from '../core/validation.js';
 import type { Pool } from 'pg';
 import { reportAgentBug } from '../api/bugs.js';
+import type { BugCategoryValue } from '../core/bug-category-values.js';
 import { UNTRUSTED_START } from './hoster.js';
 
 import { USAGE_LIMIT } from '../core/provider-limits.js';
@@ -68,6 +69,15 @@ const TRANSIENT_PATTERNS = [
 export function isTransientFailure(output: string): boolean {
   const tail = output.slice(-1500);
   return TRANSIENT_PATTERNS.some((pattern) => pattern.test(tail));
+}
+
+/**
+ * Feste Bug-Kategorie, die der Fehlerausgabe sicher anzusehen ist: Eine Sperre des Agent-Wächters ist „agent-guard“.
+ * Sonst null – dann schlägt das lokale Modell nach dem Anlegen nur vor (blockiert und wiederholt nichts).
+ */
+const GUARD_BLOCK = /AIdeation-Wächter:/;
+export function failureBugCategory(output: string): BugCategoryValue | null {
+  return GUARD_BLOCK.test(output.slice(-3000)) ? 'agent-guard' : null;
 }
 
 export function isAgentFailure(output: string): boolean {
@@ -185,6 +195,7 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
     title: `${agentName}: ${shortTitle(item.title)}`,
     description: detail,
     developmentId: item.id,
+    bugCategory: failureBugCategory(output),
   });
   // Bevor ein Behebungsauftrag entsteht, prüft die Problemanalyse (ein zweiter Agent), ob die Diagnose stimmt.
   await pool.query(

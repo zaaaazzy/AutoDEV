@@ -6,13 +6,21 @@ import { isAssignableSprintStatus, SPRINT_POOL_DEVELOPMENT_STATUSES } from '../c
 import { fencedBugDescriptionSql, isUntrustedBugSource, unapprovedBugSql } from '../core/bug-trust.js';
 import { startProductionFix } from '../runner/production-events.js';
 import { UNTRUSTED_START } from '../runner/hoster.js';
-import { afterBugCreated } from '../agent/bug-classifier.js';
+import { afterBugCreated, modelCategoriesEnabled } from '../agent/bug-classifier.js';
 import { categoryFromBug } from '../core/bug-category.js';
+import { type BugCategoryValue, isBugCategoryValue } from '../core/bug-category-values.js';
+import {
+  backlogStatus,
+  cancelBacklogCategorization,
+  startBacklogCategorization,
+} from '../agent/bug-category.js';
 import type { Principal } from './roles.js';
 import {
   buildUpdate,
+  INVALID,
   invalidInput,
   isUuid,
+  type Parser,
   parseFields,
   parseLongText,
   parseNullableUuid,
@@ -25,11 +33,16 @@ import {
 } from '../core/validation.js';
 
 const SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
+/** Feste Bug-Kategorie oder leer (null). */
+const parseBugCategory: Parser = (value) =>
+  value === null || value === '' ? null : isBugCategoryValue(value) ? value : INVALID;
 const SPRINT_NOT_ASSIGNABLE = 'Der Sprint ist nicht mehr zuordenbar. Bugs nur geplanten oder aktiven Sprints zuordnen.';
 const BUG_COLUMNS = `id, project_slug AS "projectSlug", title, description, severity, status, source,
   sprint_id AS "sprintId", fix_notes AS "fixNotes", created_at AS "createdAt", fixed_at AS "fixedAt", category,
   external_ref AS "externalRef",
-  regressed_at AS "regressedAt", approved_at AS "approvedAt", approved_by AS "approvedBy"`;
+  regressed_at AS "regressedAt", approved_at AS "approvedAt", approved_by AS "approvedBy",
+  bug_category AS "bugCategory", bug_category_suggested AS "bugCategorySuggested",
+  bug_category_state AS "bugCategoryState"`;
 /** Betriebs-Bugs: Vorkommen der letzten 24 Stunden („seit gestern“) über alle gebündelten Ereignisse. */
 const PRODUCTION_COUNT = `CASE WHEN source = 'production' THEN (
     SELECT COALESCE(SUM(k.count), 0)::int FROM production_events e JOIN production_event_buckets k ON k.event_id = e.id
@@ -44,7 +57,20 @@ const BUG_FIELDS = {
   sprintId: { column: 'sprint_id', parse: parseNullableUuid },
   fixNotes: { column: 'fix_notes', parse: parseLongText },
   category: { column: 'category', parse: parseCategory },
+  bugCategory: { column: 'bug_category', parse: parseBugCategory },
 };
+/** Bestätigen: ohne Angabe gilt der Vorschlag, sonst die gewählte (korrigierte) Kategorie. */
+const CONFIRM_FIELDS = { category: { column: 'bug_category', parse: parseBugCategory } };
+/** Gesammelt bestätigen: höchstens so viele Bugs je Anfrage (so viele zeigt auch die Liste). */
+const CONFIRM_MAX = 500;
+/**
+ * Zustand zur gesetzten Bug-Kategorie: gesetzt = bestätigt; geleert = zurück zum Vorschlag, falls einer da ist.
+ * `$n` ist der Parameter mit dem neuen Wert.
+ */
+const bugCategoryStateSql = (parameter: number): string =>
+  `bug_category_state = CASE WHEN $${parameter}::text IS NOT NULL THEN 'confirmed'
+     WHEN bug_category_suggested IS NOT NULL THEN 'suggested' END`;
+const BACKLOG_BUSY = 'Der Altbestand wird gerade kategorisiert. Bitte warten, bis der Lauf fertig ist.';
 
 const sqlList = (statuses: readonly string[]): string => statuses.map((status) => `'${status}'`).join(', ');
 /** Auftragsstatus, in denen der Bug-Auftrag dem Sprint des Bugs folgt; erledigt wird beim Wiederöffnen neu geplant. */
@@ -137,6 +163,7 @@ export async function syncBugOrder(db: Pool | PoolClient, bugId: string): Promis
 /**
  * Creates a bug report for a failed agent step unless an identical open bug already exists. Die Kategorie kommt aus
  * den genannten Pfaden, sonst stuft das lokale Modell im Hintergrund ein (ohne Einfluss auf den Auto-Fix-Ablauf).
+ * Eine mitgegebene feste Bug-Kategorie (aus der Liste) gilt als bestätigt; ohne sie gibt es nur einen Vorschlag.
  */
 export async function reportAgentBug(
   pool: Pool,
@@ -147,22 +174,25 @@ export async function reportAgentBug(
     sprintId?: string | null;
     developmentId?: string;
     paths?: string[];
+    bugCategory?: BugCategoryValue | null;
   },
 ): Promise<string> {
   const title = bug.title.slice(0, 180);
   const description = bug.description.slice(0, 10_000);
   const category = categoryFromBug({ title, description, paths: bug.paths });
+  const bugCategory = isBugCategoryValue(bug.bugCategory) ? bug.bugCategory : null;
   // development_id: Ist der Auftrag später doch erledigt, kommt die Meldung auf den Friedhof (Trigger).
   const created = await pool.query<{ id: string }>(
-    `INSERT INTO bugs (project_slug, title, description, severity, source, sprint_id, development_id, category)
-     SELECT $1, $2, $3, 'high', 'agent', NULL, $4, $5
+    `INSERT INTO bugs (project_slug, title, description, severity, source, sprint_id, development_id, category,
+                       bug_category, bug_category_state)
+     SELECT $1, $2, $3, 'high', 'agent', NULL, $4, $5, $6, CASE WHEN $6::text IS NOT NULL THEN 'confirmed' END
       WHERE NOT EXISTS (
         SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2 AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')
       ) RETURNING id`,
-    [bug.projectSlug, title, description, bug.developmentId ?? null, category],
+    [bug.projectSlug, title, description, bug.developmentId ?? null, category, bugCategory],
   );
   if (created.rows[0]) {
-    afterBugCreated(pool, created.rows[0].id, category, { title, description });
+    afterBugCreated(pool, created.rows[0].id, category, { title, description }, bugCategory);
     return created.rows[0].id;
   }
   const existing = (
@@ -293,11 +323,13 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
     // Ohne mitgeschickte Kategorie: aus den genannten Pfaden, sonst nach dem Anlegen vom lokalen Modell.
     const text = { title: String(values.get('title')), description: String(values.get('description') ?? '') };
     const category = (values.get('category') as string | null | undefined) || categoryFromBug(text);
+    // Gewählte Bug-Kategorie gilt als bestätigt; ohne sie schlägt das lokale Modell danach eine vor.
+    const bugCategory = (values.get('bug_category') as string | null | undefined) ?? null;
     // Bug und Auftrag zusammen: Scheitert der Auftrag, entsteht auch kein Bug im Sprint ohne Auftrag.
     const outcome = await withBugTransaction(pool, async (client) => {
       const result = await client.query(
-        `INSERT INTO bugs (project_slug, title, description, severity, sprint_id, category)
-         SELECT $1, $2, $3, COALESCE($4, 'medium'), s.id, $6
+        `INSERT INTO bugs (project_slug, title, description, severity, sprint_id, category, bug_category, bug_category_state)
+         SELECT $1, $2, $3, COALESCE($4, 'medium'), s.id, $6, $7, CASE WHEN $7::text IS NOT NULL THEN 'confirmed' END
            FROM (SELECT 1) seed LEFT JOIN sprints s ON s.id = $5 AND s.project_slug = $1
           WHERE $5::uuid IS NULL OR s.id IS NOT NULL
          RETURNING ${BUG_COLUMNS}`,
@@ -308,6 +340,7 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
           values.get('severity') ?? null,
           sprintId,
           category,
+          bugCategory,
         ],
       );
       if (!result.rows[0]) return { status: 400, message: 'Sprint gehört zu einem anderen Projekt.' };
@@ -318,7 +351,7 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
       response.status(outcome.status).json({ message: outcome.message });
       return;
     }
-    afterBugCreated(pool, (outcome.bug as { id: string }).id, category, text);
+    afterBugCreated(pool, (outcome.bug as { id: string }).id, category, text, bugCategory);
     response.status(201).json({ bug: outcome.bug });
   });
 
@@ -342,7 +375,16 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
           },
         ]
       : fields;
-    const update = buildUpdate('bugs', request.params.id, withFixDate, BUG_COLUMNS);
+    // Bug-Kategorie von Hand gesetzt = bestätigt (Korrektur eines Vorschlags); geleert = wieder nur der Vorschlag.
+    const bugCategoryIndex = withFixDate.findIndex((field) => field.column === 'bug_category');
+    const update = buildUpdate(
+      'bugs',
+      request.params.id,
+      withFixDate,
+      BUG_COLUMNS,
+      undefined,
+      bugCategoryIndex < 0 ? [] : [bugCategoryStateSql(bugCategoryIndex + 2)],
+    );
     // Prüfen, Bug ändern und Auftrag nachziehen in einer Transaktion: Bei 409 bleibt alles, wie es war.
     const outcome = await withBugTransaction(pool, async (client) => {
       const current = (
@@ -431,6 +473,108 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
     if (result.rows[0].sprintId) await syncBugOrder(pool, request.params.id);
     response.json({ bug: result.rows[0] });
   });
+
+  // Bug-Kategorie bestätigen (Recht „Planen“ wie Bearbeiten): ohne Angabe den Vorschlag, mit category die gewählte.
+  app.post('/bugs/:id/category/confirm', access({ role: 'plan', tenant: 'bugs' }), async (request, response) => {
+    if (!isUuid(request.params.id)) {
+      response.status(404).json({ message: 'Nicht gefunden.' });
+      return;
+    }
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const fields = parseFields(body, CONFIRM_FIELDS);
+    if (!fields) {
+      response.status(400).json(invalidInput(body, CONFIRM_FIELDS));
+      return;
+    }
+    const chosen = (fields[0]?.value as string | null | undefined) ?? null;
+    const result = await pool.query(
+      `UPDATE bugs SET bug_category = COALESCE($2::text, bug_category_suggested), bug_category_state = 'confirmed',
+              updated_at = NOW()
+        WHERE id = $1 AND COALESCE($2::text, bug_category_suggested) IS NOT NULL
+        RETURNING ${BUG_COLUMNS}`,
+      [request.params.id, chosen],
+    );
+    if (result.rows[0]) {
+      response.json({ bug: result.rows[0] });
+      return;
+    }
+    const exists = (await pool.query('SELECT 1 FROM bugs WHERE id = $1', [request.params.id])).rowCount;
+    if (!exists) {
+      response.status(404).json({ message: 'Bug nicht gefunden.' });
+      return;
+    }
+    response.status(409).json({ field: 'category', message: 'Kein Vorschlag vorhanden. Bitte eine Kategorie wählen.' });
+  });
+
+  // Gesammelt bestätigen: übernimmt die Vorschläge der genannten Bugs dieses Projekts (andere bleiben unberührt).
+  app.post(
+    '/projects/:slug/bugs/category/confirm',
+    access({ role: 'plan', tenant: 'project' }),
+    async (request, response) => {
+      const slug = parseProjectSlug(request.params.slug ?? '');
+      const ids = (request.body as { ids?: unknown } | undefined)?.ids;
+      if (!slug) {
+        response.status(400).json({ message: 'Ungültiges Projekt.' });
+        return;
+      }
+      if (!Array.isArray(ids) || !ids.length || ids.length > CONFIRM_MAX || !ids.every(isUuid)) {
+        response.status(400).json({ field: 'ids', message: `Bitte 1 bis ${CONFIRM_MAX} Bugs auswählen.` });
+        return;
+      }
+      const result = await pool.query(
+        `UPDATE bugs SET bug_category = bug_category_suggested, bug_category_state = 'confirmed', updated_at = NOW()
+          WHERE project_slug = $1 AND id = ANY($2::uuid[]) AND bug_category_state = 'suggested'
+          RETURNING ${BUG_COLUMNS}`,
+        [slug, ids],
+      );
+      response.json({ bugs: result.rows });
+    },
+  );
+
+  // Altbestand kategorisieren: einmaliger Lauf im Hintergrund, nur Vorschläge, nie zwei Läufe gleichzeitig.
+  app.get('/projects/:slug/bugs/categorize-backlog', access({ tenant: 'project' }), (request, response) => {
+    const { projectSlug, running, total, done, suggested, cancelled } = backlogStatus();
+    // Läufe anderer Projekte nur als „belegt“ melden, ohne deren Namen oder Zahlen.
+    response.json(
+      projectSlug === request.params.slug
+        ? { running, busy: running, total, done, suggested, cancelled }
+        : { running: false, busy: running, total: 0, done: 0, suggested: 0, cancelled: false },
+    );
+  });
+
+  app.post(
+    '/projects/:slug/bugs/categorize-backlog',
+    access({ role: 'plan', tenant: 'project' }),
+    async (request, response) => {
+      const slug = parseProjectSlug(request.params.slug ?? '');
+      if (!slug) {
+        response.status(400).json({ message: 'Ungültiges Projekt.' });
+        return;
+      }
+      if (!modelCategoriesEnabled()) {
+        response.status(503).json({ message: 'Das lokale Modell für Kategorien ist abgeschaltet.' });
+        return;
+      }
+      const { started, status } = await startBacklogCategorization(pool, slug);
+      if (!started) {
+        response.status(409).json({ message: BACKLOG_BUSY });
+        return;
+      }
+      response.status(202).json({ running: true, total: status.total, done: 0, suggested: 0 });
+    },
+  );
+
+  app.delete(
+    '/projects/:slug/bugs/categorize-backlog',
+    access({ role: 'plan', tenant: 'project' }),
+    (request, response) => {
+      if (backlogStatus().projectSlug !== request.params.slug || !cancelBacklogCategorization()) {
+        response.status(409).json({ message: 'Für dieses Projekt läuft kein Lauf.' });
+        return;
+      }
+      response.status(202).json({ cancelled: true });
+    },
+  );
 
   app.delete('/bugs/:id', access({ role: 'plan', tenant: 'bugs' }), async (request, response) => {
     if (!isUuid(request.params.id)) {

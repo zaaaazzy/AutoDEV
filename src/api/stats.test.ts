@@ -1,7 +1,94 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool } from 'pg';
-import { collectStats } from './stats.js';
+import { BUG_CATEGORY_VALUES } from '../core/bug-category-values.js';
+import { withMigratedDatabase } from '../db/test-database.test.js';
+import { type BugCategoryStats, bugCategoryStats, collectStats, retrospectiveInput } from './stats.js';
+
+test('Bugs je Kategorie und Kategorie × Sprint: alle acht Kategorien, „ohne“, Retrospektive mit denselben Zahlen', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('b.bug_category AS category')) {
+        return {
+          rows: [
+            { category: 'ui', sprintId: 's1', sprintName: 'Sprint 1', open: '2', buried: '1' },
+            { category: null, sprintId: 's1', sprintName: 'Sprint 1', open: '1', buried: '0' },
+            { category: 'ui', sprintId: null, sprintName: null, open: '0', buried: '3' },
+            { category: 'ci', sprintId: null, sprintName: null, open: '4', buried: '0' },
+          ],
+        };
+      }
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+  const stats = await collectStats(pool, 'mainty');
+  const byCategory = stats.bugsByCategory as BugCategoryStats['bugsByCategory'];
+  assert.deepEqual(
+    byCategory.map((row) => row.category),
+    [...BUG_CATEGORY_VALUES, null],
+  );
+  assert.deepEqual(byCategory.find((row) => row.category === 'ui'), { category: 'ui', open: 2, buried: 4, total: 6 });
+  assert.deepEqual(byCategory.at(-1), { category: null, open: 1, buried: 0, total: 1 });
+  assert.equal(
+    byCategory.reduce((sum, row) => sum + row.total, 0),
+    11,
+  );
+  const pairs = stats.bugsByCategorySprint as BugCategoryStats['bugsByCategorySprint'];
+  assert.deepEqual(pairs[2], { category: 'ui', sprintId: null, sprintName: null, open: 0, buried: 3, total: 3 });
+  const sql = queries.find((query) => query.sql.includes('b.bug_category AS category'));
+  assert.match(sql?.sql ?? '', /LEFT JOIN sprints/, 'Bugs ohne Sprint zählen mit');
+  assert.match(sql?.sql ?? '', /WHERE b\.project_slug = \$1/);
+  assert.deepEqual(await retrospectiveInput(pool, 'mainty'), {
+    bugsByCategory: stats.bugsByCategory,
+    bugsByCategorySprint: stats.bugsByCategorySprint,
+  });
+});
+
+test('Bugs je Kategorie × Sprint auf PostgreSQL: Summe = alle Bugs, „Kein Sprint“, nur bestätigte Kategorien', async (t) => {
+  await withMigratedDatabase(t, 'devlog_stats_bugcat', async (pool) => {
+    await pool.query(
+      `INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop'), ('other', 'Other', '/tmp/o')`,
+    );
+    const sprint = (
+      await pool.query<{ id: string }>(`INSERT INTO sprints (project_slug, name) VALUES ('shop', 'S1') RETURNING id`)
+    ).rows[0]!.id;
+    await pool.query(
+      `INSERT INTO bugs (project_slug, title, status, sprint_id, bug_category, bug_category_suggested, bug_category_state)
+       VALUES ('shop', 'a', 'open', $1, 'ui', NULL, 'confirmed'),
+              ('shop', 'b', 'fixed', $1, 'ui', NULL, 'confirmed'),
+              ('shop', 'c', 'wontfix', NULL, 'api', NULL, 'confirmed'),
+              ('shop', 'd', 'in_progress', NULL, NULL, 'ci', 'suggested'),
+              ('shop', 'e', 'rejected', $1, NULL, NULL, NULL),
+              ('other', 'f', 'open', NULL, 'ui', NULL, 'confirmed')`,
+      [sprint],
+    );
+    const stats = await bugCategoryStats(pool, 'shop');
+    const all = Number((await pool.query(`SELECT count(*) FROM bugs WHERE project_slug = 'shop'`)).rows[0].count);
+    assert.equal(
+      stats.bugsByCategorySprint.reduce((sum, row) => sum + row.total, 0),
+      all,
+    );
+    assert.equal(
+      stats.bugsByCategory.reduce((sum, row) => sum + row.total, 0),
+      all,
+    );
+    assert.deepEqual(
+      stats.bugsByCategorySprint.map((row) => [row.category, row.sprintName, row.open, row.buried]),
+      [
+        ['ui', 'S1', 1, 1],
+        [null, 'S1', 0, 1],
+        ['api', null, 0, 1],
+        // Nur vorgeschlagen zählt als „ohne Kategorie“.
+        [null, null, 1, 0],
+      ],
+    );
+    assert.deepEqual(await retrospectiveInput(pool, 'shop'), stats);
+    const full = await collectStats(pool, 'shop');
+    assert.deepEqual([full.bugsByCategory, full.bugsByCategorySprint], [stats.bugsByCategory, stats.bugsByCategorySprint]);
+  });
+});
 
 test('Burndown rechnet Tage in Ortszeit (DEV_LOG_TIMEZONE), nicht in UTC der Datenbank', async () => {
   const previous = process.env.DEV_LOG_TIMEZONE;

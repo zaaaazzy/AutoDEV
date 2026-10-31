@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { afterBugCreated } from '../agent/bug-classifier.js';
 import { categoryFromBug } from './bug-category.js';
+import { type BugCategoryValue, isBugCategoryValue } from './bug-category-values.js';
 import type { TestCaseResult } from './test-results.js';
 
 /**
@@ -13,6 +14,8 @@ export interface BugDraft {
   severity: 'low' | 'medium' | 'high';
   /** Betroffene Dateien (z. B. die Testdatei) für die Kategorie; dazu kommen die in der Beschreibung genannten. */
   paths?: string[];
+  /** Vom Tester gewählte feste Bug-Kategorie: gilt als bestätigt; ohne sie schlägt das lokale Modell eine vor. */
+  bugCategory?: BugCategoryValue | null;
 }
 
 const MAX_TITLE = 180;
@@ -74,16 +77,17 @@ export async function fileBugs(pool: Pool, project: string, drafts: BugDraft[]):
   let created = 0;
   for (const draft of drafts) {
     const category = categoryFromBug(draft);
+    const bugCategory = isBugCategoryValue(draft.bugCategory) ? draft.bugCategory : null;
     const result = await pool.query<{ id: string }>(
-      `INSERT INTO bugs (project_slug, title, description, severity, source, category)
-       SELECT $1, $2, $3, $4, 'test', $5
+      `INSERT INTO bugs (project_slug, title, description, severity, source, category, bug_category, bug_category_state)
+       SELECT $1, $2, $3, $4, 'test', $5, $6, CASE WHEN $6::text IS NOT NULL THEN 'confirmed' END
         WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2
                             AND status IN ('open', 'in_progress'))
        RETURNING id`,
-      [project, draft.title, draft.description, draft.severity, category],
+      [project, draft.title, draft.description, draft.severity, category, bugCategory],
     );
     created += result.rowCount ?? 0;
-    afterBugCreated(pool, result.rows[0]?.id, category, draft);
+    afterBugCreated(pool, result.rows[0]?.id, category, draft, bugCategory);
   }
   return created;
 }
