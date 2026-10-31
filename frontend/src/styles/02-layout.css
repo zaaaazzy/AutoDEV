@@ -1780,8 +1780,16 @@ span.review-live.failed {
   border-left-color: var(--error-text);
   background: var(--error-soft);
 }
+.restart-banner.cancelled {
+  border-color: var(--line);
+  border-left-color: var(--muted);
+  background: var(--surface-soft);
+}
 .restart-banner p {
   margin: 6px 0 0;
+}
+.restart-banner .restart-cancel-error {
+  color: var(--error-text-strong);
 }
 .restart-head {
   display: flex;
