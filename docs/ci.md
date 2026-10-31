@@ -29,7 +29,7 @@ flowchart TB
 
 Alle `actions/checkout`-Schritte nutzen `persist-credentials: false`: Das `GITHUB_TOKEN` landet nicht in `.git/config`, Projektcode (Tests, Testserver, Docker-Build) kann es nicht lesen. Kein Job nutzt Secrets.
 
-- **`check`**: Postgres 17 als Service (`DEV_LOG_TEST_REQUIRE_DATABASE=1`: Datenbank-Tests dürfen nicht übersprungen werden), `npm ci`, `lint`, `format:check`, `typecheck` (inkl. Tests), `npm run test:unit`. `test:unit` baut die Oberfläche nicht, kein Unit-Test liest `dist/ui`. `npm test` (= `build:ui` + `test:unit`) bleibt der lokale Komplettlauf. Die Oberfläche baut in der CI nur der Job `e2e`.
+- **`check`**: Postgres 17 als Service (`DEV_LOG_TEST_REQUIRE_DATABASE=1`: Datenbank-Tests dürfen nicht übersprungen werden), `npm ci`, `lint` (ESLint und die Schichtenprüfung `scripts/check-layers.ts`), `format:check`, `typecheck` (inkl. Tests), `npm run test:unit`. `test:unit` baut die Oberfläche nicht, kein Unit-Test liest `dist/ui`. `npm test` (= `build:ui` + `test:unit`) bleibt der lokale Komplettlauf. Die Oberfläche baut in der CI nur der Job `e2e`.
 - **`e2e`**: Postgres 17 als Service (Wegwerf-Datenbank, kein Secret), Chromium installieren, `build:ui`, `npm run test:e2e`. Der Playwright-Reporter ist in der CI `list` plus `github`, Fehler stehen also im Log und als Annotation. Bei Fehlern werden die Traces als Artefakt `playwright-traces` (7 Tage) hochgeladen.
 - **`docker`**:
   1. Zufällige, maskierte Werte für `DEV_LOG_PASSWORD` und `DEV_LOG_DB_PASSWORD` (sonst griffe das bekannte Standardpasswort aus compose).

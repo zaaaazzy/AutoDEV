@@ -7,7 +7,7 @@ import { COMPLETE_COVERAGE_SQL } from '../core/coverage-areas.js';
 import { sendPush } from '../core/push.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { CATEGORIES, shortTitle, TITLE_MAX } from '../core/validation.js';
-import type { RunnerOptions } from '../runner/runner.js';
+import type { RunnerOptions } from '../runner/runner-types.js';
 import { runAuthorAgent } from './requirements.js';
 import { readProjectFile } from './tool-paths.js';
 import { defined } from '../core/defined.js';

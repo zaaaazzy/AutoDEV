@@ -15,7 +15,7 @@ import type { Pool } from 'pg';
 import { loadProjectContext, loadProjectRules, withProjectContext } from '../core/project-context.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
-import { loadKnownBugs } from '../api/bugs.js';
+import { loadKnownBugs } from '../db/bugs-repository.js';
 import { isUniqueViolation } from '../db/transaction.js';
 import { knownBugLine } from '../core/known-bugs.js';
 import { type ActualReference, loadAuthorReference, referenceSection, splitEstimate } from './estimation.js';
@@ -34,14 +34,10 @@ import {
 import { executeAgentCommand, isClaudeCommand } from './claude-stream.js';
 import { DEFAULT_DEFINITION_OF_READY, loadDefinitions } from '../runner/acceptance.js';
 import { shortTitle, TITLE_MAX } from '../core/validation.js';
-import { containsUntrusted, UNTRUSTED_HINT } from '../runner/hoster.js';
-import {
-  agentEnvironment,
-  buildInvocation,
-  defaultAgentCommand,
-  loadWorkflow,
-  type RunnerOptions,
-} from '../runner/runner.js';
+import { containsUntrusted, UNTRUSTED_HINT } from '../core/bug-trust.js';
+import { agentEnvironment, buildInvocation } from '../runner/runner-prompts.js';
+import { defaultAgentCommand, loadWorkflow } from '../runner/runner-selection.js';
+import type { RunnerOptions } from '../runner/runner-types.js';
 import { defined } from '../core/defined.js';
 
 const MIN_REQUIREMENT_CHARS = 80;

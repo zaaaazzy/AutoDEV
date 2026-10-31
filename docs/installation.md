@@ -28,7 +28,7 @@ flowchart LR
     subgraph AG["je Projekt: agents_projekt"]
       direction TB
       WB["workbench<br/>Claude Code oder Ollama"]:::ok
-      DD["docker (dind)"]
+      DD["docker (dind-rootless)"]
     end
     WK -->|docker exec| WB
   end

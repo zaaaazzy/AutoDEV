@@ -11,6 +11,7 @@ import { dropReportCopies } from './git-sync/report-copies.js';
 import { gitEnvironment, projectEnvironment, runProjectCommand } from './project-command.js';
 import type { RunnerOptions } from './runner-types.js';
 import { runTestAgent } from './test-agent.js';
+import { afterBugCreated } from '../agent/bug-classifier.js';
 import { isAllowedCommand, shellWords, withIgnoreScripts } from '../agent/command-checks.js';
 import { gateExecutor } from './test-sandbox.js';
 
@@ -241,6 +242,7 @@ export async function processTestRequest(
         pool,
         options.project,
         failed.map((step) => stepBug(step.command, step.output, runId)),
+        (bugId, category, draft) => afterBugCreated(pool, bugId, category, draft),
       );
       await pool.query('UPDATE test_requests SET bug_count = $2 WHERE id = $1', [request.id, bugs]);
       return { passed: failed.length === 0, output: '' };

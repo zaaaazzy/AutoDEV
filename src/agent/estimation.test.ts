@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool } from 'pg';
-import { UNTRUSTED_END, UNTRUSTED_HINT, UNTRUSTED_START } from '../runner/hoster.js';
+import { UNTRUSTED_END, UNTRUSTED_HINT, UNTRUSTED_START } from '../core/bug-trust.js';
 import {
   type Estimate,
   estimateNewIdeas,

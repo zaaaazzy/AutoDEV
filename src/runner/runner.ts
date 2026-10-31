@@ -5,7 +5,7 @@ import { processApprovals } from './review-gate.js';
 import { folderAvailable, hadOutage } from '../core/folder-guard.js';
 import type { Pool } from 'pg';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
-import { loadKnownBugs } from '../api/bugs.js';
+import { loadKnownBugs } from '../db/bugs-repository.js';
 import { awaitsBugApprovalSql } from '../core/bug-trust.js';
 import { backfillFailures, detachFromClosedSprints, resumeAfterEnvironment } from './autofix.js';
 import { loadProjectContext } from '../core/project-context.js';

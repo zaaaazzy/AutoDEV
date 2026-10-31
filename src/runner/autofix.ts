@@ -6,7 +6,9 @@ import { humanActionFor, setActionTodo } from './action-todo.js';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { shortTitle } from '../core/validation.js';
 import type { Pool } from 'pg';
-import { reportAgentBug } from '../api/bugs.js';
+import { reportAgentBug } from '../db/bugs-repository.js';
+import { afterBugCreated } from '../agent/bug-classifier.js';
+import { categoryFromBug } from '../core/bug-category.js';
 import { UNTRUSTED_START } from './hoster.js';
 
 import { USAGE_LIMIT } from '../core/provider-limits.js';
@@ -202,13 +204,18 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
     );
     return;
   }
+  // Kurz: Agent und Auftrag; die Fehlerausgabe steht in der Beschreibung. Die Kategorie kommt aus den genannten
+  // Pfaden, sonst stuft das lokale Modell im Hintergrund ein (ohne Einfluss auf den Auto-Fix-Ablauf).
+  const bugTitle = `${agentName}: ${shortTitle(item.title)}`;
+  const category = categoryFromBug({ title: bugTitle, description: detail });
   const bugId = await reportAgentBug(pool, {
     projectSlug: item.projectSlug,
-    // Kurz: Agent und Auftrag; die Fehlerausgabe steht in der Beschreibung.
-    title: `${agentName}: ${shortTitle(item.title)}`,
+    title: bugTitle,
     description: detail,
     developmentId: item.id,
+    category,
   });
+  afterBugCreated(pool, bugId, category, { title: bugTitle, description: detail });
   // Bevor ein Behebungsauftrag entsteht, prüft die Problemanalyse (ein zweiter Agent), ob die Diagnose stimmt.
   await pool.query(
     `UPDATE development_items SET failure = $2, failure_bug_id = $3, auto_run = FALSE,

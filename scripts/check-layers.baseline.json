@@ -1,0 +1,132 @@
+[
+  {
+    "from": "src/agent/chat-references.ts",
+    "to": "src/api/idea-comments.ts",
+    "why": "Antwort auf Ideen-Kommentare steckt im Routenmodul; Datenzugriff nach src/db/idea-comments-repository.ts."
+  },
+  {
+    "from": "src/agent/chat.ts",
+    "to": "src/api/idea-comments.ts",
+    "why": "Antwort auf Ideen-Kommentare steckt im Routenmodul; Datenzugriff nach src/db/idea-comments-repository.ts."
+  },
+  {
+    "from": "src/agent/estimation.ts",
+    "to": "src/runner/runner-prompts.ts",
+    "why": "buildInvocation und agentEnvironment bauen den CLI-Aufruf eines Agents; gehören nach src/agent."
+  },
+  {
+    "from": "src/agent/estimation.ts",
+    "to": "src/runner/test-sandbox.ts",
+    "why": "projectSandbox liest den Sandbox-Modus des Projekts; gehört als Datenzugriff nach src/db oder zu src/core/sandbox."
+  },
+  {
+    "from": "src/agent/ollama-tools.ts",
+    "to": "src/runner/project-command.ts",
+    "why": "Gefiltertes Environment für Projektcode ist eine Hilfe ohne Runner-Bezug; gehört nach src/core."
+  },
+  {
+    "from": "src/agent/requirements.ts",
+    "to": "src/runner/acceptance.ts",
+    "why": "Definition of Ready/Done ist Datenzugriff; gehört nach src/db."
+  },
+  {
+    "from": "src/agent/requirements.ts",
+    "to": "src/runner/budget.ts",
+    "why": "Budgetprüfung ist Datenzugriff plus Regel; gehört nach src/db bzw. src/core."
+  },
+  {
+    "from": "src/agent/requirements.ts",
+    "to": "src/runner/runner-prompts.ts",
+    "why": "buildInvocation und agentEnvironment bauen den CLI-Aufruf eines Agents; gehören nach src/agent."
+  },
+  {
+    "from": "src/agent/requirements.ts",
+    "to": "src/runner/runner-selection.ts",
+    "why": "defaultAgentCommand liest den Standardbefehl aus der Umgebung; gehört nach src/agent."
+  },
+  {
+    "from": "src/agent/requirements.ts",
+    "to": "src/runner/test-sandbox.ts",
+    "why": "projectSandbox liest den Sandbox-Modus des Projekts; gehört als Datenzugriff nach src/db oder zu src/core/sandbox."
+  },
+  {
+    "from": "src/agent/service-actions.ts",
+    "to": "src/runner/project-command.ts",
+    "why": "Gefiltertes Environment für Projektcode ist eine Hilfe ohne Runner-Bezug; gehört nach src/core."
+  },
+  {
+    "from": "src/agent/sprint-comment.ts",
+    "to": "src/api/sprint-planning.ts",
+    "why": "Sprintvorschlag, Autopilot-Regeln und completeSprint stecken im Routenmodul; Datenzugriff nach src/db, Regeln nach src/core/sprint-rules."
+  },
+  {
+    "from": "src/agent/system-agents.ts",
+    "to": "src/runner/runner-selection.ts",
+    "why": "defaultAgentCommand liest den Standardbefehl aus der Umgebung; gehört nach src/agent."
+  },
+  {
+    "from": "src/agent/troubleshoot.ts",
+    "to": "src/runner/action-todo.ts",
+    "why": "Aktion-notwendig-Vermerke sind Datenzugriff; gehören nach src/db."
+  },
+  {
+    "from": "src/agent/troubleshoot.ts",
+    "to": "src/runner/autofix.ts",
+    "why": "Behebungsauftrag anlegen (delegateAfterAnalysis) ist Ablauflogik des Workers; Ziel: Domänenmodul unterhalb von agent."
+  },
+  {
+    "from": "src/runner/action-todo.ts",
+    "to": "src/api/reports.ts",
+    "why": "generateSprintReport steckt im Routenmodul; gehört als Datenzugriff nach src/db."
+  },
+  {
+    "from": "src/runner/runner-cli.ts",
+    "to": "src/api/worker.ts",
+    "why": "Heartbeat und maxConcurrentAgents stecken im Routenmodul; Datenzugriff nach src/db."
+  },
+  {
+    "from": "src/runner/runner-cli.ts",
+    "to": "src/setup/setup-jobs.ts",
+    "why": "Der Worker führt die Einrichtungsaufgaben aus; bleibt, bis die Job-Arten wie scheduled_jobs über eine Registry laufen."
+  },
+  {
+    "from": "src/runner/runner-settle.ts",
+    "to": "src/api/docs.ts",
+    "why": "Doku-Abgleich und Doku speichern stecken im Routenmodul; Datenzugriff nach src/db/docs-repository.ts."
+  },
+  {
+    "from": "src/runner/runner-steps.ts",
+    "to": "src/api/docs.ts",
+    "why": "Doku-Abgleich und Doku speichern stecken im Routenmodul; Datenzugriff nach src/db/docs-repository.ts."
+  },
+  {
+    "from": "src/runner/runner.ts",
+    "to": "src/api/attachments.ts",
+    "why": "materializeAttachments steckt im Routenmodul; gehört nach src/db bzw. src/core."
+  },
+  {
+    "from": "src/runner/runner.ts",
+    "to": "src/api/docs.ts",
+    "why": "Doku-Abgleich und Doku speichern stecken im Routenmodul; Datenzugriff nach src/db/docs-repository.ts."
+  },
+  {
+    "from": "src/runner/runner.ts",
+    "to": "src/api/reports.ts",
+    "why": "generateSprintReport steckt im Routenmodul; gehört als Datenzugriff nach src/db."
+  },
+  {
+    "from": "src/runner/scheduler.ts",
+    "to": "src/api/sprint-planning.ts",
+    "why": "Sprintvorschlag, Autopilot-Regeln und completeSprint stecken im Routenmodul; Datenzugriff nach src/db, Regeln nach src/core/sprint-rules."
+  },
+  {
+    "from": "src/runner/sprint-autopilot.ts",
+    "to": "src/api/git-state.ts",
+    "why": "Git-Zustand laden steckt im Routenmodul; Datenzugriff nach src/db."
+  },
+  {
+    "from": "src/runner/sprint-autopilot.ts",
+    "to": "src/api/sprint-planning.ts",
+    "why": "Sprintvorschlag, Autopilot-Regeln und completeSprint stecken im Routenmodul; Datenzugriff nach src/db, Regeln nach src/core/sprint-rules."
+  }
+]
