@@ -2,6 +2,7 @@ import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core'
 import { ApiService } from './api.service.js';
 import { errorMessage, FieldError } from './errors.js';
 import {
+  BUG_STATUS,
   emptyProjectData,
   type DevelopmentItem,
   type Project,
@@ -87,7 +88,8 @@ export class ProjectStore {
     equal: sameIds,
   });
   readonly openBugCount = computed(
-    () => this.data().bugs.filter((bug) => bug.status === 'open' || bug.status === 'in_progress').length,
+    () =>
+      this.data().bugs.filter((bug) => bug.status === BUG_STATUS.open || bug.status === BUG_STATUS.inProgress).length,
   );
 
   constructor() {

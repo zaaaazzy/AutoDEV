@@ -5,6 +5,8 @@ import type { BugStatus, DevelopmentStatus, SprintStatus } from '../../../../src
 
 export type { BudgetPeriod, RoutingCondition, RoutingRule, RuleEffect } from '../../../../src/core/shared-types.js';
 export type { BugStatus, DevelopmentStatus, SprintStatus } from '../../../../src/core/status.js';
+// Die Werte selbst (DEVELOPMENT_STATUS.done statt 'done'): Vergleiche und Listen bauen auf ihnen auf.
+export { BUG_STATUS, DEVELOPMENT_STATUS, IDEATION_STATUS, SPRINT_STATUS } from '../../../../src/core/status.js';
 
 export type Priority = 'low' | 'medium' | 'high';
 /** review = Pull Request offen (PR-Modus der GitHub-Brücke), Merge und Tag folgen nach grüner CI. */

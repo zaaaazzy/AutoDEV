@@ -7,6 +7,7 @@ import { Component, computed, effect, inject, input, output, signal } from '@ang
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth.service.js';
 import type { AcceptanceCheck, DevelopmentItem } from '../../core/models.js';
+import { SPRINT_STATUS } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { AcceptanceTicks } from '../../shared/acceptance-ticks.js';
 import { visibleInterval } from '../../core/visible-interval.js';
@@ -134,7 +135,7 @@ export class OrderDetailComponent {
   /** Formular für einen Folgeauftrag (nur bei erledigten Aufträgen). */
   protected readonly followUpOpen = signal(false);
   protected readonly activeSprintId = computed(
-    () => this.data().sprints.find((sprint) => sprint.status === 'active')?.id ?? null,
+    () => this.data().sprints.find((sprint) => sprint.status === SPRINT_STATUS.active)?.id ?? null,
   );
   /** Vorgänger, auf den sich dieser Auftrag bezieht. */
   protected readonly previous = computed(() => {
