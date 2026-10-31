@@ -4,6 +4,23 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 
 ## Ablauf
 
+```mermaid
+flowchart TB
+  Z["nach jedem Arbeitszyklus (30 s)<br/>runScheduledJobs"] --> Q["runDueJobs:<br/>fällige aktive Zeilen<br/>FOR UPDATE SKIP LOCKED"]
+  Q --> L["next_run_at + Intervall<br/>locked_until = 330 s<br/>last_status running"]
+  L --> K{"Job-Art in<br/>JOB_KINDS?"}
+  K -->|nein| F1["failed<br/>(nichts aus der DB ausführen)"]:::bad
+  K -->|ja| R["Job mit Zeitlimit<br/>timeoutSeconds, max. 300 s"]:::ok
+  R -->|ok / warning| S["Status, Zeitpunkt,<br/>Meldung in die Zeile"]:::ok
+  R -->|Fehler| F2["failed + Meldung<br/>Zyklus läuft weiter"]:::bad
+  R -->|Zeitlimit| G["Abbruchsignal,<br/>bis 20 s Gnadenfrist"]:::wait
+  G -->|beendet| F2
+  G -->|"läuft noch"| H["failed „läuft noch“,<br/>Sperre bleibt"]:::bad
+  classDef ok fill:#e3f1e8,stroke:#2f8a57,color:#1d4d33
+  classDef bad fill:#fbe9e4,stroke:#b4472f,color:#6b2717
+  classDef wait fill:#fdf1e0,stroke:#e08a1e,color:#5c3a0a
+```
+
 1. `runner-cli.ts` ruft nach jedem Arbeitszyklus (30 s) `runScheduledJobs()` auf, ausserhalb von `runWorkflow`, weil dieses je Projekt läuft.
 2. `runDueJobs` (`src/runner/scheduler.ts`) beansprucht fällige, aktive Zeilen mit `FOR UPDATE SKIP LOCKED`. Dabei setzt es `next_run_at` auf jetzt + Intervall, `locked_until` auf höchstes Zeitlimit + Reserve (330 s) und `last_status` auf `running`. Ein zweiter Worker sieht die Zeile nicht und führt sie nicht doppelt aus.
 3. Die Job-Art wird in der festen Registry `JOB_KINDS` nachgeschlagen. Unbekannte Art: Status `failed`, andere Jobs laufen weiter. Es wird nie ein Pfad oder Befehl aus der Datenbank ausgeführt.
@@ -26,7 +43,7 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 
 - `GET /api/scheduled-jobs` liefert Jobs und die erlaubten Job-Arten.
 - `PATCH /api/scheduled-jobs/:key` ändert `enabled`, `intervalSeconds` (60 s bis 30 Tage), `startAt` und `config` (JSON-Objekt, höchstens 4000 Zeichen). Bei neuem Intervall oder neuer Startzeit wird `next_run_at` ab dem letzten Lauf neu berechnet, frühestens ab der Startzeit.
-- Beide Routen prüfen die Admin-Rolle serverseitig (Deklaration `access({ tenant: 'admin' })` an der Route und zusätzliche Prüfung in der Route, siehe `docs/agents-und-rechte.md`, Abschnitt „Benutzerrollen und Mandanten an den API-Routen“). Nicht-Administratoren erhalten 403.
+- Beide Routen prüfen die Admin-Rolle serverseitig (Deklaration `access({ tenant: 'admin' })` am GET bzw. `access({ role: 'admin', tenant: 'admin' })` am PATCH und zusätzliche Prüfung in der Route, siehe `docs/agents-und-rechte.md`, Abschnitt „Benutzerrollen und Mandanten an den API-Routen“). Nicht-Administratoren erhalten 403.
 - Die Job-Art lässt sich nicht ändern. Eine Oberfläche gibt es nicht.
 
 ## Worauf zu achten ist

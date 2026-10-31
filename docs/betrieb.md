@@ -22,7 +22,7 @@ Mit `./start.sh --setup` (Windows: `start.cmd --setup`) öffnest du den Einricht
   schon vorhandenen Datenbank per `ALTER USER`, bevor die übrigen Container starten.
 - Die `.env` und ihre Sicherungen sind nur für dich lesbar (Modus `600`) und stehen in `.gitignore`.
 - Der Worker bekommt den Secret Key mit: im Container über `docker-compose.yml` aus der `.env`, auf dem Host über den
-  macOS-LaunchAgent, den Linux-systemd-Dienst bzw. die Windows-Startdatei `%LOCALAPPDATA%\AIdeation\worker.cmd` der
+  macOS-LaunchAgent, den Linux-systemd-Dienst bzw. die Windows-Aufgabe `AIdeationWorker` (startet `scripts\run-with-env.ps1`, Umgebung in `%LOCALAPPDATA%\AIdeation\worker.env`) der
   Aufgabe `AIdeationWorker`.
 - Läuft die Einrichtung schon in einem anderen Fenster, lehnt der Assistent einen zweiten Start ab. Nach einem
   Fehler bleibt er offen, ein neuer Versuch ist mit „Zurück“ möglich.
@@ -285,7 +285,7 @@ einmal entfernen, AIdeation legt ihn neu an: `docker rm -f aideation-egress`.
 Datei `.aideation/workbench.json` an. Der Worker liest sie aus dem **Live-Ordner** des Projekts (dem geprüften Stand
 auf `main`), nicht aus dem Arbeitsordner der Agents – ein Agent kann sich so keine weiteren Rechte geben. Erlaubt sind
 je Dienst nur `image`, `environment`, `command` und `tmpfs`; Ports, Mounts, Rechte und Netzwerke setzt AIdeation
-selbst. `environment` auf oberster Ebene gilt für die `workbench`. Beispiel (so testet AIdeation sich selbst):
+selbst. `environment` auf oberster Ebene gilt für die `workbench`. Beispiel (gekürzt aus der `.aideation/workbench.json`, mit der AIdeation sich selbst testet; die echte Datei setzt zusätzlich `DEV_LOG_ADMIN_DATABASE_URL`, `E2E_ADMIN_DATABASE_URL` und `DEV_LOG_TEST_REQUIRE_DATABASE`):
 
 ```json
 {
@@ -379,7 +379,9 @@ löscht das Skript erst, wenn sie älter als `DEV_LOG_BACKUP_KEEP_DAYS` (Standar
 ## Wiederherstellen
 
 Ein Backup spielst du mit `bash scripts/restore.sh backups/aideation-JJJJMMTT-HHMMSS.dump` ein. Das Skript stoppt
-Worker, Wächter, API, Oberfläche und Backup-Dienst. Dann füllt es eine neue Datenbank und prüft mit einem
+den Worker und den Wächter auf dem Host (launchd bzw. systemd) sowie API, Oberfläche und Backup-Dienst. **Laufen Worker und
+Wächter als Compose-Dienste** (Profil `worker`), stoppst du sie vorher selbst mit `docker compose --profile worker stop worker watchdog`
+und startest sie danach wieder; das Skript fasst sie nicht an (`scripts/restore.sh`). Dann füllt es eine neue Datenbank und prüft mit einem
 Entschlüsselungs-Test, ob `DEV_LOG_SECRET_KEY` passt. Erst dann ersetzt es `aideation`. Die alte Datenbank bleibt als
 `aideation_vor_restore_<zeit>` liegen. Scheitert ein Schritt, bleibt die Live-Datenbank unverändert. Backups werden
 dabei weder gelöscht noch rotiert.

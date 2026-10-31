@@ -1,5 +1,44 @@
 # AIdeation-Datenbank
 
+Kern des Schemas (Auswahl; alle Tabellen stehen weiter unten):
+
+```mermaid
+erDiagram
+  projects ||--o{ ideation_items : "hat"
+  ideation_items ||--o{ ideation_attachments : "Bilder"
+  ideation_items ||--o| development_items : "wird Auftrag"
+  projects ||--o{ sprints : "hat"
+  sprints ||--o{ development_items : "enthält"
+  sprints ||--o| sprint_reports : "Bericht"
+  projects ||--o{ bugs : "hat"
+  bugs ||--o{ development_items : "Behebungsauftrag"
+  projects ||--o{ agents : "hat"
+  agents ||--o{ workflow_steps : "Einsatz je Phase"
+  development_items ||--o{ agent_runs : "Läufe"
+  agent_runs ||--o{ agent_run_steps : "Schritte"
+  agents ||--o{ agent_run_steps : "führt aus"
+  development_items ||--o{ acceptance_checks : "Abnahme"
+  development_items ||--o{ development_events : "Verlauf"
+```
+
+Benutzer, Dokumentation und Tests:
+
+```mermaid
+erDiagram
+  users ||--o{ project_members : "Mitglied"
+  projects ||--o{ project_members : "Mandant"
+  users ||--o{ auth_sessions : "Sitzungen"
+  users ||--o{ push_subscriptions : "Geräte"
+  projects ||--o{ docs : "Handbücher, Berichte"
+  docs ||--o{ doc_revisions : "Änderungen (Vier-Augen)"
+  users ||--o{ doc_revisions : "Autor"
+  projects ||--o{ test_runs : "Testläufe"
+  test_runs ||--o{ test_run_steps : "Schritte"
+  projects ||--o{ chat_messages : "Chat"
+  projects ||--o{ agent_tasks : "Aktionen, Routinen"
+  agent_tasks ||--o{ agent_task_runs : "Läufe"
+```
+
 Eigene Datenbank, getrennt von `mainty`: `projects` (slug) 1:n `test_runs` 1:n `test_run_steps`; `projects` 1:n `ideation_items` 1:n `ideation_attachments` (Bilder bis 5 MB als BYTEA; Aufträge erreichen sie über `ideation_id`, der Runner legt sie unter `.dev-log/attachments/<auftrag>/` im Projektordner ab und nennt sie im Prompt); `projects` 1:n `development_items`, optional verknüpft mit einer Idee, einem Testlauf und einem Sprint desselben Projekts. `ideation_items` und `development_items` tragen `effort_hours`, `token_estimate`, `benefit` und `cost` (0–10). `projects` 1:n `sprints` (1:n `development_items`) und `projects` 1:n `agents` (`phase` pre_sprint/pre_task/while_task/after_task/on_rejected/on_done, `position` = Reihenfolge; `workflow_steps` überschreibt Phase und Position je Projekt). Das Schema wird beim Start von Dienst bzw. Agent automatisch angelegt.
 
 Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:n `agent_runs` (ein laufender Lauf pro Auftrag) 1:n `agent_run_steps` (Agent, Phase, Status, Exit-Code, Dauer, Ausgabe). `runner_workers` (ID, PID, Rechner, `last_seen`) ist das Lebenszeichen je Worker; `agent_runs.worker_id` und `agent_processes.worker_id` verweisen darauf (ohne Fremdschlüssel, Altzeilen ohne ID).
@@ -55,7 +94,7 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 - `projects`: `preview_url` (http(s), ohne Zugangsdaten; leer = Schritt übersprungen), `preview_pages` (JSONB-Liste von Pfaden wie `/#dashboard`), `visual_settings` (JSONB: `tolerance` in Prozent, `threshold` Farbabstand, `masks` CSS-Selektoren, `login` mit Seite, Selektoren und den **Namen** der Testwerte aus der `.env.example`, `aiJudge`, `visionModel`).
 - `agents.role` zusätzlich `visual_tester`; `acceptance_checks.kind` zusätzlich `visual` (Befunde der visuellen Prüfung, ersetzt bei jedem Lauf; der Tester lässt sie stehen).
 - `development_items`: `visual_approved_at`, `visual_approved_by` (Anzeigename) – „Optisch freigeben“ im Reiter „Ansicht“.
-- `visual_snapshots` (`id` UUID, `development_id` → `development_items`, `project_slug` → `projects` (Mandant), `page`, `device` desktop/mobile, `kind` shot/diff, `data` PNG als BYTEA höchstens 2 MB, `diff_percent`, `base_id` → Vorher-Stand, `created_at`). Je Projekt, Seite, Gerät und Art bleiben die letzten 3 Stände; ältere löscht der Schritt beim Speichern. Auslieferung über `/api/visual-snapshots/<id>` mit Mandantenprüfung (`tenancy.ts`).
+- `visual_snapshots` (`id` UUID, `development_id` → `development_items`, `project_slug` → `projects` (Mandant), `page`, `device` desktop/mobile, `kind` shot/diff, `data` PNG als BYTEA höchstens 2 MB, `diff_percent`, `base_id` → Vorher-Stand, `created_at`). Je Projekt, Seite, Gerät und Art bleiben die letzten 3 Stände; ältere löscht der Schritt beim Speichern. Auslieferung über `/api/visual-snapshots/<id>` mit Mandantenprüfung (`src/api/tenancy.ts`).
 
 ## Erweiterung: Wartungs-Jobs im Worker
 

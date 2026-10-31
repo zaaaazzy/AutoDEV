@@ -15,6 +15,29 @@ ausfüllen. Alles Weitere (Worker, Container, Backups, Fehlerbehebung im Betrieb
 | Worker + Ausfall-Wächter | Docker (empfohlen) oder direkt auf dem Rechner | startet die Agents in deinen Projektordnern |
 | Agents | Docker (eigene Container je Projekt) | Claude Code oder ein lokales Modell (Ollama) |
 
+```mermaid
+flowchart LR
+  U(["Browser<br/>http://localhost:3100"]):::person --> FE
+  subgraph DOCKER["Docker auf deinem Rechner"]
+    direction TB
+    FE["Oberfläche<br/>frontend (nginx)"] --> API["API<br/>dev-log (Node)"]
+    API --> DB[("PostgreSQL<br/>db · 127.0.0.1:5433")]
+    BK["backup<br/>täglich nach backups/"] --> DB
+    WK["worker<br/>startet die Agents"]:::ok <--> DB
+    WD["watchdog<br/>prüft alle 2 min"] -.-> API
+    subgraph AG["je Projekt: agents_projekt"]
+      direction TB
+      WB["workbench<br/>Claude Code oder Ollama"]:::ok
+      DD["docker (dind)"]
+    end
+    WK -->|docker exec| WB
+  end
+  WB --> P[("deine Projektordner")]
+  WB -->|Egress-Proxy| NET(["Anthropic · npm · Docker Hub · Ollama"])
+  classDef ok fill:#e3f1e8,stroke:#2f8a57,color:#1d4d33
+  classDef person fill:#e8eef6,stroke:#36608f,color:#1f3a5c
+```
+
 ## 1. Voraussetzungen
 
 | | macOS | Windows | Linux |

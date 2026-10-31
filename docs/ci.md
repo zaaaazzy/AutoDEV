@@ -6,6 +6,27 @@ Workflow: `.github/workflows/ci.yml`. Läuft bei `push` auf `main` und bei `pull
 
 ## Jobs
 
+```mermaid
+flowchart TB
+  T(["push auf main oder pull_request"]):::person --> C1
+  T --> E1
+  T --> D1
+  subgraph C["Job check"]
+    C1["Postgres 17 als Service"] --> C2["npm ci"] --> C3["lint · format:check · typecheck"] --> C4["test:unit<br/>ohne UI-Build,<br/>DB-Tests Pflicht"]
+  end
+  subgraph E["Job e2e"]
+    E1["Postgres 17 · Chromium"] --> E2["build:ui"] --> E3["test:e2e<br/>Traces bei Fehlern<br/>(7 Tage)"]
+  end
+  subgraph D["Job docker"]
+    D1["zufällige Passwörter"] --> D2["compose build dev-log frontend https<br/>build deploy/review · aideation-agent"] --> D3["sandbox-docker.test.ts<br/>mit echtem Docker"] --> D4["up --wait db dev-log frontend<br/>curl /health · worker + watchdog"] --> D5["down -v"]
+  end
+  C4 --> OK(["grün: Merge erlaubt"]):::ok
+  E3 --> OK
+  D5 --> OK
+  classDef ok fill:#e3f1e8,stroke:#2f8a57,color:#1d4d33
+  classDef person fill:#e8eef6,stroke:#36608f,color:#1f3a5c
+```
+
 Alle `actions/checkout`-Schritte nutzen `persist-credentials: false`: Das `GITHUB_TOKEN` landet nicht in `.git/config`, Projektcode (Tests, Testserver, Docker-Build) kann es nicht lesen. Kein Job nutzt Secrets.
 
 - **`check`**: Postgres 17 als Service (`DEV_LOG_TEST_REQUIRE_DATABASE=1`: Datenbank-Tests dürfen nicht übersprungen werden), `npm ci`, `lint`, `format:check`, `typecheck` (inkl. Tests), `npm run test:unit`. `test:unit` baut die Oberfläche nicht, kein Unit-Test liest `dist/ui`. `npm test` (= `build:ui` + `test:unit`) bleibt der lokale Komplettlauf. Die Oberfläche baut in der CI nur der Job `e2e`.

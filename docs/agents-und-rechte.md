@@ -10,6 +10,28 @@ Es gibt **einen** Worker (`npm run worker` = `tsx src/runner/runner-cli.ts --all
 - Alle 15 s sendet er einen Heartbeat (Worker-Badge im Dashboard).
 - Gleichzeitig laufen höchstens `maxConcurrentAgents` Projekte (Einstellung, Standard 2). Das Projekt, das am längsten wartet, kommt zuerst.
 
+```mermaid
+flowchart LR
+  subgraph W["Worker-Prozess (einer je Installation)"]
+    direction TB
+    H["Heartbeat · 15 s<br/>Badge, verwaiste Läufe, Rollback"]
+    CH["Chat-Takt · 1,5 s<br/>Assistent, Schätzung, Autor,<br/>Visionär, Problemanalyse"]
+    CY["Arbeitszyklus · 30 s oder sofort<br/>je Projekt, max. maxConcurrentAgents parallel"]:::ok
+    RT["Routinen-Planer · 1 min"]
+    GH["GitHub-Brücke · 5 min<br/>PR-Status · 2 min"]
+    JB["Wartungs-Jobs<br/>nach jedem Zyklus"]
+    SU["Einrichtung · 0,5 s<br/>Projekt-Assistent"]
+  end
+  DB[("PostgreSQL<br/>NOTIFY devlog_work")] <--> W
+  CY --> P1[("Projektordner A<br/>Agents, Git")]
+  CY --> P2[("Projektordner B")]
+  CY -->|"docker exec"| WB["Arbeitscontainer<br/>agents_slug"]:::ok
+  classDef ok fill:#e3f1e8,stroke:#2f8a57,color:#1d4d33
+  classDef bad fill:#fbe9e4,stroke:#b4472f,color:#6b2717
+  classDef wait fill:#fdf1e0,stroke:#e08a1e,color:#5c3a0a
+  classDef person fill:#e8eef6,stroke:#36608f,color:#1f3a5c
+```
+
 ## 2. Automatische Trigger
 
 | Trigger                                                     | Takt                                                                        | Was passiert                                                                                                                                                                                                                                                                                 |
@@ -31,7 +53,31 @@ Pro Auftrag läuft immer nur **ein** Lauf (`agent_runs` mit Status `running` ist
 
 ## 3. Workflow-Agents (pro Projekt konfigurierbar)
 
-Ein Auftrag durchläuft die aktivierten Agents nach Phase und Position: `pre_task` → `while_task` → `after_task`. Jeder Agent kann einen eigenen Befehl (`command`) haben; sonst gilt `DEV_LOG_AGENT_COMMAND`, sonst das lokale Ollama-Modell (`qwen3.5:9b`).
+Ein Auftrag durchläuft die aktivierten Agents nach Phase und Position: `pre_task` → `while_task` → `after_task` (dazu `pre_sprint`, `on_done`, `on_rejected`, siehe [Workflows](./workflows.md), Abschnitt 4a). Jeder Agent kann einen eigenen Befehl (`command`) haben; sonst gilt `DEV_LOG_AGENT_COMMAND`, sonst das lokale Ollama-Modell (`qwen3.5:9b`).
+
+```mermaid
+flowchart TB
+  subgraph PRE["pre_task"]
+    direction LR
+    A["Auftragsautor<br/>author · nur lesen"] --> B["Bug-Wächter<br/>bug_reviewer · nur lesen"]
+  end
+  subgraph WHILE["while_task"]
+    D["Entwickler<br/>developer · schreibt, Shell, SQL"]:::ok
+  end
+  subgraph AFTER["after_task"]
+    direction LR
+    T["Tester<br/>tester · schreibt, Shell"]:::ok --> V["Visueller Tester<br/>visual_tester"] --> R["Reviewer<br/>reviewer · muss freigeben"]:::wait --> DO["Dokumentierer<br/>documenter"] --> M["Handbuch-Autoren<br/>manual_writer<br/>user_manual_writer"]
+  end
+  subgraph SYS["System-Agents (kein Workflow-Schritt)"]
+    direction LR
+    AS["Dashboard-Assistent<br/>assistant · Chat, Aktionen, Routinen"]:::person --> AN["Problemanalyse<br/>analyst · nur lesen"] --> VI["Visionär<br/>visionary · nur lesen"] --> PS["Vor dem Sprint<br/>pre_sprint · nur lesen"]
+  end
+  B --> D --> T
+  M ~~~ AS
+  classDef ok fill:#e3f1e8,stroke:#2f8a57,color:#1d4d33
+  classDef wait fill:#fdf1e0,stroke:#e08a1e,color:#5c3a0a
+  classDef person fill:#e8eef6,stroke:#36608f,color:#1f3a5c
+```
 
 **Befehl und Rolle nur für Administration:** Der `command` läuft als Prozess auf dem Worker (mit dessen Rechten), die `role` bestimmt Ablauf und Rechte des Agents. Beide Felder setzt oder ändert nur die Rolle `admin` (`adminFieldsCheck` in `src/api/agents.ts`, gemeinsam für `POST /projects/:slug/agents` und `PATCH /agents/:id`). Die Rolle `agents` bekommt sonst 403, auch bei `null` oder `[]`; ohne angemeldeten Benutzer gilt dasselbe. Erlaubt ist nur ein exakt unveränderter Wert (JSON-Gleichheit mit dem gespeicherten Stand; beim Anlegen: kein Befehl, Rolle `custom`). Er wird dann nicht geschrieben. Ein PATCH ohne `command` und `role` (Name, Anweisung, Rechte, Weitergabe) bleibt für `agents` erlaubt. `POST …/agents/defaults` legt die Standard-Agents immer ohne Befehl an. Der Reviewer, den `ensureReviewer` einmalig nachrüstet, übernimmt den gespeicherten Befehl des Entwicklers, also einen Wert, den nur die Administration gesetzt haben kann. In der Oberfläche sind Modell, Befehl und Rolle für Nicht-Admins gesperrt; maßgeblich ist die Prüfung im Backend. Der Chat-Assistent schreibt keine Agents: Sein `run_sql` läuft nur auf der Projekt-Datenbank, nie auf der AIdeation-Datenbank (`targetsDevLogDatabase`).
 
@@ -54,7 +100,7 @@ Die Marketing-Seite im Dashboard (Dokumentation → Marketing → „Agents, Auf
 
 Das Dashboard („Agent-Status“) zeigt je Agent ein Rollen-Icon, die Rolle und die Rechte-Stufe „Dateien ändern: ja/nein“ und „Befehle: ja/nein“. Angezeigt wird der Standardwert der Rolle. Hängen die Rechte vom Befehl ab (Claude-CLI oder lokales Modell, Rechte-Gruppen), steht zusätzlich „je nach Befehl“ dabei. Die einzige Quelle dafür ist `AGENT_RIGHTS` in `frontend/src/app/features/agents/agent-options.ts`. Ändert sich die Tabelle oben, muss diese Zuordnung nachgezogen werden; `agent-rights.spec.ts` vergleicht sie mit dieser Tabelle. Die Rechte-Stufe beschreibt Agents, nicht Benutzerrollen. Darunter zeigt „Offene Aufträge je Agent“, wie die offenen Aufträge (nicht erledigt oder abgelehnt) auf die Agents verteilt sind, inklusive „Ohne Agent“. Ein Klick auf einen Abschnitt öffnet die Auftragsliste mit dem Filter in der Spalte „Agent“.
 
-Mit der Claude-CLI bekommen Assistent, Entwickler, Tester und Reviewer alle freigeschalteten Rechte-Gruppen (`TRUSTED_ROLES`); alle anderen Rollen nur „Dateien anlegen“ und „Dateien ändern“, Visionär und Problemanalyse gar nichts (`READ_ONLY_ROLES`). Zeitgesteuerte Routinen (`routine`) bekommen die Befehle der Rechte-Gruppen, aber keine Datei-Werkzeuge (`NO_FILE_WRITE_ROLES`, siehe Abschnitt 6). Beim lokalen Modell schreibt nur der Entwickler. Ohne Schreibrecht erhalten Agents nur Lese-Werkzeuge (Verzeichnis, Datei lesen, Suche) mit etwa 25 Werkzeugschritten; der Entwickler hat bis zu 80 Schritte.
+Mit der Claude-CLI bekommen Assistent, Entwickler, Tester, Reviewer und Routinen alle freigeschalteten Rechte-Gruppen (`TRUSTED_ROLES` in `src/agent/permission-rules.ts`); alle anderen Rollen nur „Dateien anlegen“ und „Dateien ändern“, Visionär, Problemanalyse und `pre_sprint` gar nichts (`READ_ONLY_ROLES`). Zeitgesteuerte Routinen (`routine`) bekommen die Befehle der Rechte-Gruppen und zusätzlich die Gruppe „Prüfbefehle“ (`npm audit`, `npm outdated`, `git ls-files`, `git grep`), aber keine Datei-Werkzeuge (`NO_FILE_WRITE_ROLES`, siehe Abschnitt 6). Beim lokalen Modell schreiben nur Entwickler und Assistent. Ohne Schreibrecht erhalten Agents nur Lese-Werkzeuge (Verzeichnis, Datei lesen, Suche) mit 25 Werkzeugschritten; Rollen mit Schreibrecht haben 80 Schritte (ein am Agent eingestellter Wert ab 10 gilt bis 200, `src/agent/ollama-agent.ts`).
 
 **Eigene Werkzeug-Regeln im Befehl:** Ein Admin kann im Agent-Befehl `--allowedTools` bzw. `--disallowedTools` setzen (auch als `--allowed-tools=…`). Die Datei-Rechte und die Ordner-Einschränkung im Wächter kommen trotzdem immer aus der Zuweisung des Agents. Mit eigenem `--allowedTools` hängt AIdeation keine eigenen Freigaben an. Eigene Sperren werden mit den Sperren von AIdeation zu einem einzigen `--disallowedTools` zusammengeführt und schränken nur weiter ein.
 
@@ -74,9 +120,26 @@ Mit der Claude-CLI bekommen Assistent, Entwickler, Tester und Reviewer alle frei
 | `services.up`      | `docker compose up -d [--build] [dienste]`                   | Dienste, `--build`                                             |
 | `services.stop`    | `docker compose stop [dienste]`                              | Dienste                                                        |
 
+```mermaid
+sequenceDiagram
+  participant A as Agent
+  participant W as Worker (runServiceAction)
+  participant C as docker compose
+  A->>W: @@SERVICES: services.restart api<br/>(lokales Modell: Werkzeug service_action)
+  W->>W: 1 Form prüfen (Aktion, Dienstnamen ≤ 10, Optionen)
+  W->>W: 2 Rolle und Gruppe „Projekt-Dienste“
+  W->>W: 3 Compose-Datei im Projektordner (realpath)
+  W->>W: 4 AIdeation selbst: nur status und logs
+  W->>C: 5 unter Projektsperre: config --services, composeViolation
+  C-->>W: bekannte Dienste, keine Privilegien/Mounts nach draussen
+  W->>C: 6 restart api (ohne Shell, gefiltertes Environment, ≤ 10 min)
+  C-->>W: Ausgabe
+  W-->>A: redactOutput, ≤ 8000 Zeichen, Abschnitt „Dienst-Aktionen“
+```
+
 Alle Aktionen nehmen optional `--file=<compose-datei>` relativ zum Projektordner; sonst gilt `compose.yaml`, `compose.yml`, `docker-compose.yaml` bzw. `docker-compose.yml` im Projektordner. Angefordert wird so: Das lokale Modell ruft das Werkzeug `service_action` auf (`ollama-tools.ts`) und bekommt das Ergebnis sofort zurück. Die Claude-CLI schreibt je Aktion eine Zeile `@@SERVICES: services.restart api` (bzw. `@@SERVICES: services.logs api --lines=200 --since=15m`). Der Worker führt diese Zeilen nach der Antwort aus (höchstens 5 je Antwort, `runServiceMarkers` in `src/agent/service-actions.ts`) und hängt das Ergebnis im Chat als Abschnitt „Dienst-Aktionen“ an. Der Worker prüft jede Anfrage, bevor er etwas ausführt (`runServiceAction`):
 
-1. Form (`parseServiceRequest` in `service-request.ts`): bekannte Aktion, Dienstnamen nur `[A-Za-z0-9][\w.-]*` (höchstens 10), Zeilenlimit und Zeitraum nur bei `services.logs`, `--build` nur bei `services.up`, Compose-Datei nur relativ ohne `..`.
+1. Form (`parseServiceRequest` in `service-request.ts`): bekannte Aktion, Dienstnamen nur `[A-Za-z0-9][\w.-]*` mit höchstens 63 Zeichen (höchstens 10 Dienste), Zeilenlimit und Zeitraum nur bei `services.logs`, `--build` nur bei `services.up`, Compose-Datei nur relativ ohne `..`, mit Endung `.yml` oder `.yaml` und nur aus `[\w@.+-]` und `/`.
 2. Rolle und Recht (`serviceRoleProblem`): Gruppe `services` am Agent; Rollen `assistant`, `developer`, `tester`; Routinen (`routine`) nur `services.status` und `services.logs`; lesende Rollen nie.
 3. Projektordner und Compose-Datei: Die Datei muss nach Auflösen symbolischer Links (`realpath`) im Projektordner liegen. Ein Link nach draussen wird abgelehnt.
 4. AIdeation selbst: Im Installationsordner von AIdeation sind nur `services.status` und `services.logs` erlaubt.
@@ -91,9 +154,36 @@ Die Gruppe „Projekt-Dienste“ (`services`) ist betriebssystem-neutral und gib
 
 ## 4. Der Dashboard-Assistent (Problemlöser)
 
-**Wächter für Shell-Befehle:** Die CLI-Freigaben prüfen nur den Anfang eines Befehls, der Wächter-Hook (`agent-guard.ts`) den Rest. Gesperrt sind: Befehlsersetzung, Prozessersetzung, Subshells und Hintergrund-Befehle (`$(…)`, Backticks, `<(…)`, `(…)`, einzelnes `&`, `&>`); Umgebungsvariablen vor dem Befehl (`VAR=… befehl`) und Wrapper wie `env`/`nohup`/`command`/`xargs`/`sudo`; Datei-Befehle, die Dateien anlegen, ändern oder löschen: `mkdir`, `touch`, `rm`, `rmdir`, `mv`, `cp`, `sed` (diese sieben gibt die CLI mit `--permission-mode acceptEdits` ohne Rückfrage und ohne `--allowedTools`-Regel frei, also an Rechten und Ordner-Einschränkung vorbei), dazu `ln`, `tee`, `truncate`, `install`, `unlink`, `shred`, `patch`, `dd` und `find` mit `-delete`/`-exec`/`-fprint` – Dateien anlegen und ändern Agents nur über die Datei-Werkzeuge, löschen und umbenennen nur mit `git rm` bzw. `git mv` (siehe unten); alle Befehle, die keine eigene Gruppe freigeben darf (`FORBIDDEN_COMMANDS`, z. B. `curl`, `chmod`, `sh`, `python`), ausser `node` und `npx`, die eingebaute Gruppen nur mit festem Präfix freigeben. `docker`, `docker-compose`, `podman`, `nerdctl`, `launchctl` und `systemctl` sind für jede Rolle gesperrt, auch mit Pfad (`/usr/local/bin/docker`), hinter Wrappern (`timeout 60 docker …`) und in Ketten. Die Meldung verweist auf die Worker-Aktionen `services.*` (Abschnitt 3). Ein Shell-Tokenizer (`parseShell` in `shell-parse.ts`) zerlegt jeden Befehl wie Bash: Anführungszeichen (`'…'`, `"…"`, `$'…'`), Backslash-Escapes, Fortsetzungszeilen (Backslash am Zeilenende), Kommentare, Ketten (`;`, `&&`, `||`, `|`, Zeilenumbruch) und Umleitungen samt File-Deskriptor. Alle Prüfungen (`bashProblem`, `forbiddenCommand`, `forbiddenSubcommand`, Git- und npm-Optionen, `isAllowedCommand` des lokalen Modells) sehen dieselben Wörter. Was sich nicht eindeutig zerlegen lässt, ist gesperrt: offene Anführungszeichen, ein Backslash am Ende, escapte Anführungszeichen (`\'`, `\"`), Heredocs (`<<`), `${…}`, Shell-Schlüsselwörter an Befehlsposition (`if`, `for`, `while`, `!`, `{ … }`, `time`) und Syntaxfehler wie ein leerer Teilbefehl. Ausgabe-Umleitungen sind nur nach `/dev/null` und als Verdopplung (`2>&1`) erlaubt. In `git`- und `npm`-Befehlen sind Variablen und Shell-Erweiterungen (`$X`, `$'…'`, `{a,b}`, `~`) gesperrt, weil ein vorheriges `export` sonst eine gesperrte Option einschleusen könnte. Geprüft wird je Teilbefehl, auch mit Pfad (`/bin/rm`); Befehlsnamen, die erst die Shell zusammensetzt (`$X`, `r?`), sind gesperrt; Git-Optionen vor dem Unterbefehl (`git -C …`) sowie `--no-index`, `--textconv`, `-c`, `--upload-pack` & Co.; npm mit `--script-shell`, `--userconfig`, `--globalconfig`, `--cache`, `-g`, `--prefix` ausserhalb des Projekts und `npm install` aus Git-, Datei- oder URL-Quellen. Das schützt vor Fehlgriffen und naheliegenden Umgehungen. Es ist die zweite Linie hinter der Docker-Sandbox (Abschnitt 4): Tests und npm-Skripte führen Code aus, den Agents geschrieben haben, und laufen darum im Container.
+```mermaid
+flowchart TD
+  IN["Bash-Aufruf des Agents"]:::person --> P{"parseShell:<br/>eindeutig zerlegbar?"}
+  P -->|"nein: offene Quotes, Heredoc,<br/>${…}, Schlüsselwörter"| X1["gesperrt"]:::bad
+  P -->|ja| S{"Struktur erlaubt?"}
+  S -->|"$(…), Backticks, &, Umleitung<br/>ausser /dev/null und 2>&1"| X1
+  S -->|ja| B{"je Teilbefehl:<br/>Builtin, Wrapper, Variable davor?"}
+  B -->|"export, eval, env, sudo, xargs …"| X1
+  B -->|"timeout/nice/stdbuf/ionice"| U["Wrapper abschälen<br/>(bis 4 Ebenen)"] --> B
+  B -->|ja| F{"Befehl?"}
+  F -->|"rm, mv, cp, sed, tee, find -delete,<br/>docker, launchctl, curl, awk, sh …"| X1
+  F -->|"git rm / git mv"| GF{"gitFileProblem:<br/>Optionen, Pfade, Rechte"} -->|ok| OK
+  GF -->|verstoss| X1
+  F -->|"git / npm / node"| O{"Optionen sicher?<br/>-C, -c, --script-shell, --registry,<br/>--import, --prefix ausserhalb …"}
+  O -->|nein| X1
+  O -->|ja| SEC{"Geheimnis im Befehl?<br/>.env, *.pem, .ssh …"}
+  F -->|"sonstige Programme"| SEC
+  SEC -->|ja| X1
+  SEC -->|nein| R{"Freigabe des Agents<br/>(Rechte-Gruppen) trifft?"}
+  R -->|nein| X1
+  R -->|ja| OK["erlaubt"]:::ok
+  classDef ok fill:#e3f1e8,stroke:#2f8a57,color:#1d4d33
+  classDef bad fill:#fbe9e4,stroke:#b4472f,color:#6b2717
+  classDef wait fill:#fdf1e0,stroke:#e08a1e,color:#5c3a0a
+  classDef person fill:#e8eef6,stroke:#36608f,color:#1f3a5c
+```
 
-**Wrapper, Builtins und eigene Regeln:** Vor `timeout`, `nice`, `stdbuf` und `ionice` schält der Wächter den Wrapper ab und prüft den Befehl dahinter wie einen direkt aufgerufenen (`unwrapCommand` in `command-checks.ts`), auch verschachtelt bis zu vier Ebenen. `timeout 60 sh -c '…'` und `timeout 5 nice -n 5 git push` sind damit gesperrt, `timeout 60 npm test` bleibt erlaubt. Gesperrt ist der Befehl auch, wenn eine Option unklar ist, ein Wert aus einer Variablen kommt, hinter dem Wrapper kein Befehl folgt oder mehr als vier Wrapper ineinander stecken. Immer gesperrt sind Shell-Builtins, die spätere Befehle verändern (`SHELL_BUILTINS`): `export`, `declare`, `typeset`, `readonly`, `local`, `unset`, `set`, `shopt`, `alias`, `unalias`, `hash`, `cd`, `pushd`, `popd`, `source`, `.`, `eval`, `exec`, `trap`, `enable`, `builtin`, `command` und `let`. Ebenso gesperrt ist `awk` samt `gawk`, `nawk` und `mawk`, weil `system()` Programme startet. Eigene Gruppen dürfen nur Programme aus einer Allowlist freigeben (`CUSTOM_RULE_PROGRAMS`): `git`, `npm`, `make` sowie lesende Werkzeuge wie `ls`, `cat`, `grep`, `head`, `tail`, `wc`, `diff`, `jq`. Regeln wie `Bash(timeout:*)`, `Bash(find:*)`, `Bash(awk:*)`, `Bash(sed:*)`, `Bash(tee:*)`, `Bash(cp:*)` oder `Bash(ln:*)` lehnt die API mit 400 ab, ebenso jede `docker`-Regel (`Bash(docker compose ps:*)`). Liegen solche Regeln schon in der Datenbank, sortiert `loadProjectPermissions` sie beim Laden aus, ohne den Start abzubrechen. Den Projektordner bekommt der Wächter in der kodierten Richtlinie (`root`, gesetzt von `withAgentPermissions` aus dem Arbeitsordner des Laufs). Nur wenn er dort fehlt, gilt `CLAUDE_PROJECT_DIR` bzw. das `cwd` der Hook-Eingabe.
+**Wächter für Shell-Befehle:** Die CLI-Freigaben prüfen nur den Anfang eines Befehls, der Wächter-Hook (`agent-guard.ts`) den Rest. Gesperrt sind: Befehlsersetzung, Prozessersetzung, Subshells und Hintergrund-Befehle (`$(…)`, Backticks, `<(…)`, `(…)`, einzelnes `&`, `&>`); Umgebungsvariablen vor dem Befehl (`VAR=… befehl`) und Wrapper wie `env`/`nohup`/`command`/`xargs`/`sudo`; Datei-Befehle, die Dateien anlegen, ändern oder löschen: `mkdir`, `touch`, `rm`, `rmdir`, `mv`, `cp`, `sed` (diese sieben gibt die CLI mit `--permission-mode acceptEdits` ohne Rückfrage und ohne `--allowedTools`-Regel frei, also an Rechten und Ordner-Einschränkung vorbei), dazu `gsed`, `ln`, `tee`, `truncate`, `install`, `unlink`, `shred`, `patch`, `chflags`, `ditto`, `dd` (`FILE_COMMAND_NAMES` und `FORBIDDEN_COMMAND_NAMES` in `command-checks.ts`) und `find` mit `-delete`, `-exec`/`-execdir`, `-ok`/`-okdir`, `-fprint`/`-fprint0`/`-fprintf` oder `-fls` (`FIND_WRITING`) – Dateien anlegen und ändern Agents nur über die Datei-Werkzeuge, löschen und umbenennen nur mit `git rm` bzw. `git mv` (siehe unten); alle Befehle, die keine eigene Gruppe freigeben darf (`FORBIDDEN_COMMANDS`, z. B. `curl`, `chmod`, `sh`, `python`), ausser `node` und `npx`, die eingebaute Gruppen nur mit festem Präfix freigeben. `docker`, `docker-compose`, `podman`, `nerdctl`, `launchctl` und `systemctl` sind für jede Rolle gesperrt, auch mit Pfad (`/usr/local/bin/docker`), hinter Wrappern (`timeout 60 docker …`) und in Ketten. Die Meldung verweist auf die Worker-Aktionen `services.*` (Abschnitt 3). Ein Shell-Tokenizer (`parseShell` in `shell-parse.ts`) zerlegt jeden Befehl wie Bash: Anführungszeichen (`'…'`, `"…"`, `$'…'`), Backslash-Escapes, Fortsetzungszeilen (Backslash am Zeilenende), Kommentare, Ketten (`;`, `&&`, `||`, `|`, Zeilenumbruch) und Umleitungen samt File-Deskriptor. Alle Prüfungen (`bashProblem`, `forbiddenCommand`, `forbiddenSubcommand`, Git- und npm-Optionen, `isAllowedCommand` des lokalen Modells) sehen dieselben Wörter. Was sich nicht eindeutig zerlegen lässt, ist gesperrt: offene Anführungszeichen, ein Backslash am Ende, escapte Anführungszeichen (`\'`, `\"`), Heredocs (`<<`), `${…}`, Shell-Schlüsselwörter an Befehlsposition (`if`, `for`, `while`, `!`, `{ … }`, `time`) und Syntaxfehler wie ein leerer Teilbefehl. Ausgabe-Umleitungen sind nur nach `/dev/null` und als Verdopplung (`2>&1`) erlaubt. In `git`- und `npm`-Befehlen sind Variablen und Shell-Erweiterungen (`$X`, `$'…'`, `{a,b}`, `~`) gesperrt, weil ein vorheriges `export` sonst eine gesperrte Option einschleusen könnte. Geprüft wird je Teilbefehl, auch mit Pfad (`/bin/rm`); Befehlsnamen, die erst die Shell zusammensetzt (`$X`, `r?`), sind gesperrt; Git-Optionen vor dem Unterbefehl (`git -C …`) sowie `--no-index`, `--textconv`, `-c`, `--upload-pack` & Co.; npm mit `--script-shell`, `--userconfig`, `--globalconfig`, `--cache`, `-g`, `--prefix` ausserhalb des Projekts und `npm install` aus Git-, Datei- oder URL-Quellen. Das schützt vor Fehlgriffen und naheliegenden Umgehungen. Es ist die zweite Linie hinter der Docker-Sandbox (Abschnitt 4): Tests und npm-Skripte führen Code aus, den Agents geschrieben haben, und laufen darum im Container.
+
+**Wrapper, Builtins und eigene Regeln:** Vor `timeout`, `nice`, `stdbuf` und `ionice` schält der Wächter den Wrapper ab und prüft den Befehl dahinter wie einen direkt aufgerufenen (`unwrapCommand` in `command-checks.ts`), auch verschachtelt bis zu vier Ebenen. `timeout 60 sh -c '…'` und `timeout 5 nice -n 5 git push` sind damit gesperrt, `timeout 60 npm test` bleibt erlaubt. Gesperrt ist der Befehl auch, wenn eine Option unklar ist, ein Wert aus einer Variablen kommt, hinter dem Wrapper kein Befehl folgt oder mehr als vier Wrapper ineinander stecken. Immer gesperrt sind Shell-Builtins, die spätere Befehle verändern (`SHELL_BUILTINS`): `export`, `declare`, `typeset`, `readonly`, `local`, `unset`, `set`, `shopt`, `alias`, `unalias`, `hash`, `cd`, `pushd`, `popd`, `source`, `.`, `eval`, `exec`, `trap`, `enable`, `builtin`, `command` und `let`. Ebenso gesperrt ist `awk` samt `gawk`, `nawk` und `mawk`, weil `system()` Programme startet. Eigene Gruppen dürfen nur Programme aus einer Allowlist freigeben (`CUSTOM_RULE_PROGRAMS`): `git`, `npm`, `make` sowie lesende Werkzeuge wie `ls`, `cat`, `grep`, `head`, `tail`, `wc`, `diff`, `jq`, `cut`, `tr`, `stat`, `du`, `df`, `pwd`, `echo`, `printf`, `date`, `which`, `basename`, `dirname`, `realpath`, `uname`, `whoami`, `ps`, `lsof`; dazu `WebFetch(domain:localhost)` bzw. `127.0.0.1`. Regeln wie `Bash(timeout:*)`, `Bash(find:*)`, `Bash(awk:*)`, `Bash(sed:*)`, `Bash(tee:*)`, `Bash(cp:*)` oder `Bash(ln:*)` lehnt die API mit 400 ab, ebenso jede `docker`-Regel (`Bash(docker compose ps:*)`). Liegen solche Regeln schon in der Datenbank, sortiert `loadProjectPermissions` sie beim Laden aus, ohne den Start abzubrechen. Den Projektordner bekommt der Wächter in der kodierten Richtlinie (`root`, gesetzt von `withAgentPermissions` aus dem Arbeitsordner des Laufs). Nur wenn er dort fehlt, gilt `CLAUDE_PROJECT_DIR` bzw. das `cwd` der Hook-Eingabe.
 
 **Löschen und Umbenennen (`git rm`, `git mv`):** Die Datei-Werkzeuge können nicht löschen, und `rm`/`mv`/`cp` bleiben gesperrt (`FILE_COMMAND_NAMES` unverändert). Vorher entstand ein „Umbenennen“ darum als Kopie und das Original blieb liegen (z. B. zwei Migrationen mit derselben Nummer). Jetzt hängt `withAgentPermissions` bei laufendem Wächter `Bash(git rm:*)` an, wenn der Agent „Dateien ändern“ hat, und `Bash(git mv:*)`, wenn er „Dateien anlegen“ und „Dateien ändern“ hat (`fileGitRules` in `permission-rules.ts`). Rollen ohne Schreibrechte (Routinen, Visionär, Problemanalyse, Vor-dem-Sprint) bekommen beides nie. Der Wächter prüft jeden Aufruf mit `gitFileProblem` (`command-checks.ts`) gegen die Richtlinie des Agents, auch bei breiten eigenen Regeln wie `Bash(git:*)`: Erlaubt sind nur die Optionen `-q`/`--quiet`, `-n`/`--dry-run`, `--cached`, `-r` (rm) bzw. `-v`/`--verbose`, `-n`/`--dry-run` (mv), genau so geschrieben – also kein `-f`/`--force`, kein `--pathspec-from-file`, keine Abkürzungen. Jeder Pfad, Quelle wie Ziel, ist ein einfacher relativer Pfad ohne `..`, Platzhalter (`*`, `?`, `[`), Variablen, `~` und Pathspec-Magie (`:(top)`, `:!`, `:/`); er liegt samt aufgelöster Links im Projekt und in den erlaubten Ordnern, ist nicht das Projekt selbst (`git rm -r .`) und nicht geschützt (`checkProjectPath`, also auch nicht `.env`, `.git/`, `.claude/`, `.npmrc` als Ziel). Bei einem Ordner sucht der Wächter darin nach geschützten Einträgen (höchstens 5000, sonst gesperrt), damit `git rm -r paket` nicht `paket/.husky` mitnimmt. `git -C …` und andere Optionen vor dem Unterbefehl bleiben gesperrt, ebenso Ketten mit `rm`/`mv`/`cp` und Wrapper wie `command` oder `env`; `timeout 30 git rm …` wird wie `git rm …` geprüft. Ohne Datei-Rechte (z. B. `bashProblem` ohne Richtlinie beim lokalen Modell) sind `git rm`/`git mv` gesperrt; das lokale Modell hat dafür bisher auch keine Freigabe in `isAllowedCommand`. Grenze: `git rm` löscht nur Dateien, die Git kennt; eine im selben Schritt neu angelegte, noch nicht committete Datei lässt sich so nicht löschen. Tests: `command-checks.test.ts` (`gitFileProblem` direkt: Optionen samt Abkürzungen, Pfade, Rechte, Ordner, versteckte Unterbefehle wie `git m\v`), `agent-guard.test.ts` („git rm und git mv …“, über den ganzen Wächter samt Ketten und Wrappern), `agent-permissions.test.ts`, `tool-permissions.test.ts`.
 
@@ -104,8 +194,8 @@ Der Assistent ist **kein** Workflow-Agent, sondern bedient den Chat und die Prob
 Er hat höhere Rechte als alle anderen, bleibt aber im Projektordner:
 
 - **Lesen/Schreiben:** `read_file`, `list_files`, `search`, `write_file`, `replace_in_file` – nur innerhalb des Projektordners (Backups in `.dev-log-backups/`). Geschrieben wird über `writeProjectFile` (`src/agent/tool-paths.ts`): erst nach dem Anlegen der Ordner wird der wirkliche Pfad (`realpath`) geprüft, dann in eine neue Temp-Datei im Zielordner geschrieben (`O_EXCL`, folgt keinem Link) und per `rename` ersetzt. Ein Link, der zwischen Prüfung und Schreiben gesetzt wird, lenkt so nicht nach draussen oder in geschützte Ordner um. Links im Projekt bleiben erhalten (geschrieben wird ihr Ziel), Dateirechte bleiben.
-- **Datenbank:** `run_sql` (Entwickler und Assistent) – lesen und schreiben in der Projekt-Datenbank (`projects.database_url`, in den Einstellungen gepflegt, wird nie ans Frontend ausgegeben). Genau eine Anweisung pro Aufruf (mehrere werden abgelehnt), in einer Transaktion; vor dem `COMMIT` wird geprüft, dass sie noch offen ist, sonst gibt es keine Erfolgsmeldung. Zeitlimits stehen schon in der Verbindung (`statement_timeout` 15 s, `lock_timeout` 5 s, `idle_in_transaction_session_timeout` 20 s per `options`), dazu ein Client-Zeitlimit von 20 s; bricht der Agent ab (Zeitlimit, Stopp, Herunterfahren), endet auch die Abfrage. Das Ergebnis wird Zeile für Zeile gelesen: höchstens 50 Zeilen und 1 MB, darüber wird die Abfrage auf dem Server abgebrochen (`pg_cancel_backend` über eine zweite Verbindung), die Verbindung geschlossen und nichts gespeichert; jede Zelle wird in der Ausgabe auf 500 Zeichen gekürzt (Konstanten oben in `src/agent/tool-sql.ts`). `UPDATE`/`DELETE` nur mit echter `WHERE`-Bedingung (nicht `WHERE true`, `1=1`, `2>1`, `id IS NOT NULL`, `… OR true` …); Unicode-Escapes `U&'…'`/`U&"…"` sind gesperrt; erlaubt sind Daten-Änderungen und additive DDL (`CREATE TABLE`, `ALTER TABLE … ADD`); gesperrt: DROP/ALTER/CREATE DATABASE/ROLE/EXTENSION, `DROP TABLE/VIEW/SEQUENCE/TYPE/SCHEMA`, `TRUNCATE`, `ALTER TABLE … DROP`, `DO`-Blöcke, `EXECUTE`, eigene Funktionen/Trigger, GRANT/REVOKE, COPY, Rollenwechsel, Server- und Large-Object-Funktionen. Die AIdeation-Datenbank selbst wird abgelehnt. Das ist ein Schutz gegen Fehlgriffe, keine Sicherheitsgrenze – dafür einen Datenbank-Benutzer mit eingeschränkten Rechten hinterlegen.
-- **Schleifenschutz:** Wiederholt ein Modell denselben Absatz (3×) oder denselben Werkzeugaufruf (4× in Folge), bricht der Lauf ab. Über ein Fenster der letzten Aufrufe werden auch Kreise erkannt: Eine Folge aus zwei oder drei Aufrufen mit denselben Argumenten, die sich 3× wiederholt (z. B. `read_file` → `search` → `read_file` → `search` …). Die Reihenfolge der Argument-Schlüssel spielt keine Rolle. Ein Aufruf mit neuen Argumenten (z. B. geänderter Inhalt) unterbricht den Kreis.
+- **Datenbank:** `run_sql` (Entwickler und Assistent) – lesen und schreiben in der Projekt-Datenbank (`projects.database_url`, in den Einstellungen gepflegt, wird nie ans Frontend ausgegeben). Genau eine Anweisung pro Aufruf (mehrere werden abgelehnt), in einer Transaktion; vor dem `COMMIT` wird geprüft, dass sie noch offen ist, sonst gibt es keine Erfolgsmeldung. Zeitlimits stehen schon in der Verbindung (`statement_timeout` 15 s, `lock_timeout` 5 s, `idle_in_transaction_session_timeout` 20 s per `options`), dazu ein Client-Zeitlimit von 20 s und 5 s für den Verbindungsaufbau; bricht der Agent ab (Zeitlimit, Stopp, Herunterfahren), endet auch die Abfrage. Das Ergebnis wird Zeile für Zeile gelesen: höchstens 50 Zeilen und 1 MB, darüber wird die Abfrage auf dem Server abgebrochen (`pg_cancel_backend` über eine zweite Verbindung), die Verbindung geschlossen und nichts gespeichert; jede Zelle wird in der Ausgabe auf 500 Zeichen gekürzt (Konstanten oben in `src/agent/tool-sql.ts`). `UPDATE`/`DELETE` nur mit echter `WHERE`-Bedingung (nicht `WHERE true`, `1=1`, `2>1`, `id IS NOT NULL`, `… OR true` …); Unicode-Escapes `U&'…'`/`U&"…"` sind gesperrt; erlaubt sind Daten-Änderungen und additive DDL (`CREATE TABLE`, `ALTER TABLE … ADD`); gesperrt: DROP/ALTER/CREATE DATABASE/ROLE/EXTENSION, `DROP TABLE/VIEW/SEQUENCE/TYPE/SCHEMA`, `TRUNCATE`, `ALTER TABLE … DROP`, `DO`-Blöcke, `EXECUTE`, eigene Funktionen/Trigger, GRANT/REVOKE, COPY, Rollenwechsel, Server- und Large-Object-Funktionen. Die AIdeation-Datenbank selbst wird abgelehnt. Das ist ein Schutz gegen Fehlgriffe, keine Sicherheitsgrenze – dafür einen Datenbank-Benutzer mit eingeschränkten Rechten hinterlegen.
+- **Schleifenschutz:** Wiederholt ein Modell denselben Absatz (3×) oder denselben Werkzeugaufruf (4× in Folge), bricht der Lauf ab. Über ein Fenster der letzten Aufrufe werden auch Kreise erkannt: Eine Folge aus zwei oder drei Aufrufen mit denselben Argumenten, die sich 3× wiederholt (z. B. `read_file` → `search` → `read_file` → `search` …). Die Reihenfolge der Argument-Schlüssel spielt keine Rolle. Ein Aufruf mit neuen Argumenten (z. B. geänderter Inhalt) unterbricht den Kreis. Absätze unter 40 Zeichen zählen nicht; derselbe Absatz insgesamt 8-mal (auch nicht in Folge) bricht ebenfalls ab (`src/agent/loop-guard.ts`).
 - **Git:** `status`, `diff`, `log`, `show`, `branch`, `remote -v`, `ls-files`, `pull --ff-only`, `fetch`, `checkout <branch>`, `clone <https/ssh-URL> [Unterordner|.]`. Bei `fetch` und `pull` (auch für Claude-Agents) nur ein eingerichtetes Remote (`git remote`, ohne Abfrage nur `origin`) und einfache Branch-Namen: URLs, Hosts (`git@host:r`), Pfade, Refspecs mit `:` und `--multiple` sperrt der Wächter, sonst gingen Daten im Pfad an einen fremden Host. Optionen mit Wert nur als `--option=wert`. Erlaubt sind z. B. `git fetch origin`, `git fetch --prune origin`, `git pull --ff-only origin main`; gesperrt sind z. B. `git fetch https://…`, `git fetch upstream` (solange kein Remote `upstream` eingerichtet ist) und `git fetch origin main:refs/heads/x`. Die Sperre nennt den Befehl und die erlaubten Remotes.
 - **npm/node:** `npm test`, `npm run <skript>`, `npm install|ci [Pakete]` (immer mit `--ignore-scripts`; nur aus der eingestellten Registry: `--registry`, `--@scope:registry`, `--//host/:…`, `--proxy`, `--https-proxy`, `--noproxy` und `--replace-registry-host` sind gesperrt, auch abgekürzt; `.npmrc` können Agents nicht schreiben), `npm ls|outdated|audit`, `node --version`, `node --check <Datei>`, tsc/eslint/prettier/jest/vitest. Für `node --check` gilt genau eine relative Datei im Projektordner (kein `..`, kein absoluter Pfad, keine `data:`- oder `file:`-URL). Jede weitere Option ist gesperrt, auch `--import`, `-r`/`--require`, `--loader` und `--experimental-loader` (ebenso in der `=`-Schreibweise) und `NODE_OPTIONS` vor dem Befehl. Node lädt Module aus diesen Optionen auch bei `--check` und führt sie aus. `node --check src/a.js` bleibt erlaubt. Beispiel: `npm ci --ignore-scripts` läuft, `npm ci --ignore-scripts --registry=https://…` wird abgelehnt.
 - **Dienste** (Gruppe „Projekt-Dienste“): nur über die Worker-Aktionen `services.status`, `services.logs` (Zeilenlimit, Zeitraum), `services.restart`, `services.up` (optional mit Build) und `services.stop` – nie per Shell (Abschnitt 3). Logs liest der Assistent mit `services.logs`, einen hängenden Dienst startet er mit `services.restart` neu. Sein Prompt (`buildChatPrompt` in `chat.ts`) nennt keine macOS-Pfade oder -Befehle mehr (kein `~/Library/Logs`, kein `launchctl`, kein `lsof`).
@@ -120,7 +210,7 @@ Er hat höhere Rechte als alle anderen, bleibt aber im Projektordner:
 
 **Problemanalyse:** Läuft mit der Rolle `analyst` (`READ_ONLY_ROLES`) – nur Lesen, keine Befehle, keine Schreibrechte. Bei der Claude-CLI gelten dieselben Sperren wie beim Visionär (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash` gesperrt, Wächter-Hook mit `shell: false`). Auch mit einer externen CLI werden Rechte-Flags entfernt, außer der Schalter für volle Werkzeugrechte ist an (siehe System-Agents).
 
-**Visionär:** Läuft mit der Rolle `visionary` (`READ_ONLY_ROLES` in `tool-permissions.ts`) und darf nur lesen. Beim lokalen Modell bekommt er nur die Lese-Werkzeuge. Bei der Claude-CLI sind `Write`, `Edit`, `MultiEdit`, `NotebookEdit` und `Bash` gesperrt, und zwar auch dann, wenn am Agent eigene Befehle zugewiesen oder im Befehl eigene Werkzeug-Regeln gesetzt sind. Der Wächter-Hook lehnt Schreib- und Befehlsaufrufe zusätzlich ab (`shell: false`). Andere CLIs (Copilot, Gemini) bekommen ihre Befehlszeile unverändert; für sie gilt die Sperre nur über den Prompt. Ideen legt der Visionär nicht selbst an. Er gibt `@@IDEA {…}`-Zeilen aus, und der Worker legt daraus die Ideen an.
+**Visionär:** Läuft mit der Rolle `visionary` (`READ_ONLY_ROLES` in `permission-rules.ts`) und darf nur lesen. Beim lokalen Modell bekommt er nur die Lese-Werkzeuge. Bei der Claude-CLI sind `Write`, `Edit`, `MultiEdit`, `NotebookEdit` und `Bash` gesperrt, und zwar auch dann, wenn am Agent eigene Befehle zugewiesen oder im Befehl eigene Werkzeug-Regeln gesetzt sind. Der Wächter-Hook lehnt Schreib- und Befehlsaufrufe zusätzlich ab (`shell: false`). Andere CLIs (Copilot, Gemini) bekommen ihre Befehlszeile unverändert; für sie gilt die Sperre nur über den Prompt. Ideen legt der Visionär nicht selbst an. Er gibt `@@IDEA {…}`-Zeilen aus, und der Worker legt daraus die Ideen an.
 
 **Nicht erlaubt (für alle Agents):** Dateien außerhalb des Projektordners, `.env`, Schlüssel, `.git`, `node_modules`, Backup-Ordner, Symlink-Ausbrüche, jeder `docker`- und `docker compose`-Aufruf, `launchctl`/`systemctl`, `git push`, `rm`, Git-Hooks (`.git/hooks`, `.husky`, `.githooks`), verkettete Befehle (`;`, `&&`, Pipes – Befehle laufen ohne Shell), `git clone` mit `file://`, Optionen oder Zielen außerhalb des Projekts.
 
@@ -128,13 +218,52 @@ Zusätzlich gilt: Ist `DEV_LOG_AGENT_COMMAND` oder ein eigener Agent-Befehl gese
 
 **Claude-CLI als Assistent oder Entwickler:** Die Rechte-Gruppen in den Projekteinstellungen werden als `--allowedTools` übergeben. Shell-Lesebefehle (`cat`, `tail`, `grep` …) und `curl` sind bewusst nicht freigegeben – damit ließen sich Dateien außerhalb des Projekts lesen und verschicken. Dateien liest Claude mit seinem Lese-Werkzeug (Projektordner und, mit der Gruppe „Dienst-Logs“, `~/Library/Logs`), lokale URLs mit `WebFetch` (nur `localhost`/`127.0.0.1`). Ebenfalls nicht freigegeben: `npx --prefix` und `npx tsx`; Installationen nur als `npm install|ci --ignore-scripts`.
 
-**Grenze:** Diese Regeln verhindern Fehlgriffe. Sie sind die zweite Linie. Die eigentliche Grenze zum Rechner ist die Docker-Sandbox.
+**Grenze:** Diese Regeln verhindern Fehlgriffe. Sie sind die zweite Linie. Die eigentliche Grenze zum Rechner ist der Container. Alle Schichten im Überblick:
 
-**Arbeitscontainer (`DEV_LOG_AGENT_SANDBOX=workbench`, Standard):** Schreibende Rollen, Tester und alle Projekttests laufen per `docker exec` im dauerhaften Arbeitscontainer des Projekts (`src/core/workbench.ts`, Einrichtung in [Betrieb](betrieb.md#arbeitscontainer-für-agents)). Er hat ein eigenes Docker (`docker:dind`, `DOCKER_HOST=tcp://127.0.0.1:2375`) und die Testdienste aus `.aideation/workbench.json` des Live-Ordners, alles unter `localhost`. Ein Abbruch beendet die Prozessgruppe des Laufs im Container (`setsid -w`). Lesende Rollen und die Schätzung bleiben kurzlebige Container mit `:ro` (unten). Die Regeln des Wächters gelten im Arbeitscontainer unverändert; Dienste starten Agents weiterhin über `services.*`.
+```mermaid
+flowchart TB
+  AG["Agent<br/>Claude-CLI oder lokales Modell"]:::person --> L1["1 · Prompt und Rolle<br/>Regeln des Projekts, Anweisung; die Rolle bestimmt die Rechte-Stufe"]
+  L1 --> L2["2 · Freigaben der CLI<br/>--allowedTools aus den Rechte-Gruppen, Deny-Regeln für Geheimnisse (.env, *.pem, .ssh …)"]
+  L2 --> L3["3 · Wächter-Hook (agent-guard)<br/>jeder Schreib- und Shell-Aufruf: Shell-Parser, verbotene Befehle,<br/>Git-/npm-Optionen, geschützte Pfade, Ordner-Einschränkung"]
+  L3 --> L4["4 · Worker-Aktionen statt Shell<br/>services.* für Docker Compose, Projektsperre, gefiltertes Environment"]
+  L4 --> L5["5 · Container<br/>Arbeitscontainer je Projekt oder kurzlebiger Container je Schritt:<br/>kein Docker-Socket, kein Home, nur /workspace"]:::ok
+  L5 --> L6["6 · Netz<br/>internes Netz aideation-agents, Egress-Proxy: nur Anthropic, npm, Docker Hub, Ollama"]:::wait
+  L6 --> HOST[("Projektordner<br/>Git, Push und Merge bleiben beim Worker")]
+  classDef ok fill:#e3f1e8,stroke:#2f8a57,color:#1d4d33
+  classDef wait fill:#fdf1e0,stroke:#e08a1e,color:#5c3a0a
+  classDef person fill:#e8eef6,stroke:#36608f,color:#1f3a5c
+```
+
+```mermaid
+flowchart TB
+  M{"DEV_LOG_AGENT_SANDBOX"} -->|"workbench (Standard)"| WB
+  M -->|docker| DK
+  M -->|"off (Notfall)"| OFF["Agents und Tests auf dem Host<br/>Warnung im Worker-Badge"]:::bad
+  subgraph WB["Arbeitscontainer je Projekt: agents_slug"]
+    direction TB
+    WB1["workbench: schreibende Rollen, Tester,<br/>Gate, test:full (docker exec, setsid)"]:::ok
+    WB2["docker:29-dind · 127.0.0.1:2375"]
+    WB3["Testdienste aus .aideation/workbench.json"]
+  end
+  subgraph DK["kurzlebiger Container je Schritt"]
+    direction TB
+    DK1["docker run --rm --cap-drop ALL<br/>Image aideation-agent, Label aideation.run"]:::ok
+    DK2["/workspace = Worktree des Auftrags<br/>lesende Rollen nur :ro"]
+  end
+  WB -.->|"lesende Rollen, Schätzung"| DK
+  WB --> NET
+  DK --> NET
+  NET["Netz aideation-agents (intern) → Egress-Proxy aideation-egress"]:::wait --> OUT(["api.anthropic.com · registry.npmjs.org · Docker Hub · Ollama auf dem Host"])
+  classDef ok fill:#e3f1e8,stroke:#2f8a57,color:#1d4d33
+  classDef bad fill:#fbe9e4,stroke:#b4472f,color:#6b2717
+  classDef wait fill:#fdf1e0,stroke:#e08a1e,color:#5c3a0a
+```
+
+**Arbeitscontainer (`DEV_LOG_AGENT_SANDBOX=workbench`, Standard):** Schreibende Rollen, Tester und alle Projekttests laufen per `docker exec` im dauerhaften Arbeitscontainer des Projekts (`src/core/workbench.ts`, Einrichtung in [Betrieb](betrieb.md#arbeitscontainer-für-agents)). Er hat ein eigenes Docker (`docker:29-dind`, `DOCKER_HOST=tcp://127.0.0.1:2375`) und die Testdienste aus `.aideation/workbench.json` des Live-Ordners, alles unter `localhost`. Ein Abbruch beendet die Prozessgruppe des Laufs im Container (`setsid -w`). Lesende Rollen und die Schätzung bleiben kurzlebige Container mit `:ro` (unten). Die Regeln des Wächters gelten im Arbeitscontainer unverändert; Dienste starten Agents weiterhin über `services.*`.
 
 **Docker-Sandbox (`DEV_LOG_AGENT_SANDBOX=docker`, kurzlebige Container, seit Phase 3 für alle Rollen):** Der Schalter steht global in `worker.env` oder je Projekt in den Einstellungen. Jeder Agent-Schritt läuft in einem eigenen kurzlebigen Container aus dem Image `aideation-agent` (`deploy/agent/Dockerfile`). Das gilt für Autor, Entwickler, Tester, Reviewer, Dokumentierer, (Benutzer-)Handbuch-Autor, Bug-Wächter, den Assistenten (Chat), Routinen, Visionär, Problemanalyse und `pre_sprint`. Auch die System-Agents laufen dort: die Schätzung im leeren Ordner `:ro`, die Analyse und die Läufe mit `readOnlyCommand`. Der Host führt damit keinen Code aus, den Agents geschrieben haben. `off` ist der ausdrückliche Notfallmodus. Dann laufen Agents und Projekttests wieder auf dem Host, und das Worker-Badge zeigt eine Warnung (`sandboxOffWarning`). Unter dem Node-Test-Runner (`NODE_TEST_CONTEXT`) gilt ohne ausdrückliche Angabe `off`, weil Unit-Tests mit Attrappen arbeiten. `runInSandbox` in `src/core/sandbox.ts` baut den Aufruf:
 
-- `docker run --rm --cap-drop ALL --security-opt no-new-privileges`, CPU-, Speicher- und Prozesslimit, Label `aideation.run=<Lauf-ID>`. `--user <uid>:<gid>` des Worker-Benutzers, unter Windows ohne `--user` (dann der Image-Benutzer `pwuser`).
+- `docker run --rm --cap-drop ALL --security-opt no-new-privileges`, CPU-, Speicher- und Prozesslimit (`--cpus` aus `DEV_LOG_AGENT_SANDBOX_CPUS`, Standard 2; `--memory` aus `DEV_LOG_AGENT_SANDBOX_MEMORY`, Standard 4g; `--pids-limit 2048`; der Arbeitscontainer nutzt dieselben Variablen mit den Standards 4 und 6g), Label `aideation.run=<Lauf-ID>`. `--user <uid>:<gid>` des Worker-Benutzers, unter Windows ohne `--user` (dann der Image-Benutzer `pwuser`).
 - Eingebunden sind nur der Worktree des Auftrags als `/workspace` und `node_modules` als Volume je Projekt (`aideation-node-modules-<projekt>`). Lesende Rollen bekommen beides nur als `:ro` (`readOnlyWorkspace`: alle aus `READ_ONLY_ROLES`, also Visionär, Problemanalyse und `pre_sprint`). Kein Docker-Socket, kein Home, kein `~/.ssh`, kein `~/.claude`, keine `.env` des Hosts. Windows-Pfade werden für `-v` umgewandelt (`C:\…` → `/c/…`).
 - Anmeldung der Claude-CLI über `CLAUDE_CODE_OAUTH_TOKEN` (oder `ANTHROPIC_API_KEY`) aus `worker.env`. Übergeben wird nur der Name (`-e CLAUDE_CODE_OAUTH_TOKEN`); den Wert reicht der Docker-Client aus seiner Umgebung weiter. Er steht nie in Argumenten oder Logs. Der Docker-Client bekommt aus der Worker-Umgebung nur PATH, Docker-Kontext, Proxy und diese Anmeldedaten.
 - Netzwerk: Die Agent-Container hängen im internen Docker-Netzwerk `aideation-agents` (`--internal`, ohne Route nach aussen). Ein gleichnamiges, nicht internes Netzwerk sperrt den Lauf. Einziger Weg hinaus ist der Egress-Proxy `aideation-egress` (`src/core/egress-proxy.ts`, im Image gebündelt). Er läuft ohne Rechte, ohne Mounts und mit `--read-only` am Bridge-Netz. Er erlaubt nur `api.anthropic.com:443`, `registry.npmjs.org:443`, `host.docker.internal:11434` (Ollama) und Docker Hub (`DOCKER_HUB_HOSTS` in `src/core/sandbox.ts`, für Docker im Arbeitscontainer). Weitere Ziele lassen sich ausdrücklich über `DEV_LOG_AGENT_SANDBOX_EGRESS` (`host:port,…`) freigeben. Rohe IP-Adressen und öffentliche Namen, die auf private Adressen auflösen (DNS-Rebinding ins LAN), weist der Proxy ab. LAN, Host-Dienste und die AIdeation-Datenbank (`db:5432`, `127.0.0.1:5433`) sind so nicht erreichbar. `HTTPS_PROXY`/`npm_config_https_proxy` im Container zeigen auf den Proxy. Ollama erreicht der Container über `DEV_LOG_OLLAMA_URL=http://host.docker.internal:11434`, ebenfalls über den Proxy.
@@ -160,9 +289,29 @@ Zusätzlich gilt: Ist `DEV_LOG_AGENT_COMMAND` oder ein eigener Agent-Befehl gese
 
 Jede Agent-Aufgabe (Assistent → Aktionen) kann einen Zeitplan bekommen: „Täglich um…“, „Wöchentlich am…“ oder ein eigener Cron-Ausdruck mit 5 Feldern (Minute Stunde Tag Monat Wochentag; Listen, Bereiche, `*/n`, Namen wie `mon`, `jan`). Alle Zeiten gelten in **Europe/Zurich**. Eine Uhrzeit, die es beim Wechsel auf Sommerzeit nicht gibt (02:30), läuft um die Lücke später; eine doppelte Uhrzeit beim Wechsel auf Winterzeit läuft genau einmal. Der Parser (`src/core/cron.ts`) kommt ohne Abhängigkeit aus und wird auch von der Oberfläche für die Vorschau „nächster Lauf: Mo 07:00“ genutzt.
 
+```mermaid
+flowchart TB
+  PL["Planer · jede Minute<br/>next_run_at ≤ now()<br/>FOR UPDATE SKIP LOCKED"] --> Q{"Auftrag oder Komplettlauf<br/>im Projekt aktiv?"}
+  Q -->|ja| WAIT["bleibt fällig"]:::wait
+  Q -->|nein| MSG["Chat-Nachricht<br/>Herkunft „Routine“"]
+  MSG --> RUN["Assistent mit Rolle routine<br/>Shell unter dem Wächter,<br/>keine Datei-Werkzeuge, nie Vollzugriff"]:::ok
+  RUN --> MK{"Marker am Zeilenanfang"}
+  MK -->|"@@BUG"| B["Bug (offen, kein Fix-Auftrag)"]
+  MK -->|"@@IDEA"| I["Idee"]
+  MK -->|"@@ORDER"| O["Auftrag im Backlog"]
+  MK -->|"Ziel push"| P["Push-Nachricht"]
+  RUN -->|"Fehler"| F{"3 Fehlschläge<br/>in Folge?"}
+  F -->|ja| PAUSE["pausiert (enabled = false)<br/>Grund in last_error"]:::bad
+  F -->|nein| NEXT["next_run_at neu<br/>(Cron, Europe/Zurich)"]
+  classDef ok fill:#e3f1e8,stroke:#2f8a57,color:#1d4d33
+  classDef bad fill:#fbe9e4,stroke:#b4472f,color:#6b2717
+  classDef wait fill:#fdf1e0,stroke:#e08a1e,color:#5c3a0a
+  classDef person fill:#e8eef6,stroke:#36608f,color:#1f3a5c
+```
+
 - **Daten:** `agent_tasks.schedule`, `enabled`, `next_run_at`, `output_target` (`chat` | `push` | `bug` | `idea` | `order`), `run_window` (optional, z. B. `22:00-06:00`), `last_status`, `last_error`, `failure_streak`, `template`. Ein Trigger löscht `next_run_at`, wenn kein Zeitplan gesetzt oder die Aufgabe pausiert ist. `next_run_at` berechnen API (Speichern, Fortsetzen) und Planer gleich (`nextRoutineRun`).
 - **Läufe:** `agent_task_runs` protokolliert jeden Lauf (Zeitplan oder Klick): Start, Dauer, Ergebnis (`ok`, `failed`, `cancelled`), Tokens, Chat-Nachricht und Antwort, Hinweise zu verworfenen Markern und die angelegten Einträge. Die Verlaufsliste im Aktionen-Menü (☰) zeigt die letzten 50 Läufe; ein Klick auf „Start“ kehrt die Sortierung um.
-- **Ausführung:** Der Assistent führt die Routine mit der Rolle `routine` aus (`NO_FILE_WRITE_ROLES` in `tool-permissions.ts`): Shell-Befehle der freigegebenen Gruppen unter dem Wächter, aber keine Datei-Werkzeuge und nie Vollzugriff, auch wenn der Befehl des Assistenten `--dangerously-skip-permissions` enthält. Ohne Chat-Verlauf, ohne Rückfragen und ohne Express-Auftrag.
+- **Ausführung:** Der Assistent führt die Routine mit der Rolle `routine` aus (`NO_FILE_WRITE_ROLES` in `permission-rules.ts`): Shell-Befehle der freigegebenen Gruppen plus die Gruppe „Prüfbefehle“ (`npm audit`, `npm outdated`, `git ls-files`, `git grep`; `CHECK_ROLES`) unter dem Wächter, aber keine Datei-Werkzeuge und nie Vollzugriff, auch wenn der Befehl des Assistenten `--dangerously-skip-permissions` enthält. Ohne Chat-Verlauf, ohne Rückfragen und ohne Express-Auftrag.
 - **Ergebnis-Weiterleitung:** Am Ende der Antwort darf der Assistent Marker-Zeilen ausgeben: `@@BUG {"title", "severity", "description"}`, `@@IDEA {"title", "category", "priority", "description"}`, `@@ORDER {"title", "priority", "description"}`. Der Worker legt daraus je einen Bug, eine Idee oder einen Auftrag im Backlog an (Quelle `routine`, Spalte `routine_run_id`, Herkunftszeile mit Routine, Lauf und Chat-Nachricht). Offene Einträge mit gleichem Titel werden nicht doppelt angelegt; ungültiges JSON legt nichts an und steht als Hinweis im Lauf. Bugs aus Routinen starten keinen automatischen Behebungsauftrag – sie landen offen in der Bug-Liste. Der Parser ist derselbe wie beim Visionär (`parseMarkerLines` in `visionary.ts`). Ein Marker zählt nur am Zeilenanfang (davor höchstens Einrückung und ein Listenpunkt wie `- ` oder `1. `) und nicht in Codeblöcken (```` ``` ```` oder `~~~`). Marker mitten im Satz, in Backticks, in Zitaten (`> `) oder in zitiertem Dateiinhalt legen nichts an.
 - **Push:** bei jedem Fehlschlag genau eine Meldung; bei Erfolg nur mit dem Ziel „Push“.
 - **Fehlschläge:** Nach 3 Fehlschlägen in Folge wird die Routine pausiert (`enabled = false`), der Grund steht in `last_error` und im Aktionen-Menü. Umgebungsfehler (Agent-Befehl fehlt, `ENOENT`, Projektordner weg, Budget erreicht) werden gemeldet, zählen aber nicht mit. Ein Klick-Lauf zählt nie, „Pausieren“ bricht wartende Läufe ab, ohne dass das als Fehlschlag gilt. „Fortsetzen“ setzt die Zählung zurück.
@@ -181,6 +330,26 @@ Dashboard-Assistent, Problemanalyse, Schnellschätzung und Visionär (`visionary
 ## Benutzerrollen und Mandanten an den API-Routen
 
 Jede API-Route deklariert direkt bei ihrer Registrierung, welche Benutzerrolle sie zum Schreiben braucht und zu welchem Mandanten (Projekt) sie gehört (`access` in `src/api/access.ts`):
+
+```mermaid
+flowchart TB
+  REQ["Anfrage mit Sitzung"]:::person --> RG["routeGuard: Route suchen<br/>(aus den registrierten Routen)"]
+  RG --> HAS{"access(…)<br/>deklariert?"}
+  HAS -->|nein| ADM["Administration nötig<br/>(fail-closed)"]:::bad
+  HAS -->|ja| ROLE{"schreibend und<br/>Rolle fehlt?"}
+  ROLE -->|ja| E403["403"]:::bad
+  ROLE -->|nein| TEN{"Mandant"}
+  TEN -->|"project: :slug"| CHK{"Projekt erlaubt?"}
+  TEN -->|"development, sprints, bugs …: :id"| CHK
+  TEN -->|global| OK["Handler filtert selbst<br/>nach allowedProjects"]:::ok
+  TEN -->|admin| ADM
+  CHK -->|nein| E404["404"]:::bad
+  CHK -->|ja| H["Handler"]:::ok
+  classDef ok fill:#e3f1e8,stroke:#2f8a57,color:#1d4d33
+  classDef bad fill:#fbe9e4,stroke:#b4472f,color:#6b2717
+  classDef wait fill:#fdf1e0,stroke:#e08a1e,color:#5c3a0a
+  classDef person fill:#e8eef6,stroke:#36608f,color:#1f3a5c
+```
 
 ```ts
 app.post('/development/:id/retry', access({ role: 'run', tenant: 'development' }), async (request, response) => …);
