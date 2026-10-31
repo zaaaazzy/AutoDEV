@@ -7,6 +7,7 @@ import { guardGit } from './git-state.js';
 import { createIngestToken } from './ingest.js';
 import type { Principal } from './roles.js';
 import { browserSnippet, ingestEndpoint, nodeSnippet, publicBaseUrl } from './production-snippets.js';
+import { BUG_STATUS } from '../core/status.js';
 
 const HISTORY_HOURS = 48;
 
@@ -43,9 +44,9 @@ export function registerProductionRoutes(app: Router, pool: Pool): void {
                   (SELECT COALESCE(SUM(e.count), 0)::int FROM production_events e
                     WHERE e.project_slug = p.slug AND e.source = 'logs') AS "logOccurrences",
                   (SELECT COUNT(*)::int FROM bugs b WHERE b.project_slug = p.slug AND b.source = 'production'
-                      AND b.status IN ('open', 'in_progress')) AS "openBugs",
+                      AND b.status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')) AS "openBugs",
                   (SELECT COUNT(*)::int FROM bugs b WHERE b.project_slug = p.slug AND b.source = 'production'
-                      AND b.severity = 'critical' AND b.status IN ('open', 'in_progress')) AS "criticalBugs",
+                      AND b.severity = 'critical' AND b.status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')) AS "criticalBugs",
                   (SELECT COALESCE(SUM(k.count), 0)::int FROM production_events e
                      JOIN production_event_buckets k ON k.event_id = e.id
                     WHERE e.project_slug = p.slug AND k.hour >= date_trunc('hour', NOW() - INTERVAL '24 hours')) AS "last24h"

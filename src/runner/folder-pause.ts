@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { sendPush } from '../core/push.js';
 import type { WorkItem } from './runner-types.js';
+import { SPRINT_STATUS } from '../core/status.js';
 
 /** So lange wartet ein Auftrag ohne Sprint, bevor er nach einem Ordnerproblem erneut versucht wird. */
 export const FOLDER_RETRY_MINUTES = 10;
@@ -25,7 +26,7 @@ export async function pauseForFolderProblem(
   if (!item.sprintId) return false;
   const paused = await pool.query<{ name: string }>(
     `UPDATE sprints SET paused_at = NOW(), paused_by = $2
-      WHERE id = $1 AND status = 'active' AND paused_at IS NULL RETURNING name`,
+      WHERE id = $1 AND status = '${SPRINT_STATUS.active}' AND paused_at IS NULL RETURNING name`,
     [item.sprintId, FOLDER_PAUSE_BY],
   );
   const sprint = paused.rows[0];

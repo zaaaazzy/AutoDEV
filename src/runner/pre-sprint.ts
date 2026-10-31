@@ -7,6 +7,7 @@ import { usageLimitReset } from './autofix.js';
 import { projectBudgetExceeded } from './budget.js';
 import type { RunnerOptions } from './runner.js';
 import type { WorkflowAgent } from './runner-types.js';
+import { SPRINT_STATUS } from '../core/status.js';
 
 /** Rolle, unter der „Vor dem Sprint“ läuft: nur lesen (siehe READ_ONLY_ROLES). */
 export const PRE_SPRINT_ROLE = 'pre_sprint';
@@ -76,7 +77,7 @@ export async function runPreSprint(
   const sprint = (
     await pool.query<ActiveSprint>(
       `SELECT id, name, goal, pre_sprint_attempts AS attempts, pre_sprint_next_at AS "nextAt"
-         FROM sprints WHERE project_slug = $1 AND status = 'active' AND pre_sprint_at IS NULL AND paused_at IS NULL
+         FROM sprints WHERE project_slug = $1 AND status = '${SPRINT_STATUS.active}' AND pre_sprint_at IS NULL AND paused_at IS NULL
         ORDER BY created_at LIMIT 1`,
       [options.project],
     )

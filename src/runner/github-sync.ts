@@ -4,6 +4,10 @@ import { pollSprintReviews, sprintTag } from './git-sync.js';
 import { goLive } from './go-live.js';
 import { createGithubAdapter, githubRepo, type GithubMode } from './github.js';
 import { type HosterAdapter, HosterError, type HosterIssue, UNTRUSTED_END, UNTRUSTED_START } from './hoster.js';
+import { BUG_STATUS, DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
+
+/** Sprint läuft oder wartet auf den Merge: seine Aufträge gelten gegenüber GitHub als „im Sprint“. */
+const SPRINT_IN_WORK: readonly string[] = [SPRINT_STATUS.active, SPRINT_STATUS.review];
 
 /** Issues höchstens alle 5 Minuten abfragen (Rate-Limit), Pull Requests alle 2 Minuten. */
 export const ISSUE_INTERVAL_MS = 5 * 60_000;
@@ -120,10 +124,11 @@ export interface TrackedRow {
 
 /** Stand eines importierten Eintrags aus Auftrag, Sprint und (bei Bugs) Bug-Status; null = noch nichts zu melden. */
 export function issueStage(row: Pick<TrackedRow, 'bugStatus' | 'orderStatus' | 'sprintStatus'>): IssueStage | null {
-  if (row.orderStatus === 'done' || row.bugStatus === 'fixed') return 'erledigt';
+  if (row.orderStatus === DEVELOPMENT_STATUS.done || row.bugStatus === BUG_STATUS.fixed) return 'erledigt';
   if (!row.orderStatus || row.orderStatus === 'rejected') return null;
-  if (row.orderStatus === 'blocked') return 'blockiert';
-  if (row.orderStatus === 'in_progress' || ['active', 'review'].includes(row.sprintStatus ?? '')) return 'im_sprint';
+  if (row.orderStatus === DEVELOPMENT_STATUS.blocked) return 'blockiert';
+  if (row.orderStatus === DEVELOPMENT_STATUS.inProgress || SPRINT_IN_WORK.includes(row.sprintStatus ?? ''))
+    return 'im_sprint';
   return 'ausgearbeitet';
 }
 
@@ -137,7 +142,7 @@ export function stageComment(row: TrackedRow, stage: IssueStage): string {
   ];
   if (stage === 'erledigt') {
     const tag =
-      row.sprintId && row.sprintName && row.sprintStatus === 'completed' && row.sprintSync === 'done'
+      row.sprintId && row.sprintName && row.sprintStatus === SPRINT_STATUS.completed && row.sprintSync === 'done'
         ? sprintTag(row.sprintName, row.sprintId)
         : null;
     lines.push(
@@ -228,7 +233,7 @@ export async function checkGithubAuth(pool: Pool, project: string, adapter: Host
 /** Gibt es einen Sprint im Review mit geöffnetem Pull Request, den pollSprintReviews verfolgen muss? */
 async function hasSprintReviews(pool: Pool, project: string): Promise<boolean> {
   const { rows } = await pool.query(
-    `SELECT 1 FROM sprints WHERE project_slug = $1 AND status = 'review' AND pr_url IS NOT NULL LIMIT 1`,
+    `SELECT 1 FROM sprints WHERE project_slug = $1 AND status = '${SPRINT_STATUS.review}' AND pr_url IS NOT NULL LIMIT 1`,
     [project],
   );
   return rows.length > 0;

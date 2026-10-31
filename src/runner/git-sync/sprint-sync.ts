@@ -28,6 +28,7 @@ import { ensureCiWorkflow, runTestGate, waitForCi } from './ci.js';
 import { orderWorkInProgress } from './order-branch.js';
 import { gitEnvironment } from '../project-command.js';
 import { gateExecutor } from '../test-sandbox.js';
+import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../../core/status.js';
 
 /** Erstellt nach einem erledigten Sprint-Auftrag einen lokalen Commit (kein Push; den übernimmt die Sprint-Sicherung). */
 export async function commitTaskToGit(
@@ -143,7 +144,7 @@ async function pushSprint(
   let awaitingMerge = false;
   if (await branchExists(git, branch)) {
     if ((await must('rev-parse', '--abbrev-ref', 'HEAD')) !== branch) await must('checkout', branch);
-  } else if (sprint.status === 'completed' && sprint.hasDone) {
+  } else if (sprint.status === SPRINT_STATUS.completed && sprint.hasDone) {
     // Erledigte Aufträge, aber kein Sprint-Branch: Früher wurde dann der aktuelle Branch gesichert, getaggt und „done“
     // gemeldet – main bekam die Aufträge nie, der Tag zeigte auf einen fremden Stand.
     throw new Error(
@@ -170,7 +171,7 @@ async function pushSprint(
   }
   // Geprüft wird der Stand, der live geht: aktuellen main in den Sprint-Branch übernehmen (z. B. Korrekturen, die
   // nach dem Sprintstart auf main kamen). Konflikte brechen ab, statt etwas Ungeprüftes zu mergen.
-  if (sprint.status === 'completed' && (await branchExists(git, MAIN_BRANCH))) {
+  if (sprint.status === SPRINT_STATUS.completed && (await branchExists(git, MAIN_BRANCH))) {
     const head = await must('rev-parse', '--abbrev-ref', 'HEAD');
     if (head !== MAIN_BRANCH && (await git('merge-base', '--is-ancestor', MAIN_BRANCH, 'HEAD')).exitCode !== 0) {
       const merged = await git('merge', '--no-edit', MAIN_BRANCH, '-m', `Merge ${MAIN_BRANCH} in ${head}`);
@@ -190,12 +191,12 @@ async function pushSprint(
     await must('push', '-u', 'origin', current);
     log.push(`${current} nach GitHub gepusht.`);
   }
-  if (sprint.status === 'review') {
+  if (sprint.status === SPRINT_STATUS.review) {
     // Nachbesserung im Review: der Push aktualisiert den Pull Request; der Tag folgt erst nach dem Merge.
     log.push('Sprint im Review: Pull Request aktualisiert, Merge und Tag folgen nach grüner CI.');
     return { commit: await must('rev-parse', '--short', 'HEAD'), branch: current, log };
   }
-  if (sprint.status === 'completed' && current === branch && ci.pullRequest && sprint.remote) {
+  if (sprint.status === SPRINT_STATUS.completed && current === branch && ci.pullRequest && sprint.remote) {
     // PR-Modus: statt direkt zu mergen einen Pull Request öffnen; den Merge übernimmt pollSprintReviews.
     const { adapter, body, existing } = ci.pullRequest;
     const url =
@@ -205,7 +206,7 @@ async function pushSprint(
     log.push(`Pull Request ${url} geöffnet – Merge nach ${MAIN_BRANCH} und Tag folgen nach grüner CI.`);
     return { commit: await must('rev-parse', '--short', 'HEAD'), branch: current, log, pullRequest: url };
   }
-  if (sprint.status === 'completed' && current === branch) {
+  if (sprint.status === SPRINT_STATUS.completed && current === branch) {
     if (sprint.remote) await waitForCi(ci.execute, ci.cwd, branch, log);
     const elsewhere = await checkedOutElsewhere(git, MAIN_BRANCH, ci.cwd);
     if (elsewhere) {
@@ -450,7 +451,7 @@ export async function syncSprintToGit(
       WHERE s.id = (SELECT id FROM sprints WHERE project_slug = $1 AND git_sync = 'pending'
                      ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
       RETURNING s.id, s.name, s.branch, s.status, s.git_action AS action, s.pr_url AS "prUrl",
-                EXISTS (SELECT 1 FROM development_items d WHERE d.sprint_id = s.id AND d.status = 'done') AS "hasDone",
+                EXISTS (SELECT 1 FROM development_items d WHERE d.sprint_id = s.id AND d.status = '${DEVELOPMENT_STATUS.done}') AS "hasDone",
                 (SELECT git_remote FROM projects WHERE slug = s.project_slug) AS remote`,
     [project],
   );
@@ -496,7 +497,7 @@ export async function syncSprintToGit(
           });
     if (result.pullRequest) {
       await pool.query(
-        `UPDATE sprints SET status = 'review', pr_url = $5, ci_status = 'pending', ci_bug_run = NULL, git_sync = 'done',
+        `UPDATE sprints SET status = '${SPRINT_STATUS.review}', pr_url = $5, ci_status = 'pending', ci_bug_run = NULL, git_sync = 'done',
                 git_message = $2, git_commit = $3, git_branch = $4, git_synced_at = NOW() WHERE id = $1`,
         [sprint.id, result.log.join(' '), result.commit, result.branch, result.pullRequest],
       );
@@ -504,7 +505,7 @@ export async function syncSprintToGit(
     }
     // Abgeschlossen heisst „in main“: Fehlt der Sprint dort noch (main in anderem Ordner mit offenen Änderungen), wartet
     // er auf den Merge – kein „done“, kein Live schalten, kein Neustart, und der Autopilot startet keinen neuen Sprint.
-    if (sprint.status === 'completed' && sprint.action !== 'pull') {
+    if (sprint.status === SPRINT_STATUS.completed && sprint.action !== 'pull') {
       const branch = sprintBranchOf(sprint);
       const waiting =
         result.awaitingMerge ||
@@ -571,7 +572,7 @@ async function planPullRequest(
   execute: CommandExecutor,
   log: string[],
 ): Promise<PullRequestPlan | null> {
-  if (sprint.status !== 'completed') return null;
+  if (sprint.status !== SPRINT_STATUS.completed) return null;
   const settings = (
     await pool
       .query<{ mode: string }>('SELECT github_mode AS mode FROM projects WHERE slug = $1', [project])

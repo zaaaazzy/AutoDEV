@@ -21,7 +21,7 @@ import {
   projectFolderError,
   validText,
 } from '../core/validation.js';
-import { REVIEW_MODES } from '../core/status.js';
+import { AGENT_RUN_STATUS, IDEATION_STATUS, REVIEW_MODES } from '../core/status.js';
 
 /** With DEV_LOG_SECRET_KEY set, database access stored before encryption existed is encrypted once at start. */
 export async function encryptProjectSecrets(pool: Pool): Promise<number> {
@@ -146,8 +146,8 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
         return void response.status(400).json({ message: 'Bitte zur Bestätigung den Projektnamen genau eintippen.' });
       }
       const running = await pool.query(
-        `SELECT 1 FROM agent_runs WHERE project_slug = $1 AND status = 'running'
-          UNION ALL SELECT 1 FROM ideation_items WHERE project_slug = $1 AND status = 'drafting' LIMIT 1`,
+        `SELECT 1 FROM agent_runs WHERE project_slug = $1 AND status = '${AGENT_RUN_STATUS.running}'
+          UNION ALL SELECT 1 FROM ideation_items WHERE project_slug = $1 AND status = '${IDEATION_STATUS.drafting}' LIMIT 1`,
         [slug],
       );
       if (running.rows[0]) {

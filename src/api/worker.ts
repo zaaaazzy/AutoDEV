@@ -7,6 +7,13 @@ import { access } from './access.js';
 import { cpus, loadavg } from 'node:os';
 import type { Pool } from 'pg';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
+import {
+  AGENT_RUN_STATUS,
+  AGENT_STEP_STATUS,
+  DEVELOPMENT_STATUS,
+  IDEATION_STATUS,
+  SPRINT_STATUS,
+} from '../core/status.js';
 
 export async function beatHeartbeat(
   pool: Pool,
@@ -131,7 +138,7 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
         await pool.query(
           `SELECT r.project_slug AS project, d.title, r.started_at AS "startedAt"
            FROM agent_runs r JOIN development_items d ON d.id = r.development_id
-          WHERE r.status = 'running' AND ($1::text[] IS NULL OR r.project_slug = ANY($1)) ORDER BY r.started_at`,
+          WHERE r.status = '${AGENT_RUN_STATUS.running}' AND ($1::text[] IS NULL OR r.project_slug = ANY($1)) ORDER BY r.started_at`,
           [visible],
         )
       ).rows;
@@ -173,8 +180,8 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
            FROM development_items d
            JOIN agents a ON a.id = $1 AND a.project_slug = d.project_slug
            LEFT JOIN sprints s ON s.id = d.sprint_id
-          WHERE d.project_slug = $2 AND d.status = 'planned'
-            AND (d.agent_id = a.id OR (d.agent_id IS NULL AND s.status = 'active' AND a.enabled
+          WHERE d.project_slug = $2 AND d.status = '${DEVELOPMENT_STATUS.planned}'
+            AND (d.agent_id = a.id OR (d.agent_id IS NULL AND s.status = '${SPRINT_STATUS.active}' AND a.enabled
                  AND NOT (a.role = 'author' AND d.ideation_id IS NOT NULL)))
           ORDER BY d.created_at LIMIT 50`,
           [id, slug],
@@ -230,7 +237,7 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
         await pool.query(
           `SELECT d.id, d.title, r.started_at AS "startedAt"
            FROM agent_runs r JOIN development_items d ON d.id = r.development_id
-          WHERE r.project_slug = $1 AND r.status = 'running' ORDER BY r.started_at`,
+          WHERE r.project_slug = $1 AND r.status = '${AGENT_RUN_STATUS.running}' ORDER BY r.started_at`,
           [slug],
         )
       ).rows;
@@ -241,7 +248,7 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
            FROM agents a
            LEFT JOIN LATERAL (
              SELECT st.id, r.development_id FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
-              WHERE st.agent_id = a.id AND st.status = 'running' AND r.status = 'running' LIMIT 1
+              WHERE st.agent_id = a.id AND st.status = '${AGENT_STEP_STATUS.running}' AND r.status = '${AGENT_RUN_STATUS.running}' LIMIT 1
            ) st ON TRUE
            LEFT JOIN development_items d ON d.id = st.development_id
            LEFT JOIN sprints s ON s.id = d.sprint_id
@@ -261,12 +268,12 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
           startedAt: string | null;
         }>(
           `SELECT id, title, status, progress, progress_agent AS agent, drafting_started_at AS "startedAt"
-             FROM ideation_items WHERE project_slug = $1 AND status IN ('requested', 'drafting')
-            ORDER BY status = 'drafting' DESC, updated_at`,
+             FROM ideation_items WHERE project_slug = $1 AND status IN ('${IDEATION_STATUS.requested}', '${IDEATION_STATUS.drafting}')
+            ORDER BY status = '${IDEATION_STATUS.drafting}' DESC, updated_at`,
           [slug],
         )
       ).rows;
-      for (const draft of drafts.filter((entry) => entry.status === 'drafting' && entry.agent)) {
+      for (const draft of drafts.filter((entry) => entry.status === IDEATION_STATUS.drafting && entry.agent)) {
         const agent = agents.find((entry) => entry.role === draft.agent && !entry.active);
         if (agent) Object.assign(agent, { active: true, orderTitle: `Neuer Auftrag: ${draft.title}` });
       }

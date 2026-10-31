@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { EXTERNAL_TEXT_END, EXTERNAL_TEXT_START, plainExternalText } from '../core/bug-trust.js';
-import { BUG_STATUS } from '../core/status.js';
+import { BUG_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
 import { maskSecrets } from '../core/secret-mask.js';
 import { shortTitle } from '../core/validation.js';
 import { queueBugFix } from './autofix.js';
@@ -232,7 +232,7 @@ export async function recordDeploy(
     `INSERT INTO production_deploys (project_slug, order_ids, sprint_tag, new_migrations)
      SELECT $1, COALESCE(ARRAY(
               SELECT d.id FROM development_items d
-               WHERE d.project_slug = $1 AND d.status = 'done' AND d.completed_at <= NOW()
+               WHERE d.project_slug = $1 AND d.status = '${DEVELOPMENT_STATUS.done}' AND d.completed_at <= NOW()
                  AND d.completed_at > COALESCE(
                    (SELECT MAX(deployed_at) FROM production_deploys WHERE project_slug = $1), NOW() - INTERVAL '1 day')
                ORDER BY d.completed_at), '{}'), $2, $3`,
@@ -334,7 +334,7 @@ export async function recordEvent(
       const note = `**Regression** (${now.toISOString().slice(0, 16).replace('T', ' ')} UTC): Der Fehler ist im Betrieb wieder aufgetreten (Fingerabdruck \`${print}\`).`;
       // Eine Regression kann jeder mit dem Ingest-Token auslösen: die frühere Freigabe gilt nicht weiter.
       await client.query(
-        `UPDATE bugs SET status = 'open', fixed_at = NULL, regressed_at = $2, severity = $3, updated_at = NOW(),
+        `UPDATE bugs SET status = '${BUG_STATUS.open}', fixed_at = NULL, regressed_at = $2, severity = $3, updated_at = NOW(),
                 fix_notes = CASE WHEN fix_notes = '' THEN $4 ELSE fix_notes || E'\n\n' || $4 END,
                 approved_at = NULL, approved_by = NULL
           WHERE id = $1`,
@@ -383,8 +383,8 @@ const PRODUCTION_INTRO =
  */
 export async function startProductionFix(pool: Pool, bugId: string): Promise<void> {
   const replanned = await pool.query(
-    `UPDATE development_items SET status = 'planned', auto_run = TRUE, failure = NULL, updated_at = NOW()
-      WHERE bug_id = $1 AND status = 'done'`,
+    `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE, failure = NULL, updated_at = NOW()
+      WHERE bug_id = $1 AND status = '${DEVELOPMENT_STATUS.done}'`,
     [bugId],
   );
   if (replanned.rowCount) return;

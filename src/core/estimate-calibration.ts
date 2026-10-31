@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { DEVELOPMENT_STATUS } from './status.js';
 
 /**
  * Kalibrierung der Schätzungen: Planer, Modell-Routing und Statistik rechnen in Agent-Stunden (gemessene Laufzeit
@@ -124,7 +125,7 @@ export const CALIBRATION_SQL = `
       FROM development_items d
       JOIN agent_runs r ON r.development_id = d.id
       JOIN agent_run_steps st ON st.run_id = r.id
-     WHERE d.status = 'done' AND d.kind <> 'express'
+     WHERE d.status = '${DEVELOPMENT_STATUS.done}' AND d.kind <> 'express'
      GROUP BY d.id
   ), ranked AS (
     SELECT *, ROW_NUMBER() OVER (PARTITION BY project_slug, source ORDER BY completed_at DESC NULLS LAST) AS n

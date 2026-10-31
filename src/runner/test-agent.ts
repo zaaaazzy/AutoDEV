@@ -13,6 +13,7 @@ import { type CommandExecutor, redactOutput, runCommand } from '../core/command.
 import { killGroup } from '../core/shutdown.js';
 import { SKIPPED_NOTE } from './order-tests.js';
 import { gitEnvironment, projectEnvironment } from './project-command.js';
+import { TEST_RUN_STATUS } from '../core/status.js';
 
 const execFile = promisify(nodeExecFile);
 
@@ -258,7 +259,7 @@ async function main(): Promise<void> {
     pool = await createDatabasePool(readDatabaseConfig());
     const runId = await runTestAgent(options, pool);
     const status = await pool.query<{ status: string }>('SELECT status FROM test_runs WHERE id = $1', [runId]);
-    if (status.rows[0]?.status !== 'passed') {
+    if (status.rows[0]?.status !== TEST_RUN_STATUS.passed) {
       process.exitCode = 1;
     }
   } finally {

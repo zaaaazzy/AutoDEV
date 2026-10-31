@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { logged } from '../core/log.js';
 import { killOrphan, type OrphanResult, type ProcessStore } from '../core/shutdown.js';
 import { currentWorkerId, liveWorkerSql, WORKER_STALE_SECONDS } from './worker-identity.js';
+import { AGENT_STEP_STATUS } from '../core/status.js';
 
 type Queryable = Pick<Pool, 'query'>;
 
@@ -62,7 +63,7 @@ export async function killPreviousProcesses(
       WHERE p.worker_id IS NULL OR p.worker_id = $1 OR NOT ${liveWorkerSql('p.worker_id', '$2')}
      UNION
      SELECT s.pid, s.pid_started_at FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
-      WHERE s.status = 'running' AND s.pid IS NOT NULL AND s.pid_started_at IS NOT NULL
+      WHERE s.status = '${AGENT_STEP_STATUS.running}' AND s.pid IS NOT NULL AND s.pid_started_at IS NOT NULL
         AND ${RECLAIMABLE_RUN_SQL}`,
     [workerId, WORKER_STALE_SECONDS],
   );

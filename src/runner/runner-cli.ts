@@ -53,6 +53,7 @@ import { acceptsNewWork, completeRestart, processRestart, readRestart, RESTART_E
 import { sendPush } from '../core/push.js';
 import { listenForWork, WorkSignal } from './work-signal.js';
 import { runDueJobs } from './scheduler.js';
+import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
 
 /**
  * Projektbereich des Workers: aus der Umgebung, sonst aus der .env der Installation, sonst der Ordner, in dem
@@ -269,14 +270,14 @@ export async function recoverInterruptedRuns(
   // Läufe, die dieser Worker aufräumen darf – einmal festgehalten, damit Neueinplanen, Schritte und Läufe dieselben treffen.
   const runs = (
     await pool.query<{ id: string }>(
-      `SELECT r.id FROM agent_runs r WHERE r.status = 'running' AND ${RECLAIMABLE_RUN_SQL}`,
+      `SELECT r.id FROM agent_runs r WHERE r.status = '${AGENT_RUN_STATUS.running}' AND ${RECLAIMABLE_RUN_SQL}`,
       [workerId, WORKER_STALE_SECONDS],
     )
   ).rows.map((row) => row.id);
   const requeued = safe
     ? await pool.query(
-        `UPDATE development_items SET status = 'planned', updated_at = NOW()
-          WHERE status = 'in_progress' AND id IN (SELECT development_id FROM agent_runs WHERE id = ANY($1::uuid[]))`,
+        `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.planned}', updated_at = NOW()
+          WHERE status = '${DEVELOPMENT_STATUS.inProgress}' AND id IN (SELECT development_id FROM agent_runs WHERE id = ANY($1::uuid[]))`,
         [runs],
       )
     : { rowCount: 0 };
@@ -287,7 +288,9 @@ export async function recoverInterruptedRuns(
     await pool.query(`DELETE FROM chat_messages WHERE role = 'assistant' AND status = 'processing'`);
     await pool.query(`UPDATE chat_messages SET status = $1 WHERE status = 'processing'`, [safe ? 'pending' : 'failed']);
     await pool.query(`UPDATE development_items SET analysis_status = 'requested' WHERE analysis_status = 'running'`);
-    await pool.query(`UPDATE ideation_items SET status = 'requested', updated_at = NOW() WHERE status = 'drafting'`);
+    await pool.query(
+      `UPDATE ideation_items SET status = '${IDEATION_STATUS.requested}', updated_at = NOW() WHERE status = '${IDEATION_STATUS.drafting}'`,
+    );
     await pool
       .query(
         `UPDATE visionary_runs SET status = 'requested', started_at = NULL, progress = NULL WHERE status = 'running'`,
@@ -295,13 +298,13 @@ export async function recoverInterruptedRuns(
       .catch(logged('runner-cli'));
   }
   await pool.query(
-    `UPDATE agent_run_steps SET status = 'failed', interrupted = TRUE,
+    `UPDATE agent_run_steps SET status = '${AGENT_STEP_STATUS.failed}', interrupted = TRUE,
             output = output || E'\nUnterbrochen: Der Worker wurde beendet.'
-      WHERE status = 'running' AND run_id = ANY($1::uuid[])`,
+      WHERE status = '${AGENT_STEP_STATUS.running}' AND run_id = ANY($1::uuid[])`,
     [runs],
   );
   await pool.query(
-    `UPDATE agent_runs SET status = 'failed', completed_at = NOW() WHERE status = 'running' AND id = ANY($1::uuid[])`,
+    `UPDATE agent_runs SET status = '${AGENT_RUN_STATUS.failed}', completed_at = NOW() WHERE status = '${AGENT_RUN_STATUS.running}' AND id = ANY($1::uuid[])`,
     [runs],
   );
   if (alone) {

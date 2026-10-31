@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { access } from './access.js';
 import { parseProjectSlug } from '../core/validation.js';
 import { realFailureSql } from '../core/interrupted-steps.js';
+import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
 
 /** Auswertung „Was klappt“: wo der Ablauf hilft und wo er hängen bleibt (letzte 30 Tage). */
 export interface QualityStats {
@@ -28,18 +29,18 @@ export async function collectQuality(pool: Pool, slug: string, days = 30): Promi
               COUNT(*) FILTER (WHERE retry_count = 0 AND failure_bug_id IS NULL
                 AND (SELECT COUNT(*) FROM agent_runs r WHERE r.development_id = d.id) <= 1) AS first
          FROM development_items d
-        WHERE project_slug = $1 AND status = 'done' AND completed_at >= ${since}`,
+        WHERE project_slug = $1 AND status = '${DEVELOPMENT_STATUS.done}' AND completed_at >= ${since}`,
       [slug, days],
     ),
     pool.query<{ count: string; succeeded: string }>(
-      `SELECT COUNT(DISTINCT r.id) AS count, COUNT(DISTINCT r.id) FILTER (WHERE r.status = 'passed') AS succeeded
+      `SELECT COUNT(DISTINCT r.id) AS count, COUNT(DISTINCT r.id) FILTER (WHERE r.status = '${AGENT_RUN_STATUS.passed}') AS succeeded
          FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
         WHERE r.project_slug = $1 AND r.started_at >= ${since}
           AND EXISTS (SELECT 1 FROM jsonb_array_elements(s.events) e WHERE e->>'text' LIKE 'Zurück an den Entwickler%')`,
       [slug, days],
     ),
     pool.query<{ count: string; succeeded: string }>(
-      `SELECT COUNT(*) AS count, COUNT(*) FILTER (WHERE s.status = 'passed') AS succeeded
+      `SELECT COUNT(*) AS count, COUNT(*) FILTER (WHERE s.status = '${AGENT_STEP_STATUS.passed}') AS succeeded
          FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
         WHERE r.project_slug = $1 AND r.started_at >= ${since}
           AND EXISTS (SELECT 1 FROM jsonb_array_elements(s.events) e WHERE e->>'text' LIKE 'Vorübergehender Fehler%')`,
@@ -60,7 +61,7 @@ export async function collectQuality(pool: Pool, slug: string, days = 30): Promi
               MAX(EXTRACT(EPOCH FROM (NOW() - COALESCE(
                 (SELECT MAX(e.at) FROM development_events e WHERE e.development_id = d.id AND e.detail LIKE '%>blocked'),
                 d.updated_at))) / 3600) AS longest
-         FROM development_items d WHERE d.project_slug = $1 AND d.status = 'blocked'`,
+         FROM development_items d WHERE d.project_slug = $1 AND d.status = '${DEVELOPMENT_STATUS.blocked}'`,
       [slug],
     ),
     pool.query<{ count: string }>(
@@ -75,7 +76,7 @@ export async function collectQuality(pool: Pool, slug: string, days = 30): Promi
               COUNT(*) AS steps, COUNT(*) FILTER (WHERE ${realFailureSql('s')}) AS failed
          FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
          LEFT JOIN agents a ON a.id = s.agent_id
-        WHERE r.project_slug = $1 AND r.started_at >= ${since} AND s.status IN ('passed', 'failed')
+        WHERE r.project_slug = $1 AND r.started_at >= ${since} AND s.status IN ('${AGENT_STEP_STATUS.passed}', '${AGENT_STEP_STATUS.failed}')
         GROUP BY 1, 2 ORDER BY COUNT(*) FILTER (WHERE ${realFailureSql('s')}) DESC, COUNT(*) DESC LIMIT 20`,
       [slug, days],
     ),
