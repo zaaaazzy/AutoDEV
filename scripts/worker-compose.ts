@@ -11,7 +11,7 @@ const result = await writeWorkerOverride(ROOT);
 if (result === 'kept') {
   console.warn(
     `! ${OVERRIDE_FILE} ist eine eigene Datei (ohne Kennzeichnung) und bleibt unverändert – der Worker im Container ` +
-      'braucht darin AIdeation-Ordner und Projektordner (docs/installation.md).',
+      'braucht darin AIdeation-Ordner und Projektordner (docs/betrieb.md).',
   );
 } else if (result === 'written') {
   console.log(`→ ${OVERRIDE_FILE} für den Worker im Container geschrieben.`);

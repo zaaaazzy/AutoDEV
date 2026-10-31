@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { folderAvailable, missingFolderMessage } from './folder-guard.js';
+import { GIT_GUARD_ENV, guardGitCall } from './git-guard.js';
 import { maskTokens } from './secret-mask.js';
 import { killGroup, trackChild } from './shutdown.js';
 
@@ -139,7 +140,20 @@ export function redactOutput(
   return finish(joinHeadAndTail(head, tail, output.length - head.length - tail.length, secrets));
 }
 
-export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
+export const runCommand: CommandExecutor = async (command, cwd, options = {}) => {
+  // Git des Workers auf Projekten (gitEnvironment): Repo-Konfiguration prüfen und Git-Ordner festhalten (git-guard.ts).
+  if (command[0] === 'git' && options.env?.[GIT_GUARD_ENV]) {
+    const guarded = await guardGitCall(command.slice(1), cwd, options.env);
+    if ('refused' in guarded) {
+      options.onOutput?.(guarded.refused);
+      return { exitCode: 1, durationMs: 0, output: guarded.refused };
+    }
+    return spawnCommand(command, cwd, { ...options, env: guarded.env });
+  }
+  return spawnCommand(command, cwd, options);
+};
+
+const spawnCommand: CommandExecutor = (command, cwd, options = {}) => {
   return new Promise((resolveCommand) => {
     const startedAt = Date.now();
     // Schon abgebrochen: gar nicht erst starten (ein 'abort'-Listener feuert für ein bereits abgebrochenes Signal nie).

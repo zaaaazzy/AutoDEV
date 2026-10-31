@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import { createDevLogApp } from './app.js';
@@ -19,8 +22,16 @@ const boundUser = {
   credential_version: await credentialVersion(auth, 'scrypt$salz$hash'),
 };
 
+// Attrappe der gebauten Oberfläche: Unit-Tests laufen ohne `build:ui` (CI-Job `check`), kein Test liest `dist/ui`.
+const uiDirectory = mkdtempSync(join(tmpdir(), 'aideation-ui-'));
+writeFileSync(
+  join(uiDirectory, 'index.html'),
+  '<!doctype html><html><head><base href="./" /></head><body><app-root></app-root><script src="main-TEST1234.js" type="module"></script></body></html>',
+);
+writeFileSync(join(uiDirectory, 'main-TEST1234.js'), 'export {};');
+
 async function withServer(pool: Pool, action: (baseUrl: string) => Promise<void>): Promise<void> {
-  const server = createDevLogApp(pool, auth).listen(0, '127.0.0.1');
+  const server = createDevLogApp(pool, auth, uiDirectory).listen(0, '127.0.0.1');
   try {
     await new Promise<void>((resolve) => server.once('listening', resolve));
     const address = server.address() as AddressInfo;
@@ -258,12 +269,12 @@ test('validates board input and stores valid project-scoped ideas', async () => 
 
 function recordingPool(rows: Record<string, unknown>[] = []) {
   const queries: { sql: string; values: unknown[] }[] = [];
-  const pool = {
-    query: async (sql: string, values: unknown[] = []) => {
-      queries.push({ sql, values });
-      return { rows };
-    },
-  } as unknown as Pool;
+  const query = async (sql: string, values: unknown[] = []) => {
+    // Transaktionsrahmen (withTransaction) nicht mitschreiben: Die Tests prüfen die eigentlichen Anweisungen.
+    if (!['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql)) queries.push({ sql, values });
+    return { rows };
+  };
+  const pool = { query, connect: async () => ({ query, release: () => undefined }) } as unknown as Pool;
   return { pool, queries };
 }
 
@@ -287,7 +298,8 @@ test('stores effort, token, benefit and cost estimates on ideas and rejects out-
       }),
     });
     assert.equal(created.status, 201);
-    assert.deepEqual(queries[0]?.values.slice(5), [12.5, 40000, 8, 3, 'frontend']);
+    // Ohne Art: null, die Abfrage setzt dann `feature`.
+    assert.deepEqual(queries[0]?.values.slice(5), [12.5, 40000, 8, 3, 'frontend', null]);
 
     for (const invalid of [
       { benefit: 11 },
@@ -650,6 +662,10 @@ test('defines agents per workflow phase and persists their order', async () => {
     assert.equal(created.status, 201);
     const insert = queries.find((query) => query.sql.includes('INSERT INTO agents'));
     assert.equal(insert?.values[3], 'while_task');
+    // Nutzt das Projekt Workflow-Schritte, bekommt der neue Agent dort seinen Schritt (sonst liefe er nie).
+    const step = queries.find((query) => query.sql.includes('INSERT INTO workflow_steps'));
+    assert.deepEqual(step?.values, ['mainty', 'while_task', ID]);
+    assert.match(step?.sql ?? '', /WHERE EXISTS \(SELECT 1 FROM workflow_steps WHERE project_slug = \$1\)/);
     // Jeder Befehl wird einzeln gesetzt: ohne Angabe bekommt ein neuer Agent keine Befehle.
     assert.deepEqual(insert?.values[7], []);
 
@@ -673,6 +689,10 @@ test('defines agents per workflow phase and persists their order', async () => {
     });
     assert.equal(ordered.status, 204);
     assert.deepEqual(queries.at(-1)?.values, ['mainty', 'pre_task', [ID, SPRINT_ID]]);
+    // Eine Quelle: Die Reihenfolge landet auch in den Workflow-Schritten, die der Worker ausführt.
+    assert.match(queries.at(-1)?.sql ?? '', /UPDATE workflow_steps s SET position = o\.ord, phase = \$2/);
+    assert.match(queries.at(-1)?.sql ?? '', /s\.agent_id = o\.id AND s\.project_slug = \$1/);
+    assert.match(queries.at(-2)?.sql ?? '', /UPDATE agents a SET position/);
 
     const badOrder = await fetch(`${baseUrl}/api/projects/mainty/agents/order`, {
       method: 'POST',
@@ -685,6 +705,32 @@ test('defines agents per workflow phase and persists their order', async () => {
     assert.equal(list.status, 200);
     // Workflow-Reihenfolge: vor dem Sprint, vor dem Auftrag, während, danach, bei abgelehnt, bei abgeschlossen.
     assert.match(queries.at(-1)?.sql ?? '', /'pre_sprint' THEN 0 WHEN 'pre_task' THEN 1 WHEN 'while_task' THEN 2/);
+  });
+});
+
+test('changing the phase of an agent moves its workflow steps, so the next run follows the setting', async () => {
+  const { pool, queries } = recordingPool([{ id: ID }]);
+  await withServer(pool, async (baseUrl) => {
+    const patch = (body: unknown) =>
+      fetch(`${baseUrl}/api/agents/${ID}`, { method: 'PATCH', headers: jsonHeaders(), body: JSON.stringify(body) });
+    assert.equal((await patch({ phase: 'after_task' })).status, 200);
+    const move = queries.at(-1);
+    assert.match(move?.sql ?? '', /UPDATE workflow_steps s\s+SET phase = \$2/);
+    assert.deepEqual(move?.values, [ID, 'after_task']);
+    // Ohne Phasenänderung bleiben die Schritte unberührt (Name, Anweisung …).
+    const before = queries.length;
+    assert.equal((await patch({ name: 'Neu' })).status, 200);
+    assert.ok(queries.slice(before).every((query) => !query.sql.includes('workflow_steps')));
+  });
+});
+
+test('lists agents with the phase and position of their first workflow step', async () => {
+  const { pool, queries } = recordingPool([{ id: ID }]);
+  await withServer(pool, async (baseUrl) => {
+    const list = await fetch(`${baseUrl}/api/projects/mainty/agents`, { headers: jsonHeaders() });
+    assert.deepEqual(((await list.json()) as { agents: unknown[] }).agents, [{ id: ID }]);
+    assert.match(queries.at(-1)?.sql ?? '', /COALESCE\(s\.phase, a\.phase\) AS phase/);
+    assert.match(queries.at(-1)?.sql ?? '', /FROM workflow_steps WHERE agent_id = a\.id/);
   });
 });
 
@@ -780,7 +826,8 @@ test('stores an agent command as an argument array and rejects strings', async (
       body: JSON.stringify({ name: 'Dev', phase: 'while_task', command: ['claude', '-p'] }),
     });
     assert.equal(created.status, 201);
-    assert.deepEqual(queries.at(-1)?.values[6], ['claude', '-p']);
+    const insert = queries.find((query) => query.sql.includes('INSERT INTO agents'));
+    assert.deepEqual(insert?.values[6], ['claude', '-p']);
     const invalid = await fetch(`${baseUrl}/api/agents/${ID}`, {
       method: 'PATCH',
       headers: jsonHeaders(),
@@ -1121,6 +1168,209 @@ test('Ablehnen mit Grund: Status rejected, Grund an der Idee und als Kommentar',
   assert.deepEqual(comment.values, [IDEA_ID, 'Pia', '**Abgelehnt:** Kein Bedarf im Team']);
 });
 
+/** memberPool mit Transaktions-Client (connect), der dieselben Antworten liefert. */
+function transactionPool(roles: string[], answer: (sql: string, values: unknown[]) => unknown): Pool {
+  const pool = memberPool(roles, answer);
+  return Object.assign(pool, { connect: async () => ({ query: pool.query.bind(pool), release: () => undefined }) });
+}
+
+const BULK_IDS = [
+  '11111111-1111-4111-8111-11111111111a',
+  '11111111-1111-4111-8111-11111111111b',
+  '11111111-1111-4111-8111-11111111111c',
+];
+const REQUESTED_ID = '11111111-1111-4111-8111-11111111111d';
+
+test('Massenablehnung: alle zulässigen Ideen mit Grund und Kommentar in einer Transaktion, der Rest übersprungen', async () => {
+  const calls: { sql: string; values: unknown[] }[] = [];
+  let failComments = false;
+  const pool = transactionPool(['plan'], (sql, values) => {
+    // Nur Ideen und Transaktion mitschreiben, nicht die Abfragen der Anmeldung.
+    if (/ideation|^(BEGIN|COMMIT|ROLLBACK)/.test(sql)) calls.push({ sql, values });
+    if (sql.startsWith('UPDATE ideation_items')) {
+      return { rows: BULK_IDS.map((id, index) => ({ id, title: `Idee ${index + 1}` })) };
+    }
+    if (sql.includes('INSERT INTO ideation_comments') && failComments) throw new Error('Kommentar fehlgeschlagen');
+    if (sql.startsWith('SELECT id, title, status FROM ideation_items')) {
+      return { rows: [{ id: REQUESTED_ID, title: 'Läuft schon', status: 'requested' }] };
+    }
+    return undefined;
+  });
+  await withServer(pool, async (baseUrl) => {
+    const reject = (body: unknown) =>
+      fetch(`${baseUrl}/api/ideation/bulk/reject`, {
+        method: 'POST',
+        headers: sessionHeaders,
+        body: JSON.stringify(body),
+      });
+    assert.equal((await reject({ ids: BULK_IDS, reason: '   ' })).status, 400);
+    assert.equal((await reject({ ids: BULK_IDS })).status, 400);
+    assert.equal((await reject({ ids: Array.from({ length: 201 }, () => IDEA_ID), reason: 'x' })).status, 400);
+    assert.equal((await reject({ ids: ['bulk'], reason: 'x' })).status, 400);
+    assert.equal(calls.length, 0, 'ungültige Anfragen schreiben nichts');
+
+    const response = await reject({ ids: [...BULK_IDS, REQUESTED_ID], reason: ' Passt nicht zur Vision ' });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.deepEqual(
+      result.rejected.map((idea: { id: string }) => idea.id),
+      BULK_IDS,
+    );
+    assert.deepEqual(result.skipped, [
+      { id: REQUESTED_ID, title: 'Läuft schon', status: 'requested', reason: 'nicht möglich' },
+    ]);
+  });
+  const statements = calls.map((call) => call.sql.split(/\s/)[0]);
+  assert.deepEqual(statements, ['BEGIN', 'UPDATE', 'INSERT', 'COMMIT', 'SELECT']);
+  const update = calls.find((call) => call.sql.startsWith('UPDATE ideation_items'))!;
+  assert.match(update.sql, /status = 'rejected', rejection_reason = \$2/);
+  assert.match(update.sql, /WHERE id = ANY\(\$1::uuid\[\]\) AND status = ANY\(\$3\)/);
+  assert.deepEqual(update.values, [
+    [...BULK_IDS, REQUESTED_ID],
+    'Passt nicht zur Vision',
+    ['idea', 'considering', 'review'],
+    ['p'],
+  ]);
+  const comment = calls.find((call) => call.sql.includes('INSERT INTO ideation_comments'))!;
+  assert.match(comment.sql, /SELECT unnest\(\$1::uuid\[\]\)/);
+  assert.deepEqual(comment.values, [BULK_IDS, 'Pia', '**Abgelehnt:** Passt nicht zur Vision']);
+
+  // Scheitern die Kommentare, wird auch die Statusänderung zurückgenommen.
+  calls.length = 0;
+  failComments = true;
+  await withServer(pool, async (baseUrl) => {
+    const failed = await fetch(`${baseUrl}/api/ideation/bulk/reject`, {
+      method: 'POST',
+      headers: sessionHeaders,
+      body: JSON.stringify({ ids: BULK_IDS, reason: 'Kein Bedarf' }),
+    });
+    assert.ok(failed.status >= 500, `Status ${failed.status}`);
+  });
+  assert.deepEqual(
+    calls.map((call) => call.sql.split(/\s/)[0]),
+    ['BEGIN', 'UPDATE', 'INSERT', 'ROLLBACK'],
+  );
+});
+
+test('Massenpriorität: setzt die Priorität nur auf bearbeitbaren Ideen des eigenen Projekts', async () => {
+  const calls: { sql: string; values: unknown[] }[] = [];
+  const pool = memberPool(['plan'], (sql, values) => {
+    if (sql.includes('ideation')) calls.push({ sql, values });
+    if (sql.startsWith('UPDATE ideation_items')) return { rows: [{ id: BULK_IDS[0], title: 'Idee 1' }] };
+    if (sql.startsWith('SELECT id, title, status FROM ideation_items')) {
+      return { rows: [{ id: BULK_IDS[1], title: 'Abgelehnt', status: 'rejected' }] };
+    }
+    return undefined;
+  });
+  await withServer(pool, async (baseUrl) => {
+    const prioritize = (body: unknown) =>
+      fetch(`${baseUrl}/api/ideation/bulk/priority`, {
+        method: 'POST',
+        headers: sessionHeaders,
+        body: JSON.stringify(body),
+      });
+    assert.equal((await prioritize({ ids: BULK_IDS, priority: 'urgent' })).status, 400);
+    assert.equal((await prioritize({ ids: [], priority: 'high' })).status, 400);
+    const response = await prioritize({ ids: BULK_IDS, priority: 'high' });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.deepEqual(result.changed, [{ id: BULK_IDS[0], title: 'Idee 1' }]);
+    assert.deepEqual(
+      result.skipped.map((idea: { id: string; reason: string }) => [idea.id, idea.reason]),
+      [
+        [BULK_IDS[1], 'nicht möglich'],
+        [BULK_IDS[2], 'nicht gefunden'],
+      ],
+    );
+  });
+  const update = calls.find((call) => call.sql.startsWith('UPDATE ideation_items'))!;
+  assert.match(update.sql, /SET priority = \$2/);
+  assert.match(update.sql, /WHERE id = ANY\(\$1::uuid\[\]\) AND status = ANY\(\$3\)/);
+  assert.deepEqual(update.values, [BULK_IDS, 'high', ['idea', 'considering', 'review'], ['p']]);
+  assert.equal(calls.filter((call) => call.sql.startsWith('UPDATE')).length, 1);
+});
+
+test('Massenaktionen ohne Admin: Ideen fremder Projekte bleiben unverändert und gelten als nicht gefunden', async () => {
+  // Kleine Ideen-Tabelle: eine Idee im eigenen Projekt p, zwei im fremden Projekt q.
+  const ideas = [
+    { id: BULK_IDS[0], title: 'Eigene Idee', status: 'idea', project: 'p' },
+    { id: BULK_IDS[1], title: 'Fremde Idee', status: 'idea', project: 'q' },
+    { id: BULK_IDS[2], title: 'Fremd in Prüfung', status: 'review', project: 'q' },
+  ];
+  // Wertet die Bedingung „id = ANY($1) [AND status = ANY($3)] AND project_slug = ANY(allowed)“ wie die Datenbank aus.
+  const matching = (ids: unknown, allowed: unknown, statuses?: unknown) =>
+    ideas.filter(
+      (idea) =>
+        (ids as string[]).includes(idea.id) &&
+        (allowed === null || (allowed as string[]).includes(idea.project)) &&
+        (!statuses || (statuses as string[]).includes(idea.status)),
+    );
+  const comments: unknown[][] = [];
+  const updates: unknown[][] = [];
+  const pool = transactionPool(['plan'], (sql, values) => {
+    if (sql.startsWith('UPDATE ideation_items')) {
+      updates.push(values);
+      return { rows: matching(values[0], values[3], values[2]).map(({ id, title }) => ({ id, title })) };
+    }
+    if (sql.includes('INSERT INTO ideation_comments')) comments.push(values[0] as unknown[]);
+    if (sql.startsWith('SELECT id, title, status FROM ideation_items')) {
+      return { rows: matching(values[0], values[1]).map(({ id, title, status }) => ({ id, title, status })) };
+    }
+    return undefined;
+  });
+  await withServer(pool, async (baseUrl) => {
+    const post = (path: string, body: unknown) =>
+      fetch(`${baseUrl}/api/ideation/bulk/${path}`, {
+        method: 'POST',
+        headers: sessionHeaders,
+        body: JSON.stringify(body),
+      }).then(async (response) => ({ status: response.status, body: await response.json() }));
+    const reasons = (skipped: { id: string; reason: string }[]) => skipped.map((idea) => [idea.id, idea.reason]);
+    const foreign = [
+      [BULK_IDS[1], 'nicht gefunden'],
+      [BULK_IDS[2], 'nicht gefunden'],
+    ];
+    const rejected = await post('reject', { ids: BULK_IDS, reason: 'Kein Bedarf' });
+    assert.equal(rejected.status, 200);
+    assert.deepEqual(rejected.body.rejected, [{ id: BULK_IDS[0], title: 'Eigene Idee' }]);
+    assert.deepEqual(reasons(rejected.body.skipped), foreign);
+    // Fremde Titel werden nicht verraten.
+    assert.ok(rejected.body.skipped.every((idea: { title: unknown }) => idea.title === null));
+
+    const prioritized = await post('priority', { ids: BULK_IDS.slice(1), priority: 'high' });
+    assert.equal(prioritized.status, 200);
+    assert.deepEqual(prioritized.body.changed, []);
+    assert.deepEqual(reasons(prioritized.body.skipped), foreign);
+  });
+  assert.deepEqual(comments, [[BULK_IDS[0]]], 'nur die eigene Idee bekommt den Ablehnungskommentar');
+  assert.ok(
+    updates.every((values) => JSON.stringify(values[3]) === '["p"]'),
+    'jedes UPDATE filtert nach Projekt',
+  );
+});
+
+test('Massenaktionen brauchen die Rolle „Planen“', async () => {
+  const writes: string[] = [];
+  const pool = memberPool(['run'], (sql) => {
+    if (sql.startsWith('UPDATE')) writes.push(sql);
+    return undefined;
+  });
+  await withServer(pool, async (baseUrl) => {
+    for (const [path, body] of [
+      ['reject', { ids: BULK_IDS, reason: 'x' }],
+      ['priority', { ids: BULK_IDS, priority: 'high' }],
+    ] as const) {
+      const denied = await fetch(`${baseUrl}/api/ideation/bulk/${path}`, {
+        method: 'POST',
+        headers: sessionHeaders,
+        body: JSON.stringify(body),
+      });
+      assert.equal(denied.status, 403);
+    }
+  });
+  assert.deepEqual(writes, []);
+});
+
 test('Filter „Herkunft“: das Board liefert auf Wunsch nur Ideen des Visionärs', async () => {
   const sources: unknown[] = [];
   const pool = memberPool(['plan'], (sql, values) => {
@@ -1212,6 +1462,81 @@ test('with a second factor, cached basic credentials neither count as failures n
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test('ein Handbuch mit 30 000 Umlauten passt durch den JSON-Parser, ein zu grosser Body gibt 413 als JSON', async () => {
+  const { pool, queries } = recordingPool([{ id: ID }]);
+  await withServer(pool, async (baseUrl) => {
+    const post = (content: string) =>
+      fetch(`${baseUrl}/api/projects/mainty/docs`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ title: 'Handbuch', content }),
+      });
+    // 30 000 Zeichen „ä“ sind rund 60 KB – vorher schon am 32-KB-Limit als HTML-413 gescheitert.
+    const full = await post('ä'.repeat(30_000));
+    assert.equal(full.status, 201);
+    assert.equal(queries.at(-1)?.values[2], 'ä'.repeat(30_000));
+
+    const tooLarge = await post('ä'.repeat(150_000));
+    assert.equal(tooLarge.status, 413);
+    assert.match(tooLarge.headers.get('content-type') ?? '', /application\/json/);
+    assert.match(((await tooLarge.json()) as { message: string }).message, /zu gross/);
+  });
+});
+
+test('kaputtes JSON gibt 400 als JSON, ein Serverfehler 500 ohne Stacktrace und Fehlertext', async () => {
+  const pool = {
+    query: async () => {
+      throw new Error('geheimes Detail aus der Datenbank');
+    },
+  } as unknown as Pool;
+  const errors = console.error;
+  console.error = () => undefined;
+  try {
+    await withServer(pool, async (baseUrl) => {
+      const broken = await fetch(`${baseUrl}/api/projects/mainty/docs`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: '{"title": "x",',
+      });
+      assert.equal(broken.status, 400);
+      assert.deepEqual(await broken.json(), { message: 'Die Anfrage enthält kein gültiges JSON.' });
+
+      const failed = await fetch(`${baseUrl}/api/projects/mainty/docs`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ title: 'Handbuch', content: 'x' }),
+      });
+      assert.equal(failed.status, 500);
+      assert.match(failed.headers.get('content-type') ?? '', /application\/json/);
+      const text = await failed.text();
+      assert.doesNotMatch(text, /stack|geheimes Detail|at /);
+      assert.deepEqual(JSON.parse(text), { message: 'Interner Fehler. Bitte später erneut versuchen.' });
+    });
+  } finally {
+    console.error = errors;
+  }
+});
+
+test('ein Sitzungs-Cookie mit kaputtem „%“ gibt 401 statt 500', async () => {
+  const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/projects`, { headers: { Cookie: 'devlog_session=%E0%A4%A' } });
+    assert.equal(response.status, 401);
+    assert.match(response.headers.get('content-type') ?? '', /application\/json/);
+  });
+});
+
+test('unbekannte Pfade antworten für jede Methode mit JSON-404', async () => {
+  const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    for (const method of ['GET', 'POST', 'DELETE']) {
+      const response = await fetch(`${baseUrl}/gibt-es-nicht`, { method, headers: { Authorization: basicAuth() } });
+      assert.equal(response.status, 404, method);
+      assert.deepEqual(await response.json(), { message: 'Nicht gefunden.' }, method);
+    }
+  });
 });
 
 test('Sprint-Name mit gleichem Git-Branch wie ein anderer Sprint wird abgelehnt', async () => {

@@ -1,6 +1,7 @@
 import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
+import { FocusOnce } from '../../core/focus-once.js';
 import type { Priority } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { CATEGORIES, isFinished, statusLabel } from '../../shared/labels.js';
@@ -51,17 +52,22 @@ export class DevelopmentComponent {
     });
     // Aus einem Link (#development/<id>, z. B. im Sprintbericht): Auftrag aufklappen und hinscrollen.
     // Wartet der Auftrag auf dich, steht er unter „Aktionen“ – dorthin weiterleiten (Parameter wie ?answer=1 bleiben).
+    // Hinscrollen nur einmal je Link, nicht bei jedem Nachladen im Hintergrund.
+    const focus = new FocusOnce();
     effect(() => {
       const id = this.store.focusId();
       const inAttention = id ? this.store.attentionIds().has(id) : false;
-      if (!id || !this.data().development.some((item) => item.id === id)) return;
-      untracked(() => {
-        if (inAttention) {
+      const present = !!id && this.data().development.some((item) => item.id === id);
+      if (id && present && inAttention) {
+        untracked(() => {
           const query = globalThis.location.hash.split('?')[1];
           this.store.navigate('actions', { focus: id });
           if (query) globalThis.history.replaceState(null, '', `#actions/${id}?${query}`);
-          return;
-        }
+        });
+        return;
+      }
+      if (!focus.take(id, present)) return;
+      untracked(() => {
         if (this.data().development.find((item) => item.id === id)?.status === 'done') this.showDoneOrders.set(true);
         globalThis.setTimeout(() => {
           const target = document.getElementById(`order-${id}`) ?? document.querySelector('.row-open');

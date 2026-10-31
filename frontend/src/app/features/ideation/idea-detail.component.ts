@@ -25,6 +25,7 @@ import {
   sourceLabel,
 } from './idea-options.js';
 import { ModalComponent } from '../../shared/modal.component.js';
+import { RejectReasonFormComponent } from './reject-reason-form.component.js';
 
 /** Dialog mit Details, Bearbeitung und Kommentaren einer Idee. */
 @Component({
@@ -44,6 +45,7 @@ import { ModalComponent } from '../../shared/modal.component.js';
     PriorityLabelPipe,
     StatusClassPipe,
     StatusLabelPipe,
+    RejectReasonFormComponent,
   ],
   templateUrl: './idea-detail.component.html',
   host: { style: 'display: contents' },
@@ -112,6 +114,7 @@ export class IdeaDetailComponent {
           ...(IDEA_SELECTABLE_STATUSES.includes(idea.status) ? { status: values['status'] } : {}),
           priority: values['priority'],
           category: values['category'] || null,
+          kind: values['kind'] === 'bug' ? 'bug' : 'feature',
         }),
       'Idee gespeichert.',
     );
@@ -134,18 +137,16 @@ export class IdeaDetailComponent {
   }
 
   protected readonly rejecting = signal(false);
-  protected rejectReason = '';
 
   /** Ablehnen mit Grund: Status „Abgelehnt“, der Grund wird gespeichert und fliesst in den nächsten Visionär-Lauf. */
-  protected async rejectIdea(idea: Idea): Promise<void> {
-    const reason = this.rejectReason.trim();
-    if (!reason) return;
-    await this.store.perform(
+  protected async rejectIdea(idea: Idea, reason: string): Promise<void> {
+    const rejected = await this.store.perform(
       () => this.api.post(`/api/ideation/${encodeURIComponent(idea.id)}/reject`, { reason }),
       'Idee abgelehnt.',
     );
+    // Gescheitert: Formular mit dem Grund stehen lassen.
+    if (!rejected) return;
     this.rejecting.set(false);
-    this.rejectReason = '';
   }
 
   protected async promoteIdea(idea: Idea): Promise<void> {

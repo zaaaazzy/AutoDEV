@@ -1,5 +1,6 @@
 // Rechte-Regeln: Pseudo-Befehle, Datei-Werkzeuge, eingebaute Rechte-Gruppen und Rollen-Sets.
 import { LEGACY_DOCKER_GROUP, LEGACY_SERVICE_RULE } from './legacy-rules.js';
+import { defined } from '../core/defined.js';
 
 /** Eine schaltbare Rechte-Gruppe für Dashboard-Assistent und Entwickler (Claude-CLI-Regeln). */
 export interface PermissionGroup {
@@ -42,7 +43,7 @@ export function rulesAllow(rules: readonly string[], command: string): boolean {
   return rules.some((rule) => {
     const bash = rule.match(/^Bash\((.+?)(:\*)?\)$/);
     if (!bash) return false;
-    const prefix = bash[1]!;
+    const prefix = defined(bash[1]);
     return bash[2] ? command === prefix || command.startsWith(`${prefix} `) : command === prefix;
   });
 }
@@ -79,7 +80,7 @@ export function commandLabel(rule: string): string {
   if (rule === DATABASE_COMMAND) return 'SQL auf der Projekt-Datenbank';
   if (rule === SERVICES_COMMAND) return 'Dienste: services.status/logs/restart/up/stop';
   const bash = rule.match(/^Bash\((.+?)(?::\*)?\)$/);
-  if (bash) return bash[1]!;
+  if (bash) return defined(bash[1]);
   const web = rule.match(/^WebFetch\(domain:(.+)\)$/);
   return web ? `Webseiten auf ${web[1]} abrufen` : rule;
 }

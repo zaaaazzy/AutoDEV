@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from 'pg';
 import { access } from './access.js';
 import { upsertDoc } from './docs.js';
 import { isUuid, isRecord, parseProjectSlug } from '../core/validation.js';
+import { defined } from '../core/defined.js';
 
 interface OrderRow {
   id: string;
@@ -141,7 +142,7 @@ export async function generateSprintReport(pool: Pool | PoolClient, sprintId: st
     problems,
     todos: orders.rows
       .filter((order) => order.actionTodo)
-      .map((order) => ({ id: order.id, title: order.title, todo: order.actionTodo! })),
+      .map((order) => ({ id: order.id, title: order.title, todo: defined(order.actionTodo) })),
   };
   await pool.query(
     `INSERT INTO sprint_reports (sprint_id, project_slug, summary, implemented, missing, problems)

@@ -103,7 +103,8 @@ test('Vor dem Sprint am Nutzungslimit: kein Fehlversuch, kein Hinweis, Nachholen
   // Aufträge blockiert die Phase dabei nicht: Sie laufen in ihre eigene Limit-Behandlung.
   assert.equal(await runPreSprint(pool, options, [planner], execute, at(0)), false);
   assert.equal(sprint.attempts, 0);
-  assert.equal(sprint.nextAt?.getHours(), 20);
+  // 20:50 Uhr in Zürich (MEZ) = 19:50 UTC, plus drei Minuten Reserve.
+  assert.equal(sprint.nextAt?.toISOString().slice(11, 16), '19:53');
   assert.equal(finished().length, 0);
   assert.equal(await runPreSprint(pool, options, [planner], execute, at(60 * 60_000)), false);
   assert.equal(calls(), 1, 'vor dem Reset kein neuer Aufruf');

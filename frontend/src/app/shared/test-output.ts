@@ -1,3 +1,5 @@
+import { defined } from '../../../../src/core/defined.js';
+
 /** Ein Befehl aus einem gespeicherten Testlauf („$ npm test → passed“) mit Kurzfazit statt Rohausgabe. */
 export interface TestStep {
   command: string;
@@ -29,7 +31,7 @@ export function summarizeTestOutput(raw: string, status: string): string {
     return failed ? `${all} Tests · ${failed} fehlgeschlagen` : `${all} Tests · alle bestanden`;
   }
   const image = raw.match(/Image\s+(\S+)\s+Built/i) ?? raw.match(/naming to (?:docker\.io\/library\/)?(\S+)/i);
-  if (image) return `Image ${image[1]!.replace(/:latest$/, '')} gebaut`;
+  if (image) return `Image ${defined(image[1]).replace(/:latest$/, '')} gebaut`;
   if (status === 'passed') return 'erfolgreich';
   const error = raw
     .split('\n')
@@ -62,7 +64,7 @@ export function splitTestSteps(text: string): (string | TestStep)[] {
       flushStep();
       if (plain.length) parts.push(plain.join('\n'));
       plain = [];
-      step = { command: start[1]!.trim(), status: start[2]!, raw: start[3] ? [start[3]] : [] };
+      step = { command: defined(start[1]).trim(), status: defined(start[2]), raw: start[3] ? [start[3]] : [] };
       continue;
     }
     if (step && END_LINE.test(line)) flushStep();

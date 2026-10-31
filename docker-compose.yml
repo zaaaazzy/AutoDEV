@@ -57,8 +57,8 @@ services:
       DEV_LOG_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/aideation
       DEV_LOG_ADMIN_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/postgres
       DEV_LOG_AUTH: ${DEV_LOG_AUTH:-on}
+      # Lauscht nur im Compose-Netz (kein veröffentlichter Port); von aussen geht es über frontend bzw. https.
       DEV_LOG_HOST: 0.0.0.0
-      DEV_LOG_BIND: 127.0.0.1
       DEV_LOG_USERNAME: ${DEV_LOG_USERNAME:-devlog}
       DEV_LOG_PASSWORD: ${DEV_LOG_PASSWORD:-}
       # Erzeugt der Einrichtungs-Assistent einmalig. Nie ändern oder löschen: sonst sind verschlüsselte Werte
@@ -217,8 +217,10 @@ services:
   # der oberste Ordner, ohne Netzwerk). Danach beendet er sich.
   worker-volumes:
     profiles: ["worker"]
-    build: deploy/worker
+    # Image baut nur der Dienst worker: drei gleichzeitige Builds desselben Images scheitern mit dem
+    # containerd-Image-Store (Docker 29, Docker Desktop) an „image … already exists“.
     image: aideation-worker
+    pull_policy: never
     container_name: ${COMPOSE_PROJECT_NAME:-aideation}_worker_volumes
     user: root
     entrypoint: ["chown", "${DEV_LOG_WORKER_USER:-1000:1000}", "/modules"]
@@ -235,8 +237,8 @@ services:
   # Docker-Socket und ohne Git-Zugang; AIdeation-Ordner und node_modules nur lesend (docker-compose.override.yml).
   watchdog:
     profiles: ["worker"]
-    build: deploy/worker
     image: aideation-worker
+    pull_policy: never
     container_name: ${COMPOSE_PROJECT_NAME:-aideation}_watchdog_nodejs
     command: ["watchdog"]
     restart: unless-stopped
@@ -321,8 +323,9 @@ services:
   # Übergibt sie dem Benutzer caddy und beendet sich – nur chown, ohne Netzwerk.
   https-volumes:
     profiles: ["https"]
-    build: deploy/caddy
+    # Image baut nur der Dienst https (siehe worker-volumes).
     image: aideation-caddy:2.8.4
+    pull_policy: never
     container_name: ${COMPOSE_PROJECT_NAME:-aideation}_proxy_caddy_volumes
     user: root
     entrypoint: ["chown", "-R", "caddy:caddy", "/data", "/config"]

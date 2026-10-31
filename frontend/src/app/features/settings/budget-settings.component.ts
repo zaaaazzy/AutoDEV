@@ -5,6 +5,7 @@ import type { BudgetOverview, BudgetPeriod, RoutingRule, RuleEffect } from '../.
 import { ProjectStore } from '../../core/project-store.js';
 import { BudgetMeterComponent } from '../../shared/budget-meter.component.js';
 import { SettingsGroupDirective } from './settings-group.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 export const PERIODS: { key: BudgetPeriod; label: string; hint: string }[] = [
   { key: 'day', label: 'Je Tag', hint: 'Agents und Assistent zusammen; wird am Folgetag wieder frei.' },
@@ -145,7 +146,7 @@ export class BudgetSettingsComponent {
     const target = index + offset;
     if (target < 0 || target >= this.rules.length) return;
     const rules = [...this.rules];
-    [rules[index], rules[target]] = [rules[target]!, rules[index]!];
+    [rules[index], rules[target]] = [defined(rules[target]), defined(rules[index])];
     this.rules = rules;
     this.routing.customized = true;
   }

@@ -1,4 +1,5 @@
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { ConfirmService } from '../core/confirm.service.js';
 import { type RestartState, RestartStatusService } from '../core/restart-status.service.js';
 import { visibleInterval } from '../core/visible-interval.js';
 import { formatElapsed, pullNote } from './restart-text.js';
@@ -35,6 +36,7 @@ function readDismissed(): string {
         class="restart-banner"
         [class.done]="restart.status === 'done'"
         [class.failed]="restart.status === 'failed'"
+        [class.cancelled]="restart.status === 'cancelled'"
         role="status"
         aria-live="polite"
         aria-label="Neustart von AIdeation"
@@ -47,6 +49,9 @@ function readDismissed(): string {
               }
               @case ('failed') {
                 ✕ Neustart fehlgeschlagen
+              }
+              @case ('cancelled') {
+                Neustart abgebrochen
               }
               @default {
                 <span class="live-dot"></span> AIdeation startet neu
@@ -69,6 +74,16 @@ function readDismissed(): string {
         }
         @if (note()) {
           <p class="muted">{{ note() }}</p>
+        }
+        @if (cancelError()) {
+          <p class="restart-cancel-error">{{ cancelError() }}</p>
+        }
+        @if (restart.status === 'requested') {
+          <div class="restart-actions">
+            <button type="button" class="button secondary" [disabled]="cancelling()" (click)="cancel()">
+              Neustart abbrechen
+            </button>
+          </div>
         }
         @if (restart.status === 'failed' && restart.log) {
           <details>
@@ -93,6 +108,9 @@ export class RestartBannerComponent {
   protected readonly steps = STEPS;
   private readonly now = signal(Date.now());
   private readonly dismissed = signal(readDismissed());
+  private readonly confirm = inject(ConfirmService);
+  protected readonly cancelling = signal(false);
+  protected readonly cancelError = signal('');
 
   constructor() {
     void this.status.load();
@@ -123,9 +141,10 @@ export class RestartBannerComponent {
     const current = this.visible()?.status;
     if (!current) return '';
     const order = STEPS.map((entry) => entry.status);
-    // Fehlgeschlagen: der Schritt, in dem es scheiterte, ist rot (ohne Bau: „Angefordert“).
-    if (current === 'failed') {
-      const failedAt = this.visible()?.startedAt ? 'building' : 'requested';
+    // Fehlgeschlagen: der Schritt, in dem es scheiterte, ist rot (ohne Bau: „Angefordert“). Abgebrochen wird nur
+    // ein wartender Neustart, also immer bei „Angefordert“.
+    if (current === 'failed' || current === 'cancelled') {
+      const failedAt = current === 'failed' && this.visible()?.startedAt ? 'building' : 'requested';
       const index = order.indexOf(failedAt);
       return order.indexOf(step) < index ? 'passed' : step === failedAt ? 'failed' : '';
     }
@@ -141,6 +160,26 @@ export class RestartBannerComponent {
       globalThis.localStorage?.setItem(DISMISSED_KEY, value);
     } catch {
       // Ohne Speicher bleibt das Ausblenden nur bis zum Neuladen.
+    }
+  }
+
+  /** Wartenden Neustart zurücknehmen; sobald der Worker baut, geht das nicht mehr (409), die Leiste zeigt dann den Stand. */
+  protected async cancel(): Promise<void> {
+    const ok = await this.confirm.ask({
+      title: 'Neustart abbrechen?',
+      message:
+        'Der Worker wartet noch auf laufende Aufgaben und hat nichts gebaut. AIdeation läuft unverändert weiter.',
+      confirmLabel: 'Neustart abbrechen',
+    });
+    if (!ok) return;
+    this.cancelling.set(true);
+    this.cancelError.set('');
+    try {
+      await this.status.cancel();
+    } catch (error) {
+      this.cancelError.set(error instanceof Error ? error.message : 'Abbrechen fehlgeschlagen.');
+    } finally {
+      this.cancelling.set(false);
     }
   }
 

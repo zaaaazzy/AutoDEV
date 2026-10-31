@@ -7,7 +7,7 @@ export function describeError(error: unknown): string {
   return error.message || code || error.name;
 }
 
-/** Gleiche Fehlermeldungen pro Schlüssel nur einmal ausgeben, bis sie sich ändern oder der Fehler verschwindet. */
+/** Gleiche Fehlermeldungen pro Schlüssel nur einmal ausgeben, bis sich die Meldung ändert (gleiche Meldung nach einer Erholung bleibt still). */
 export function logOnce(key: string, message: string): void {
   if (loggedErrors.get(key) === message) return;
   loggedErrors.set(key, message);

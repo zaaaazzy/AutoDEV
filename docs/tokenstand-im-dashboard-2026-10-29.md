@@ -1,0 +1,73 @@
+# Tokenstand im Dashboard (Auftrag b42e30c8, 29.10.2026)
+
+## Problem
+
+Hatte das Konto eines Agent-Anbieters sein Nutzungslimit erreicht („You've hit your monthly spend limit …“), war das nur in den Schritt-Protokollen sichtbar. Im Dashboard stand kein Hinweis, und es gab keinen Weg zur Bezahlseite des Anbieters.
+
+## Lösung
+
+- **Eine Erkennung.** Muster und `usageLimitReset` liegen jetzt in `src/core/provider-limits.ts`. `src/runner/autofix.ts` exportiert sie weiter. Pre-Sprint, Runner und die Einordnung als Agent-Fehler (kein Bug) nutzen dieselbe Funktion wie bisher.
+- **Status je Anbieter.** `noteProviderOutcome` ordnet einen Lauf dem Anbieter am Programmnamen des konfigurierten Befehls zu (`claude`, `copilot`, `gemini`). Es liest den Anbieter nie aus der Ausgabe.
+  - Bei Limit-Meldung: `app_settings.provider_limit:<anbieter>` = `{ since, resetAt }`.
+  - Bei Erfolg: Eintrag löschen.
+  - Aufgerufen wird es in `runStep` (Workflow-Schritte) und in `runAuthorAgent` (Chat, Bug-Wächter, Visionär, Analyse …). Das lokale Modell und unbekannte Programme ändern nichts.
+- **Zurücksetzen.** Nach `resetAt` gilt der Eintrag als abgelaufen (Status `ok`), auch ohne neuen Lauf.
+- **API** (`src/api/provider-limits.ts`):
+  - `GET /api/agent-limits` liefert je Anbieter `status` (ok/limited), `since`, `resetAt`, `paymentUrl` und `actions`.
+  - `actions.pay` gibt es nur bei erreichtem Limit.
+  - `actions.resume` gibt es nur zusätzlich mit der Rolle „Ausführen“ und Zugriff auf alle Projekte, denn das Konto gilt für alle Projekte.
+  - `POST /api/agent-limits/:provider/resume` prüft dasselbe auf dem Server (404 unbekannter Anbieter, 403 ohne Zugriff auf alle Projekte, 409 ohne Limit). Danach vergisst es das Limit und setzt `retry_after` nur bei Aufträgen zurück, deren Vermerk mit „Unterbrochen: Nutzungslimit des Agent-Kontos erreicht“ beginnt.
+- **Bezahlseiten** je Anbieter und Fall (`paymentUrlFor`): Ein Link aus der Limit-Meldung gilt nur mit https auf einem `paymentHosts`-Eintrag des Anbieters, ohne Port und Anmeldedaten. Query und Fragment fallen weg. Sonst gilt die feste Seite: Claude `https://claude.ai/settings/usage`, beim Limit der Organisation `https://claude.ai/admin-settings/usage`; GitHub Copilot `https://github.com/settings/copilot`; Gemini `https://console.cloud.google.com/billing`. Der gespeicherte Link wird beim Lesen erneut geprüft. Das Frontend zeigt zusätzlich nur `https://`-Links.
+- **Dashboard.** `app-provider-limit-alert` steht unter dem Git-Hinweis. Es fragt alle 60 Sekunden ab und nutzt die vorhandenen Stile von `.git-alert` (kein neues CSS, keine neuen Pakete).
+
+## Nachtrag 30.10.2026 (Sprint 30, im Arbeitscontainer umgesetzt und getestet)
+
+- **Beide Meldungsvarianten.** `USAGE_LIMIT` erkennt jetzt bis zu drei Wörter mit Apostroph vor „limit“, also auch „You've hit your org's monthly spend limit“. Diese Variante fiel vorher durch: Läufe galten als normaler Fehler und erzeugten Bugs wie „Gegenprobe: neue Tests müssen ohne Fix scheitern“, die nur aus der Limit-Meldung bestehen. Jetzt pausieren sie ohne Bug und ohne Fehlversuch (`isAgentFailure`, `usageLimitReset`).
+- **Reset mit Zeitzone.** „resets 10:20pm (UTC)“ und „resets 8:50pm (Europe/Zurich)“ werden in der genannten Zone gerechnet, auch über eine Umstellung der Sommerzeit. Ohne Zone oder mit unbekannter Zone gilt wie bisher die des Workers.
+- **Fall „Organisation“.** `scope: 'org' | 'account'` wird mitgespeichert. Das Dashboard ergänzt bei `org` den Satz „Erhöhen kann es nur ein Admin der Organisation.“
+- **Behobene Testfehler des alten Stands.** Der Hinweis pollt über `visibleInterval` statt `setInterval` (`visible-interval.spec.ts`). `GET /agent-limits` und `POST /agent-limits/:provider/resume` stehen bewusst in `GLOBAL` (`access.test.ts`).
+- **Teststand:** `npm run typecheck` und `npm run test:unit` grün im Arbeitscontainer (1942 Tests, 1932 bestanden, 0 fehlgeschlagen, 10 übersprungen). Die Umgebung ist damit nicht mehr blockiert.
+- **Merge Sprint 30:** Die eigene `npm ci`-Befüllung des Volumes (`modulesInstallArgs`) ist entfallen. Sprint 30 installiert die Abhängigkeiten über `ensureDependencies` (Stempel, flock). Übernommen bleiben `npm_config_cache=/tmp/npm-cache` und das Löschen von `/root/.npm` im Dockerfile.
+
+## Grenzen
+
+- Erkannt wird nur die Meldungsform der Claude-CLI („hit your … limit“). Copilot und Gemini erscheinen nur, wenn ihre CLI eine solche Meldung ausgibt.
+- „Fortsetzen“ löst die Pause nur bei Aufträgen. Eine Pre-Sprint-Phase, die auf den Reset wartet (`sprints.pre_sprint_next_at`), läuft weiter zur gemeldeten Zeit.
+- Ist der Befehl ein eigenes Wrapper-Skript (z. B. `run-claude.sh`), ist der Anbieter unbekannt. Der Auftrag pausiert dann wie bisher, nur der Dashboard-Hinweis fehlt.
+
+## Tests
+
+- `src/core/provider-limits.test.ts`: Anbieter aus dem Befehl, fester https-Link, Zurücksetzen nach Reset und Erfolg, unlesbare Einträge, „Fortsetzen“, Aktionen je Rolle und Mandant.
+- `frontend/src/app/features/dashboard/provider-limits.spec.ts`: Anzeige nur bei aktivem Limit, nur `https://`, Meldungstext.
+
+## Geänderte Dateien
+
+- Backend: `src/core/provider-limits.ts` (neu), `src/api/provider-limits.ts` (neu), `src/api/app.ts`, `src/runner/autofix.ts`, `src/runner/runner-agent.ts`, `src/runner/runner-steps.ts`, `src/agent/requirements.ts`
+- Frontend: `core/models.ts`, `features/dashboard/provider-limits.ts` (neu), `provider-limit-alert.component.ts` (neu), `dashboard.component.ts/.html`
+- Doku: `README.md`, `docs/erm.md`, diese Datei, Benutzerhandbuch `benutzerhandbuch-tokenstand-im-dashboard-2026-10-29.md`
+
+## Hinweise / Teststand
+
+- Neue Daten liegen in `app_settings` (Schlüssel `provider_limit:<anbieter>`), keine neue Tabelle. Das ERM erwähnt dies.
+- **Überholt (siehe „Stand Dokumentierer, Schluss“ unten): Die folgenden Punkte zu Image, Volume und „nicht verifiziert“ beschreiben den Stand vor dem Lauf im Arbeitscontainer am 30.10.2026.** Teststand damals: Der Tester-Lauf scheiterte an der Umgebung, nicht am Code: `tsc: not found` (Exit 127 im Image „aideation-agent“) und `npx` mit `EACCES` auf `/home/agent/.npm`. Weder `npm run typecheck` noch die sechs zugehörigen Testdateien liefen. Vor dem Merge `npm run typecheck` und `npm run test:unit` in einer Umgebung mit installierten Abhängigkeiten ausführen (letzter grüner Stand: 1833 Tests).
+- **Sandbox-Fix (30.10.2026, erneuter Versuch):** Beide Ursachen sind im Code behoben, beide Fixes greifen aber erst nach einem Neubau des Images und einem Neustart des Workers.
+  - `deploy/agent/Dockerfile` löscht nach `npm install -g` das root-eigene `/home/agent/.npm`.
+  - `src/core/sandbox.ts` setzt im Container `npm_config_cache=/tmp/npm-cache`. Das wirkt auch mit dem alten Image.
+  - Vor jedem Lauf füllt `src/core/sandbox.ts` ein leeres oder veraltetes `node_modules`-Volume per `npm ci --ignore-scripts` (`modulesInstallArgs`).
+  - Tests: `src/core/sandbox.test.ts`. In der Umgebung des Entwicklers liessen sie sich nicht ausführen, dort ist `node_modules` ebenfalls leer.
+- **Vor dem erneuten Test (Reihenfolge):** (1) Image `aideation-agent` neu bauen, (2) Worker neu starten, (3) Auftrag testen lassen. Der erste Lauf füllt das `node_modules`-Volume per `npm ci` und dauert länger. Zusätzlich `src/core/sandbox.test.ts` ausführen. Steht am Anfang der Ausgabe „liess sich nicht mit npm ci füllen“, liegt das an Registry oder Egress-Proxy, nicht am Auftrag.
+- **Stand nach dem Entwicklerlauf vom 30.10.2026:** Der Lauf hat keine Dateien geändert. Der Code des Auftrags ist vollständig (23 Dateien, siehe oben). Offen ist allein ein Schritt auf dem Host, den Agents nicht ausführen dürfen (`npm install` ist gesperrt):
+  1. Image `aideation-agent` neu bauen (Dockerfile-Fix).
+  2. Worker neu starten.
+  3. `node_modules`-Volume einmal per `npm ci` füllen (sonst übernimmt es der erste Lauf automatisch).
+  4. Auftrag erneut testen lassen.
+- **Hinweis für den Tester:** Vor dem Test prüfen, ob `node_modules/.bin/tsc` existiert. Fehlt die Datei, wurden Image und Volume nicht erneuert. Das ist ein Sandbox-Problem, kein Fehler des Auftrags, und dafür wird kein Code-Bug angelegt.
+- **Stand Dokumentierer (30.10.2026, nach dem erneuten Versuch):** Es gab keine weiteren Code-Änderungen. Der letzte Tester-Lauf (after_task) scheiterte wieder vor dem Auftragscode an `npm error EACCES` auf `/home/agent/.npm/_cacache` (root-eigene Dateien im Image). Das ist derselbe Umgebungsfehler wie zuvor, kein Fehler des Auftrags, und er verschwindet erst mit dem neu gebauten Image. Der Auftrag bleibt „nicht verifiziert“, bis ein Mensch Image, Worker und Volume erneuert hat (Schritte oben, zusätzlich Rechte an `/home/agent/.npm` prüfen).
+- **Stand Dokumentierer (30.10.2026, 12:22-Versuch):** Wieder keine Code-Änderung. Der Entwickler meldet, der Dockerfile-Fix sei im Code, und `node_modules` im Worktree zeige auf einen Mac-Pfad, der im Container fehlt. Der Tester-Lauf scheiterte erneut an `EACCES` auf `/home/agent/.npm/_cacache`. Der Auftrag bleibt „nicht verifiziert“. Zu tun ist nur der Host-Schritt: Image neu bauen, Worker neu starten, `node_modules`-Volume per `npm ci` füllen, dann erneut testen lassen. Das Dashboard-Tokenstand-Feature selbst ist unverändert und vollständig.
+- **Stand Dokumentierer (30.10.2026, nach 12:26):** Unverändert. Es gibt weder Code-Änderungen noch ein neues Testergebnis. Der Tester-Lauf scheiterte erneut an `EACCES` auf `/home/agent/.npm`, der Entwickler meldet die Umgebung weiterhin als blockiert. Der Auftrag bleibt „nicht verifiziert“. Offen ist nur der Host-Schritt (Image neu bauen, Worker neu starten, `node_modules`-Volume per `npm ci` füllen). Weitere Versuche ohne diesen Schritt bringen kein neues Ergebnis.
+- **Stand Dokumentierer, Schluss (30.10.2026, Sprint 30):** Der Auftrag ist im Arbeitscontainer umgesetzt und getestet. `npm run typecheck` und `npm run test:unit` laufen grün (1932 bestanden, 0 fehlgeschlagen). Die Umgebungsfehler (`tsc: not found`, `EACCES` auf `/home/agent/.npm`) und der Host-Schritt (Image neu bauen, Volume per `npm ci` füllen) sind damit erledigt.
+  - Neu in diesem Lauf: Erkennung der Variante „org's monthly spend limit“ und Zeitzonen im Reset (siehe Nachtrag), dazu die Tests in `src/core/provider-limits.test.ts`.
+  - Zu beachten: Prettier meldet weiter 7 Dateien ausserhalb dieses Auftrags (z. B. `src/api/coverage.ts`), die schon vorher nicht formatiert waren. Die Dashboard-Ansicht ist nicht im Browser geprüft, Printscreens fehlen (siehe Benutzerhandbuch).
+  - Die offenen Bug-Wächter-Einträge, die nur aus der Limit-Meldung bestehen (u. a. „Gegenprobe: neue Tests müssen ohne Fix scheitern“, „Abnahme für alle Umsetzungen mit einem Klick“, „Bug-Kategorien mit Vorschlag, Filter und Statistik“), sind kein Code-Fehler und können verworfen werden. „CI CD nicht in Ordnung“ bleibt zur Prüfung offen, bis die CI mit dem neuen Stand läuft.
+- Limit-Meldungen („hit your … limit“) erzeugen keine Bugs und keine Folgeaufträge. Die ca. zehn Bug-Wächter-Einträge mit nur diesem Meldungstext sind kein Code-Fehler.
+- Die Bug-Liste enthält weiterhin den Eintrag „CI CD nicht in Ordnung“ (offen, critical). Er hängt mit derselben Umgebung zusammen und ist durch diesen Auftrag nicht behoben.

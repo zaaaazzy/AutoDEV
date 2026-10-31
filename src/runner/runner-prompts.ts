@@ -1,6 +1,6 @@
 import { agentComposeProject } from './project-command.js';
 import { HANDOFF_RULE } from '../core/workflow-phases.js';
-import { acceptanceInstructions } from './acceptance.js';
+import { acceptanceInstructions, EVIDENCE_INSTRUCTIONS } from './acceptance.js';
 import { reviewInstructions } from './review.js';
 import { COVERAGE_INSTRUCTIONS } from './coverage.js';
 import { containsUntrusted, UNTRUSTED_HINT } from './hoster.js';
@@ -23,7 +23,10 @@ Beende deine Antwort mit dem Abschnitt „## Geänderte Dateien“ und liste dar
  * Sprint-Abschluss selbst aus; sie ist kein offener Punkt der Dokumentation.
  */
 export const COUNTER_CHECK_NOTE = `## Gegenprobe
-Ob die neuen oder geänderten Tests ohne den Fix scheitern, prüft das Test-Gate beim Sprint-Abschluss automatisch (Gegenprobe auf dem Stand vor dem Fix). Das Ergebnis je Testdatei steht danach im Auftragsdetail und im Testbericht. Vermerke die Gegenprobe deshalb nicht als offen und beschreibe keine Schritte, sie von Hand nachzuholen.`;
+Ob die neuen oder geänderten Tests ohne den Fix scheitern, prüft das Test-Gate beim Sprint-Abschluss automatisch (Gegenprobe auf dem Stand vor dem Fix). Das Ergebnis je Testdatei steht danach im Auftragsdetail und im Testbericht. Vermerke die Gegenprobe deshalb nicht als offen, melde sie nicht als @@NACHWEIS mit "gegenprobe_fehlt" und beschreibe keine Schritte, sie von Hand nachzuholen.`;
+
+/** Rollen, die offene Testnachweise (@@NACHWEIS) melden. */
+export const EVIDENCE_ROLES = new Set(['tester', 'documenter']);
 
 export function buildPrompt(
   agent: WorkflowAgent,
@@ -65,6 +68,7 @@ export function buildPrompt(
     agent.role === 'tester' && extras.definitionOfDone
       ? acceptanceInstructions(extras.criteria ?? [], extras.definitionOfDone)
       : '',
+    EVIDENCE_ROLES.has(agent.role) ? EVIDENCE_INSTRUCTIONS : '',
     agent.role === 'reviewer' ? reviewInstructions(extras.baseBranch ?? null) : '',
     agent.role === 'developer' ? CHANGED_FILES_INSTRUCTIONS : '',
     agent.role === 'documenter' && item.kind === 'bug' ? COUNTER_CHECK_NOTE : '',

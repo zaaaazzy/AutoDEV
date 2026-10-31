@@ -406,9 +406,10 @@ test('beim Herunterfahren werden keine neuen Jobs beansprucht', async () => {
   assert.equal(row.lastStatus, null);
 });
 
-test('Registry: genau die fünf festen Job-Arten, keine Pfade', () => {
+test('Registry: genau die sechs festen Job-Arten, keine Pfade', () => {
   assert.deepEqual(Object.keys(JOB_KINDS).sort(), [
     'backup_check',
+    'bug_categories',
     'close_old_sprints',
     'push_alert',
     'restore_probe',

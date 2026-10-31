@@ -10,6 +10,7 @@ import {
   type VisualSettings,
   withoutQuery,
 } from './visual-settings.js';
+import { defined } from '../core/defined.js';
 
 const PAGE_TIMEOUT_MS = 30_000;
 const IDLE_TIMEOUT_MS = 5_000;
@@ -67,11 +68,7 @@ export function collectPageFacts(): PageFacts {
   const media = Array.from(body.querySelectorAll('img, svg, canvas, video, picture')).filter(visible).length;
   const brokenImages = (Array.from(body.querySelectorAll('img')) as Image[])
     .filter((image) => image.getAttribute('src') && image.complete && image.naturalWidth === 0)
-    .map((image) =>
-      String(image.currentSrc || image.getAttribute('src') || '')
-        .split(/[?#]/)[0]!
-        .slice(0, 200),
-    )
+    .map((image) => (String(image.currentSrc || image.getAttribute('src') || '').split(/[?#]/)[0] ?? '').slice(0, 200))
     .slice(0, 10);
   const truncated = Array.from(body.querySelectorAll('body *'))
     .filter((element) => {
@@ -162,7 +159,7 @@ async function capturePage(context: BrowserContext, url: string, settings: Visua
       failedResources,
       layout: null,
       facts: null,
-      error: (error instanceof Error ? error.message : String(error)).split('\n')[0]!.slice(0, 300),
+      error: defined((error instanceof Error ? error.message : String(error)).split('\n')[0]).slice(0, 300),
     };
   } finally {
     await page.close().catch(() => undefined);

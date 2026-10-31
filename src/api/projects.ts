@@ -3,6 +3,7 @@ import { SPRINT_MODES, type SprintMode } from './sprint-planning.js';
 import { isValidWorkingHours, type WorkingHours } from '../core/working-hours.js';
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { withTransaction } from '../db/transaction.js';
 import { access } from './access.js';
 import { ensureDefaultAgents, ensureVisualTester } from './agents.js';
 import { parsePreviewSettings, VISUAL_COLUMNS } from './visual.js';
@@ -154,17 +155,20 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
           .status(409)
           .json({ message: 'Gerade arbeitet ein Agent am Projekt – bitte warten oder abbrechen.' });
       }
-      let folderJob: string | null = null;
-      if (body.deleteFolder === true) {
-        folderJob =
-          (
-            await pool.query<{ id: string }>(
-              `INSERT INTO setup_jobs (kind, params) VALUES ('delete_folder', $1::jsonb) RETURNING id`,
-              [JSON.stringify({ path: project.repository })],
-            )
-          ).rows[0]?.id ?? null;
-      }
-      await pool.query('DELETE FROM projects WHERE slug = $1', [slug]);
+      // Auftrag zum Löschen des Ordners nur zusammen mit dem Projekt: Scheitert das Löschen, bleibt der Ordner.
+      const folderJob = await withTransaction(pool, async (client) => {
+        const job =
+          body.deleteFolder === true
+            ? ((
+                await client.query<{ id: string }>(
+                  `INSERT INTO setup_jobs (kind, params) VALUES ('delete_folder', $1::jsonb) RETURNING id`,
+                  [JSON.stringify({ path: project.repository })],
+                )
+              ).rows[0]?.id ?? null)
+            : null;
+        await client.query('DELETE FROM projects WHERE slug = $1', [slug]);
+        return job;
+      });
       response.json({ deleted: true, folderJob });
     } catch (error) {
       next(error);
@@ -395,10 +399,10 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
       sets.push(`agent_workspace = $${values.length}`);
     }
     if (body.agentSandbox !== undefined) {
-      // Leer bzw. null = globaler Schalter (DEV_LOG_AGENT_SANDBOX), sonst „off“ oder „docker“ nur für dieses Projekt.
+      // Leer bzw. null = globaler Schalter (DEV_LOG_AGENT_SANDBOX), sonst „off“, „docker“ oder „workbench“ nur für dieses Projekt.
       const mode = body.agentSandbox === null || body.agentSandbox === '' ? null : parseSandboxMode(body.agentSandbox);
       if (mode === null && body.agentSandbox !== null && body.agentSandbox !== '')
-        return fail('Docker-Sandbox: global, aus oder docker.');
+        return fail('Docker-Sandbox: global, aus, docker oder workbench.');
       values.push(mode);
       sets.push(`agent_sandbox = $${values.length}`);
     }

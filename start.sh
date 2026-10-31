@@ -54,6 +54,11 @@ echo "→ Starte AIdeation …"
 # docker-compose.override.yml – bei jedem Start neu, damit ein geänderter Projektbereich gilt.
 npx --no-install tsx scripts/worker-compose.ts
 docker compose up -d --build
+# Image der Agents (Sandbox): fehlt es, scheitert jeder Agent-Lauf mit „Image fehlt“.
+if ! docker image inspect aideation-agent >/dev/null 2>&1; then
+  echo "→ Baue das Agent-Image (einmalig, einige Minuten) …"
+  docker build -t aideation-agent -f deploy/agent/Dockerfile . || echo "! Agent-Image nicht gebaut – Agents starten erst nach „docker build -t aideation-agent -f deploy/agent/Dockerfile .“."
+fi
 # Node statt curl: curl fehlt auf manchen Linux-Systemen, Node ist ohnehin Voraussetzung.
 healthy=0
 for _ in $(seq 1 60); do

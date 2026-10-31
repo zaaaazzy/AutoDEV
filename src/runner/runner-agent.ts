@@ -23,7 +23,7 @@ import {
 } from '../agent/tool-permissions.js';
 import { resolveModel, runOllamaAgent } from '../agent/ollama-agent.js';
 import { describeCommand, loadRouting, routable, routeModel } from '../agent/model-routing.js';
-import { calibratedHours, loadCalibration } from '../core/estimate-calibration.js';
+import { calibratedHours } from '../core/estimate-calibration.js';
 import { runTestAgent } from './test-agent.js';
 import { projectEnvironment } from './project-command.js';
 import { agentEnvironment, buildInvocation } from './runner-prompts.js';
@@ -32,7 +32,7 @@ import { planSummary, SKIPPED_NOTE, testerPlan } from './order-tests.js';
 import { runVisualStep } from './visual-check.js';
 import { captureInSandbox } from './visual-sandbox.js';
 import { projectSandbox, projectTestExecutor } from './test-sandbox.js';
-import { orderFilePaths, type RunContext } from './runner-context.js';
+import { orderCalibration, orderFilePaths, type RunContext } from './runner-context.js';
 
 /** Built-in agents: the tester runs build and tests (and records a test run), all other roles use the local model. */
 export const runBuiltinAgent: BuiltinAgent = async ({
@@ -140,7 +140,7 @@ export async function routeStep(ctx: RunContext, agent: WorkflowAgent): Promise<
   // Die Regeln vergleichen Agent-Stunden: Schätzung mit dem gemessenen Faktor ihrer Herkunft umrechnen.
   const estimate = ctx.item.effortHours ?? null;
   if (ctx.routedHours === undefined)
-    ctx.routedHours = await loadCalibration(ctx.pool, ctx.item.projectSlug)
+    ctx.routedHours = await orderCalibration(ctx)
       .then((calibration) => calibratedHours(estimate, ctx.item.estimateSource, calibration))
       .catch(() => estimate);
   const decision = routeModel(ctx.routing.rules, {
@@ -156,7 +156,7 @@ export async function routeStep(ctx: RunContext, agent: WorkflowAgent): Promise<
 }
 
 /** CLI-Befehl eines Schritts: vom Routing, eigener Befehl des Agents oder Standardbefehl; null = eingebautes Modell. */
-function configuredCommand(ctx: RunContext, agent: WorkflowAgent, routed: RoutedModel): string[] | null {
+export function configuredCommand(ctx: RunContext, agent: WorkflowAgent, routed: RoutedModel): string[] | null {
   if (routed.model) return null;
   if (routed.command) return routed.command;
   return agent.command?.length ? agent.command : agent.role === 'tester' ? null : ctx.fallbackCommand;
@@ -265,6 +265,7 @@ export async function invokeAgent(
                     cwd: options.cwd,
                     runId: ctx.runId,
                     docker: execute,
+                    mode,
                   })
                 : agentExecute,
           }
@@ -272,16 +273,19 @@ export async function invokeAgent(
     });
   const configured = configuredCommand(ctx, agent, routed);
   const permissions = await loadProjectPermissions(pool, item.projectSlug);
-  // Docker-Sandbox (DEV_LOG_AGENT_SANDBOX, Standard docker): Jeder Agent-Schritt läuft in einem eigenen Container
+  // Sandbox (DEV_LOG_AGENT_SANDBOX, Standard workbench): Jeder Agent-Schritt läuft im Arbeitscontainer des Projekts
+  // bzw. (docker) in einem eigenen Container
   // (Label aideation.run), der Worktree heisst dort /workspace – für lesende Rollen nur :ro –, und der Wächter ist der
   // im Image. Fehlen Docker oder Image, scheitert der Schritt – kein Rückfall auf den Host.
-  const sandboxed = usesSandbox(sandboxMode(await projectSandbox(pool, item.projectSlug)));
+  const mode = sandboxMode(await projectSandbox(pool, item.projectSlug));
+  const sandboxed = usesSandbox(mode);
   const agentExecute = sandboxed
     ? sandboxExecutor(options.cwd, {
         runId: ctx.runId,
         project: item.projectSlug,
         readOnly: readOnlyWorkspace(agent.role),
         docker: execute,
+        mode,
       })
     : execute;
   const agentCwd = sandboxed ? SANDBOX_WORKDIR : options.cwd;

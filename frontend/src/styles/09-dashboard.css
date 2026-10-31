@@ -7,13 +7,17 @@
 .coverage-table th {
   white-space: nowrap;
 }
+.coverage-incomplete {
+  display: block;
+  font-size: 11px;
+}
 .coverage-table .coverage-total td {
-  border-top: 2px solid #dfe3da;
+  border-top: 2px solid var(--border-subtle);
   background: var(--surface-soft);
 }
 .coverage-failed {
   display: block;
-  color: #b4472f;
+  color: var(--error-text-strong);
   font-size: 11px;
 }
 .coverage-value {
@@ -28,26 +32,71 @@
   height: 5px;
   overflow: hidden;
   border-radius: 999px;
-  background: #e8ebe4;
+  background: var(--surface-track);
 }
 .coverage-bar span {
   display: block;
   height: 100%;
 }
 .coverage-value.good .coverage-bar span {
-  background: #2f8a57;
+  background: var(--success);
 }
 .coverage-value.warn .coverage-bar span {
-  background: #e08a1e;
+  background: var(--accent-orange);
 }
 .coverage-value.bad .coverage-bar span {
   background: var(--danger);
 }
 .coverage-value.bad {
-  color: #b4472f;
+  color: var(--error-text-strong);
 }
 
 /* ── Statistik ───────────────────────────────────────────────────────── */
+/* Testabdeckung-Verlauf: ein Kleindiagramm je Bereichsschlüssel */
+.coverage-history-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+.coverage-history-item {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.coverage-history-item figcaption {
+  display: flex;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+}
+.coverage-history-item svg {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.coverage-history-target {
+  stroke: var(--line-strong);
+  stroke-dasharray: 4 4;
+  vector-effect: non-scaling-stroke;
+}
+.coverage-history-line {
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.coverage-history-point {
+  fill: var(--green);
+  stroke: var(--surface);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.coverage-history-table td,
+.coverage-history-table th {
+  padding: 2px 12px 2px 0;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
 .usage-row {
   display: grid;
   gap: 6px;
@@ -70,7 +119,7 @@
 /* ── Aufträge in Entstehung ──────────────────────────────────────────── */
 .drafts-panel {
   border-color: #cfe5d8;
-  background: linear-gradient(180deg, #f6fbf8, var(--surface) 120px);
+  background: linear-gradient(180deg, var(--success-surface-faint), var(--surface) 120px);
 }
 .draft-list {
   display: grid;
@@ -89,7 +138,7 @@
   background: var(--surface);
 }
 .draft-card.active {
-  border-color: #b9d3c3;
+  border-color: var(--success-border-soft);
   box-shadow: 0 0 0 3px rgb(47 111 79 / 8%);
 }
 .draft-state {
@@ -127,7 +176,7 @@
 
 /* ── Besondere Aufmerksamkeit ────────────────────────────────────────── */
 .attention-panel {
-  border-color: #f1d8b5;
+  border-color: var(--notice-border);
   background: linear-gradient(180deg, #fffaf3, var(--surface) 120px);
 }
 
@@ -252,7 +301,7 @@
   border-radius: 8px;
 }
 .test-live-step.running {
-  background: #eef6f1;
+  background: var(--success-surface);
 }
 .test-live-name {
   font-weight: 600;
@@ -303,9 +352,9 @@
 }
 .attention-solution .attention-suggestion {
   padding: 8px 12px;
-  border-left: 3px solid #e0a03a;
+  border-left: 3px solid var(--accent-amber);
   border-radius: 8px;
-  background: #fdf6ec;
+  background: var(--notice-surface);
 }
 .attention-solution .small {
   margin-top: 4px;
@@ -414,6 +463,91 @@ a.git-commit[href]:hover {
   border-bottom: 1px solid var(--line);
 }
 
+/* Testabdeckung im Verlauf (Statistik): je Bereich ein kleines Liniendiagramm, Zweige gestrichelt mit Quadraten. */
+.coverage-trend {
+  margin-bottom: 1rem;
+}
+.coverage-trend-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 1rem;
+}
+.coverage-trend-area h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.95rem;
+}
+.coverage-trend-area svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.coverage-trend-area .grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.coverage-trend-area .target {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+.coverage-trend-area .axis {
+  fill: var(--muted);
+  font-size: 9px;
+  text-anchor: end;
+}
+.coverage-trend-area path {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.coverage-trend-area path.series-lines {
+  stroke: var(--green);
+}
+.coverage-trend-area path.series-branches {
+  stroke: var(--orange);
+  stroke-dasharray: 5 3;
+}
+.coverage-trend-area circle.series-lines,
+.coverage-trend-area rect.series-branches {
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.coverage-trend-area circle.series-lines {
+  fill: var(--green);
+}
+.coverage-trend-area rect.series-branches {
+  fill: var(--orange);
+}
+.coverage-trend-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.coverage-trend-legend span::before {
+  content: '';
+  display: inline-block;
+  width: 18px;
+  margin-right: 0.35rem;
+  vertical-align: middle;
+  border-top: 2px solid var(--green);
+}
+.coverage-trend-legend .legend-branches::before {
+  border-top: 2px dashed var(--orange);
+}
+.coverage-trend-legend .legend-target::before {
+  border-top: 1px dotted var(--muted);
+}
+.coverage-trend-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.coverage-trend-table th,
+.coverage-trend-table td {
+  text-align: left;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
 /* Test, Test-Gate oder Push laufen noch: Restzeit und Fortschritt statt „Review läuft“ */
 app-wait-status {
   display: contents;
@@ -433,7 +567,7 @@ app-wait-status {
   padding: 14px 18px;
   border: 1px solid #ecd9b8;
   border-radius: 11px;
-  background: #fffaf2;
+  background: var(--notice-surface-faint);
   box-shadow: 0 1px 2px rgb(32 40 36 / 4%);
   font-size: 14px;
 }
@@ -509,18 +643,18 @@ app-wait-status {
   border-left: 4px solid var(--line);
 }
 .production-tile.tone-healthy {
-  border-left-color: #2b9a66;
+  border-left-color: var(--success-bright);
   background: #eef8f2;
 }
 .production-tile.tone-healthy strong {
-  color: #1f6e49;
+  color: var(--success-text);
 }
 .production-tile.tone-failing {
-  border-left-color: #d6453d;
-  background: #fbeeea;
+  border-left-color: var(--error-bright);
+  background: var(--error-soft);
 }
 .production-tile.tone-failing strong {
-  color: #a8322b;
+  color: var(--error-text-dark);
 }
 .production-tile.tone-idle {
   border-left-color: var(--line);
@@ -534,7 +668,7 @@ app-wait-status {
 }
 .production-badge {
   background: #e3f3ea;
-  color: #1f6e49;
+  color: var(--success-text);
   white-space: nowrap;
 }
 .budget-meter {
@@ -555,10 +689,10 @@ app-wait-status {
   height: 9px;
 }
 .budget-meter .bar-track span.warn {
-  background: #e8590c;
+  background: var(--accent-orange-strong);
 }
 .budget-meter .bar-track span.bad {
-  background: #d6453d;
+  background: var(--error-bright);
 }
 
 /* ── Seite „Aktionen“ ── */
@@ -586,9 +720,9 @@ app-wait-status {
   grid-column: auto;
   padding: 12px 14px;
   border: 1px solid var(--line);
-  border-left: 3px solid #e0a03a;
+  border-left: 3px solid var(--accent-amber);
   border-radius: 10px;
-  background: #fffaf2;
+  background: var(--notice-surface-faint);
 }
 .attention-table .attention-solution :is(app-order-approval, app-order-question) {
   display: block;
@@ -615,6 +749,24 @@ app-wait-status {
 .attention-table .attention-section h3 {
   margin-bottom: 6px;
 }
+
+/* Offene Testnachweise: über die ganze Breite, Befehl als Code, Knopf bzw. Rechte-Link rechts (am Handy darunter). */
+.attention-table .attention-body > .attention-section.attention-evidence {
+  grid-column: 1 / -1;
+}
+.attention-evidence .evidence-item {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.attention-evidence .evidence-command {
+  overflow-wrap: anywhere;
+}
+.attention-evidence .evidence-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
 .attention-table .attention-section p {
   line-height: 1.55;
 }
@@ -622,7 +774,7 @@ app-wait-status {
   padding: 0;
 }
 .attention-table .attention-answer {
-  color: #4b554e;
+  color: var(--text-strong);
   font-weight: 600;
 }
 .attention-table .attention-answer textarea {

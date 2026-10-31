@@ -100,3 +100,19 @@ test('Review-Image: läuft als node, npm-Cache im Home von node statt /root', ()
   assert.match(dockerfile, /chown node:node \/work \/home\/node\/\.npm/);
   assert.doesNotMatch(read('src/runner/review-slots.ts'), /\/root\/\.npm/);
 });
+
+test('Compose: jedes eigene Image baut genau ein Dienst, die übrigen nutzen es nur (pull_policy: never)', () => {
+  // Gleichzeitige Builds desselben Images scheitern mit dem containerd-Image-Store an „image … already exists“.
+  const builders = new Map<string, string[]>();
+  for (const [name, block] of services()) {
+    const image = /^ {4}image: (\S+)$/m.exec(block)?.[1];
+    if (!image || !/^ {4}build:/m.test(block)) continue;
+    builders.set(image, [...(builders.get(image) ?? []), name]);
+  }
+  for (const [image, names] of builders) assert.equal(names.length, 1, `${image}: ${names.join(', ')}`);
+  for (const name of ['worker-volumes', 'watchdog', 'https-volumes']) {
+    const block = services().get(name) ?? '';
+    assert.doesNotMatch(block, /^ {4}build:/m, name);
+    assert.match(block, /^ {4}pull_policy: never$/m, name);
+  }
+});

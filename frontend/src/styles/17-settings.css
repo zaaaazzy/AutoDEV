@@ -13,7 +13,7 @@
   align-items: center;
   gap: 14px;
   padding: 14px 16px;
-  border: 1.5px solid #e1e6de;
+  border: 1.5px solid var(--border-light);
   border-radius: 16px;
   background: var(--surface);
   cursor: pointer;
@@ -22,8 +22,8 @@
     background 0.15s;
 }
 .permission-list label:has(input:checked) {
-  border-color: #b9d3c3;
-  background: #f6fbf8;
+  border-color: var(--success-border-soft);
+  background: var(--success-surface-faint);
 }
 .permission-list input {
   position: relative;
@@ -139,7 +139,7 @@
   padding: 10px 14px;
   border-radius: 12px;
   background: #fbefec;
-  color: #a33d26;
+  color: var(--error-text-deep);
 }
 .login-submit {
   min-height: 48px;
@@ -178,7 +178,7 @@
   padding: 4px 10px;
   place-items: center;
   border-radius: 999px;
-  background: #eef0ea;
+  background: var(--surface-tint);
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
@@ -291,7 +291,7 @@
 }
 .role-grid legend {
   margin-bottom: 6px;
-  color: #4b554e;
+  color: var(--text-strong);
   font-size: 12px;
   font-weight: 600;
 }
@@ -306,7 +306,7 @@
   cursor: pointer;
 }
 .role-option:has(input:checked) {
-  border-color: #b9d3c3;
+  border-color: var(--success-border-soft);
   background: #f3faf6;
 }
 .role-option input {
@@ -340,7 +340,7 @@
   background: var(--surface);
 }
 .user-row.system {
-  background: #f7f8f5;
+  background: var(--surface-muted);
 }
 .user-row.inactive {
   opacity: 0.6;
@@ -372,8 +372,8 @@
 .role-chip {
   padding: 1px 8px;
   border-radius: 999px;
-  background: #eef0ea;
-  color: #4b554e;
+  background: var(--surface-tint);
+  color: var(--text-strong);
   font-size: 11px;
   font-weight: 650;
 }
@@ -385,7 +385,7 @@
   border-color: #efc2b8;
 }
 .danger-zone h2 {
-  color: #a33d26;
+  color: var(--error-text-deep);
 }
 .permission-list li {
   padding: 10px 12px;
@@ -414,14 +414,14 @@
 .permission-rules code {
   padding: 1px 6px;
   border-radius: 4px;
-  background: #eef1ec;
+  background: var(--surface-hover-alt);
   font-size: 0.74rem;
 }
 .permission-form {
   margin-top: 10px;
 }
 .role-chip.project {
-  background: #eef1ec;
+  background: var(--surface-hover-alt);
   color: var(--ink);
 }
 .system-tools {
@@ -488,7 +488,7 @@
   height: 26px;
   place-items: center;
   border-radius: 50%;
-  background: #eef3ef;
+  background: var(--surface-cool);
   color: var(--green);
   font-size: 12px;
 }
@@ -610,7 +610,7 @@
 }
 .settings-group legend {
   padding: 0 4px;
-  color: #4b554e;
+  color: var(--text-strong);
   font-size: 12px;
   font-weight: 650;
 }
@@ -703,7 +703,7 @@
     height: auto;
     overflow: visible;
     clip-path: none;
-    color: #4b554e;
+    color: var(--text-strong);
     font-size: 12px;
     font-weight: 600;
   }

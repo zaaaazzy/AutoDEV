@@ -7,7 +7,6 @@ export const IDEATION_STATUS = {
   accepted: 'accepted',
   rejected: 'rejected',
 } as const;
-export type IdeationStatus = (typeof IDEATION_STATUS)[keyof typeof IDEATION_STATUS];
 /** Abgeschlossene Ideen: alle anderen (auch ohne Status) gelten als offen. */
 export const CLOSED_IDEATION_STATUSES: readonly string[] = [IDEATION_STATUS.accepted, IDEATION_STATUS.rejected];
 export const EDITABLE_IDEATION_STATUSES = new Set<string>([
@@ -43,6 +42,15 @@ export const BUG_STATUS = {
 export type BugStatus = (typeof BUG_STATUS)[keyof typeof BUG_STATUS];
 export const BUG_STATUSES = new Set<string>(Object.values(BUG_STATUS));
 
+export const SPRINT_STATUS = {
+  planned: 'planned',
+  active: 'active',
+  review: 'review',
+  completed: 'completed',
+  cancelled: 'cancelled',
+} as const;
+export type SprintStatus = (typeof SPRINT_STATUS)[keyof typeof SPRINT_STATUS];
+
 export const RUN_STATUS = {
   running: 'running',
   passed: 'passed',
@@ -50,10 +58,8 @@ export const RUN_STATUS = {
 } as const;
 export type RunStatus = (typeof RUN_STATUS)[keyof typeof RUN_STATUS];
 export const TEST_RUN_STATUS = RUN_STATUS;
-export type TestRunStatus = RunStatus;
 
 export const AGENT_RUN_STATUS = RUN_STATUS;
-export type AgentRunStatus = RunStatus;
 
 export const AGENT_STEP_STATUS = {
   running: 'running',

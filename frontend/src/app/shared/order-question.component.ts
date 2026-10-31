@@ -1,4 +1,4 @@
-import { Component, effect, inject, input, signal } from '@angular/core';
+import { Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { ApiService } from '../core/api.service.js';
 import { AuthService } from '../core/auth.service.js';
 import { errorMessage } from '../core/errors.js';
@@ -71,12 +71,16 @@ export class OrderQuestionComponent {
   protected readonly sending = signal(false);
   protected readonly sent = signal(false);
 
+  /** Neu laden nur, wenn sich Auftrag oder offene Aktion ändern – nicht bei jedem Nachladen der Projektdaten. */
+  private readonly key = computed(() => `${this.order().id}\n${this.order().actionTodo ?? ''}`);
+  /** Aus der Push-Nachricht „Rückfrage“: nur einmal ins Antwortfeld springen, nicht bei jedem Nachladen. */
+  private jumped = false;
+
   constructor() {
     effect(() => {
-      const item = this.order();
       // Neu laden, sobald sich der Auftrag ändert (z. B. neue Rückfrage nach einer Antwort).
-      void item.actionTodo;
-      void this.load(item.id);
+      this.key();
+      untracked(() => void this.load(this.order().id));
     });
   }
 
@@ -89,7 +93,8 @@ export class OrderQuestionComponent {
     if (result?.question) {
       this.sent.set(false);
       // Aus der Push-Nachricht „Rückfrage“ geöffnet: direkt ins Antwortfeld.
-      if (targetFromHash() === id && hashParameter('answer') === '1') {
+      if (!this.jumped && targetFromHash() === id && hashParameter('answer') === '1') {
+        this.jumped = true;
         globalThis.setTimeout(() => {
           const field = globalThis.document?.getElementById(`answer-${id}`);
           field?.scrollIntoView({ block: 'center' });

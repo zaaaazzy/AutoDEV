@@ -3,7 +3,15 @@ import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { formatEnvValue, mergeEnv, parseEnv, planEnv, validateInstall, writeEnvFile } from './env-file.js';
+import {
+  applyServiceInstallEnv,
+  formatEnvValue,
+  mergeEnv,
+  parseEnv,
+  planEnv,
+  validateInstall,
+  writeEnvFile,
+} from './env-file.js';
 
 const input = {
   username: 'admin',
@@ -157,4 +165,22 @@ test('first write without .env creates no backup', async () => {
     assert.equal(result.backup, null);
     assert.ok(result.secretKeyCreated);
   });
+});
+
+test('install scripts get DB URL, secret key and the public URL of the domain', () => {
+  const plan = planEnv('', { ...input, domain: 'devlog.example.com' });
+  const target: NodeJS.ProcessEnv = {};
+  applyServiceInstallEnv(plan.values, target);
+  assert.equal(target.DEV_LOG_PUBLIC_URL, 'https://devlog.example.com');
+  assert.equal(target.DEV_LOG_DATABASE_URL, plan.values.get('DEV_LOG_DATABASE_URL'));
+  assert.equal(target.DEV_LOG_SECRET_KEY, plan.values.get('DEV_LOG_SECRET_KEY'));
+});
+
+test('without a domain no public URL goes to the install scripts, an old value is removed', () => {
+  const plan = planEnv('', input);
+  const target: NodeJS.ProcessEnv = { DEV_LOG_PUBLIC_URL: 'https://alt.example.com', OTHER: 'bleibt' };
+  applyServiceInstallEnv(plan.values, target);
+  assert.ok(!('DEV_LOG_PUBLIC_URL' in target));
+  assert.equal(target.OTHER, 'bleibt');
+  assert.ok(target.DEV_LOG_DATABASE_URL && target.DEV_LOG_SECRET_KEY);
 });

@@ -34,7 +34,19 @@ test('Mehrfach definierte CHECK-Listen: jede Fassung erlaubt alle Werte der letz
     versions.set(match[1], [...(versions.get(match[1]) ?? []), values]);
   }
   assert.ok(versions.has('sprints_status_check'));
+  // Ausnahme: Migration 24 bereinigt test_coverage_areas im selben Schritt vor ihrem CHECK (nicht zuordenbare Zeilen
+  // fallen weg), eine Zeile mit 'auftrag' kann sie also nicht scheitern lassen; Migration 25 ergänzt 'auftrag'.
+  // Auch hier darf aber keine spätere Fassung einen Wert verlieren.
+  const cleanedBeforeCheck = new Set(['test_coverage_areas_area_check']);
   for (const [name, lists] of versions) {
+    if (cleanedBeforeCheck.has(name)) {
+      for (let index = 1; index < lists.length; index += 1) {
+        for (const value of lists[index - 1]!) {
+          assert.ok(lists[index]!.includes(value), `${name}: Fassung ${index + 1} verliert '${value}'`);
+        }
+      }
+      continue;
+    }
     const last = lists.at(-1)!;
     for (const [index, values] of lists.entries()) {
       for (const value of last) {
@@ -66,6 +78,17 @@ test('sprints.git_sync: erlaubt awaiting_merge, Migration läuft mehrfach, Unsin
     const row = (await db.query<{ sync: string }>('SELECT git_sync AS sync FROM sprints WHERE id = $1', [sprint]))
       .rows[0];
     assert.equal(row.sync, 'awaiting_merge');
+  });
+});
+
+test('sprints_project_idx: Migration legt den Index idempotent auf Projekt, Status und Anlage an', async (t) => {
+  assert.ok(MIGRATIONS.some((migration) => migration.sql.includes('CREATE INDEX IF NOT EXISTS sprints_project_idx')));
+  await withMigratedDatabase(t, 'devlog_sprints_index', async (db) => {
+    await runMigrations(db); // zweiter Start ohne Fehler
+    const index = await db.query<{ def: string }>(
+      `SELECT indexdef AS def FROM pg_indexes WHERE tablename = 'sprints' AND indexname = 'sprints_project_idx'`,
+    );
+    assert.match(index.rows[0]?.def ?? '', /\(project_slug, status, created_at\)/);
   });
 });
 

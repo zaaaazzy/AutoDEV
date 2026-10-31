@@ -29,7 +29,7 @@ import { TourService } from './features/tour/tour.service.js';
 import { WelcomeDialogComponent } from './features/tour/welcome-dialog.component.js';
 import type { DevelopmentItem } from './core/models.js';
 import { isFinished, sprintLabel } from './shared/labels.js';
-import { navCount } from './core/nav-counts.js';
+import { navCount, sprintHealthOf, sprintStateOf, type SprintState } from './core/nav-counts.js';
 import { PageSearchService } from './core/page-search.service.js';
 import { isOpenIdea } from './features/ideation/idea-options.js';
 import { nextOpenOrders } from './features/sprints/review-launch.js';
@@ -38,6 +38,7 @@ import { HeaderReviewComponent } from './features/sprints/header-review.componen
 import { orderProblem, type OrderProblem } from './shared/order-problem.js';
 import { GitAlertComponent } from './shared/git-alert.component.js';
 import { RestartBannerComponent } from './shared/restart-banner.component.js';
+import { defined } from '../../../src/core/defined.js';
 
 const CREATE_LABELS: Partial<Record<Section, string>> = {
   development: 'Neuer Auftrag',
@@ -82,7 +83,7 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
   templateUrl: './app.component.html',
 })
 export class AppComponent {
-  /** Browser-Tab zeigt das aktive Projekt (statt fest „Mainty“). */
+  /** Browser-Tab zeigt das aktive Projekt („AIdeation | Projekt“). */
   private readonly tabTitle = effect(() => {
     const name = this.store.currentProject()?.name;
     globalThis.document.title = name ? `AIdeation | ${name}` : 'AIdeation';
@@ -117,13 +118,13 @@ export class AppComponent {
     this.afterProject.set(false);
     this.welcomeDismissed.set(true);
   }
-  /** Favicon der betreuten Anwendung neben der Projektauswahl, falls vorhanden. */
   /** Favicon-Adresse, die nicht geladen werden konnte – dann erscheint wieder das AIdeation-Logo. */
   protected readonly failedFavicon = signal<string | null>(null);
   protected readonly visibleFavicon = computed(() => {
     const icon = this.favicon();
     return icon && icon !== this.failedFavicon() ? icon : null;
   });
+  /** Favicon der betreuten Anwendung neben der Projektauswahl, falls vorhanden. */
   protected readonly favicon = computed(() => {
     const project = this.store.currentProject();
     return project?.faviconVersion
@@ -204,16 +205,13 @@ export class AppComponent {
     const indicator = event.currentTarget as HTMLElement;
     if (!indicator.contains(event.relatedTarget as Node | null)) this.sprintFocus.set(false);
   }
-  /** Zustand des laufenden Sprints für die Menü-Bubble: grün läuft, orange Fehler, rot gestoppt. */
+  /** Zustand des laufenden Sprints für die Menü-Bubble: grün läuft, orange Fehler, grau pausiert, rot gestoppt. */
   protected readonly sprintHealth = computed(() => {
     const data = this.store.data();
     const sprint = data.sprints.find((candidate) => candidate.status === 'active');
     if (!sprint) return null;
     const items = data.development.filter((item) => item.sprintId === sprint.id);
     const open = items.filter((item) => !isFinished(item.status)).length;
-    const worker = this.worker();
-    if (this.store.workerFailure() || !worker.online)
-      return { open, tone: 'stopped', text: 'Sprint gestoppt: Worker offline' };
     const failed = items.some(
       (item) =>
         item.status === 'blocked' ||
@@ -222,9 +220,8 @@ export class AppComponent {
             .filter((run) => run.developmentId === item.id)
             .sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0]?.status === 'failed'),
     );
-    return failed
-      ? { open, tone: 'warn', text: 'Sprint läuft mit Fehlern' }
-      : { open, tone: 'ok', text: 'Sprint läuft' };
+    const workerDown = this.store.workerFailure() || !this.worker().online;
+    return { open, ...sprintHealthOf({ workerDown, paused: !!sprint.pausedAt, failed }) };
   });
 
   /** Aufträge des laufenden Sprints mit Handlungsbedarf: Problem und Lösung in wenigen Worten (Sprint-Hover). */
@@ -241,7 +238,7 @@ export class AppComponent {
   /** Handy: Mit Handlungsbedarf führt der Sprint-Chip direkt zu den betroffenen Aufträgen, sonst zu den Sprints. */
   protected openSprintChip(): void {
     const attention = this.sprintAttention();
-    if (attention.length === 1) this.openOrder(attention[0]!.item.id);
+    if (attention.length === 1) this.openOrder(defined(attention[0]).item.id);
     else if (attention.length) this.store.navigate('actions');
     else this.store.navigate('sprints');
   }
@@ -250,16 +247,16 @@ export class AppComponent {
     this.store.navigate('development', { focus: id });
   }
 
-  /** Zustand des Sprint-Chips im Handy-Header: fertig, gestoppt, Risiko, läuft oder wartet. */
-  protected readonly sprintState = computed<'done' | 'stopped' | 'warn' | 'running' | 'idle' | null>(() => {
+  /** Zustand des Sprint-Chips im Handy-Header: fertig, gestoppt, pausiert, Risiko, läuft oder wartet. */
+  protected readonly sprintState = computed<SprintState | null>(() => {
     const sprint = this.activeSprint();
     if (!sprint) return null;
-    if (sprint.finished) return 'done';
-    const tone = this.sprintHealth()?.tone;
-    if (tone === 'stopped') return 'stopped';
-    if (tone === 'warn') return 'warn';
-    const busy = this.worker().agents.some((agent) => agent.active && agent.sprintName === sprint.name);
-    return sprint.running || busy ? 'running' : 'idle';
+    const agentBusy = this.worker().agents.some((agent) => agent.active && agent.sprintName === sprint.name);
+    return sprintStateOf({
+      finished: sprint.finished,
+      tone: this.sprintHealth()?.tone,
+      busy: sprint.running > 0 || agentBusy,
+    });
   });
 
   /** Farbe der Menü-Bubble: Aktionen warten auf dich, laufende Agents sind grün. */
@@ -272,7 +269,7 @@ export class AppComponent {
     if (this.store.workerFailure()) return 'Worker-Status nicht abrufbar';
     const worker = this.worker();
     if (!worker.online) return worker.worker ? 'Worker offline' : 'Worker nicht gestartet';
-    if (worker.running.length) return `Worker arbeitet: ${worker.running[0]!.title}`;
+    if (worker.running.length) return `Worker arbeitet: ${defined(worker.running[0]).title}`;
     return 'Worker bereit';
   });
 

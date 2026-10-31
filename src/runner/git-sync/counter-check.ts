@@ -81,7 +81,7 @@ const shortDetail = (text: string): string => text.replace(/\s+/g, ' ').trim().s
 /** Der Befehl lief gar nicht (fehlt im PATH, Sandbox lehnt ab, Zeitüberschreitung): kein Testergebnis. */
 function commandProblem(result: { exitCode: number; output: string }, timedOut: boolean): string | null {
   if (timedOut) return 'Zeitüberschreitung des Testbefehls.';
-  if (result.output.startsWith('Sandbox:')) return result.output.split('\n')[0]!;
+  if (result.output.startsWith('Sandbox:')) return result.output.split('\n', 1)[0] ?? 'Sandbox:';
   if (result.exitCode < 0 || result.exitCode === 127 || /im PATH des Workers nicht gefunden/.test(result.output)) {
     return `Testbefehl nicht ausführbar (Exit-Code ${result.exitCode}).`;
   }

@@ -1,12 +1,13 @@
 // Egress-Proxy der Agent-Sandbox: einziger Weg aus dem internen Netzwerk aideation-agents (siehe sandbox.ts). Läuft
 // als eigener Container aus dem Image aideation-agent (deploy/agent/Dockerfile bündelt diese Datei ohne
-// Abhängigkeiten nach /opt/aideation/egress-proxy.mjs). Erlaubt sind nur feste Ziele (host:port): Anthropic-API,
-// npm-Registry und Ollama auf dem Host. LAN, Host-Dienste wie die AIdeation-Datenbank und alles andere sind gesperrt.
+// Abhängigkeiten nach /opt/aideation/egress-proxy.mjs). Erlaubt sind nur feste Ziele (host:port, egressAllowList in
+// sandbox.ts): Anthropic-API, npm-Registry, Docker Hub und Ollama auf dem Host. LAN, Host-Dienste wie die AIdeation-Datenbank und alles andere sind gesperrt.
 import { lookup } from 'node:dns/promises';
 import { createServer, request as httpRequest, type IncomingMessage, type Server } from 'node:http';
 import { isIP, connect, type Socket } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { defined } from './defined.js';
 
 /** Ziel auf dem Host, das in private Adressen auflösen darf (Docker Desktop bzw. host-gateway). */
 const HOST_ALIAS = 'host.docker.internal';
@@ -60,7 +61,7 @@ export function isPrivateAddress(address: string): boolean {
   if (version === 6) {
     const lower = address.toLowerCase();
     const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
-    if (mapped) return isPrivateAddress(mapped[1]!);
+    if (mapped) return isPrivateAddress(defined(mapped[1]));
     return lower === '::' || lower === '::1' || /^f[cd]/.test(lower) || /^fe[89ab]/.test(lower) || /^ff/.test(lower);
   }
   return true;
@@ -83,7 +84,7 @@ export async function resolveTarget(
   const addresses = await resolver(target.host).catch(() => []);
   if (!addresses.length) return null;
   if (target.host !== HOST_ALIAS && addresses.some(({ address }) => isPrivateAddress(address))) return null;
-  return addresses[0]!.address;
+  return defined(addresses[0]).address;
 }
 
 function deny(socket: Socket, status: string): void {
@@ -107,7 +108,7 @@ export function startEgressProxy(
       response.writeHead(403, { 'Content-Type': 'text/plain' }).end('AIdeation-Sandbox: Ziel gesperrt.\n');
       return;
     }
-    const url = new URL(request.url!);
+    const url = new URL(defined(request.url));
     const upstream = httpRequest(
       {
         host: address,
