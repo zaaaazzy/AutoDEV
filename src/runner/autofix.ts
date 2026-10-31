@@ -6,7 +6,7 @@ import { humanActionFor, setActionTodo } from './action-todo.js';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { shortTitle } from '../core/validation.js';
 import type { Pool } from 'pg';
-import { reportAgentBug } from '../api/bugs.js';
+import { reportAgentBug } from '../db/bugs-repository.js';
 import { UNTRUSTED_START } from './hoster.js';
 import { defined } from '../core/defined.js';
 

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Router } from 'express';
 import type { Pool } from 'pg';
-import { ensureReviewer, registerAgentRoutes } from './agents.js';
+import { registerAgentRoutes } from './agents.js';
+import { ensureReviewer } from '../agent/default-agents.js';
 import type { Principal } from './roles.js';
 
 type Handler = (request: unknown, response: unknown) => Promise<void>;

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { registerProject } from '../db/project.js';
+import { ensureDefaultAgents } from '../agent/default-agents.js';
 import { categoryOfCommand, parseTapCases } from '../core/test-results.js';
 import { createTestRun, createTestRunStep, finishTestRun, finishTestRunStep, saveTestCases } from '../db/test-runs.js';
 import type { Pool } from 'pg';
@@ -184,6 +185,7 @@ export async function runTestAgent(options: TestAgentOptions, pool: Pool): Promi
   const repository = process.env.DEV_LOG_REPOSITORY ?? process.env.GITHUB_REPOSITORY ?? options.cwd;
   if (!options.existingProject) {
     await registerProject(pool, { slug: options.project, name: projectName, repository });
+    await ensureDefaultAgents(pool, options.project);
   }
   const runId = await createTestRun(pool, {
     projectSlug: options.project,

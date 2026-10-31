@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { ensureDefaultAgents, ensureReviewer } from '../../src/api/agents.js';
+import { ensureDefaultAgents, ensureReviewer } from '../../src/agent/default-agents.js';
 import { DEMO_BACKLOG, DEMO_IDEAS, DEMO_REJECTED, DEMO_SPRINTS } from './content.js';
 
 /**
