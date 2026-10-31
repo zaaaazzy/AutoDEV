@@ -14,7 +14,7 @@ import { commentSprintProposal } from '../agent/sprint-comment.js';
 import { publishSystemAgents } from '../agent/system-agents.js';
 import { analyzeBlocked } from '../agent/troubleshoot.js';
 import { processVisionaryRun } from '../agent/visionary.js';
-import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
+import { beatHeartbeat, readMaxAgents } from '../db/worker-repository.js';
 import { runCommand } from '../core/command.js';
 import { volumeOf, watchFolders } from '../core/folder-guard.js';
 import { treeLockName } from '../core/project-lock.js';

@@ -4,8 +4,8 @@ import { cancelAgent } from './agent-cancel.js';
 import { ANSWERED } from './chat-routes.js';
 import type { Router } from 'express';
 import { access } from './access.js';
-import { cpus, loadavg } from 'node:os';
 import type { Pool } from 'pg';
+import { MAX_AGENTS_LIMIT, readMaxAgents } from '../db/worker-repository.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 import {
   AGENT_RUN_STATUS,
@@ -14,24 +14,6 @@ import {
   IDEATION_STATUS,
   SPRINT_STATUS,
 } from '../core/status.js';
-
-export async function beatHeartbeat(
-  pool: Pool,
-  project: string,
-  intervalSeconds: number,
-  lastError: string | null = null,
-  startup = false,
-): Promise<void> {
-  const cpuPercent = Math.min(100, Math.round((loadavg()[0] / cpus().length) * 100));
-  await pool.query(
-    `INSERT INTO worker_heartbeats (project_slug, pid, interval_seconds, last_error, cpu_percent)
-     VALUES ($1, $2, $3, $4, $6)
-     ON CONFLICT (project_slug) DO UPDATE
-       SET last_seen = NOW(), pid = $2, interval_seconds = $3, last_error = $4, cpu_percent = $6,
-           started_at = CASE WHEN $5 THEN NOW() ELSE worker_heartbeats.started_at END`,
-    [project, process.pid, intervalSeconds, lastError, startup, cpuPercent],
-  );
-}
 
 /** Eintrag der Agent-Anzeige (Kopfzeile, Dashboard). */
 export interface AgentStatusRow {
@@ -76,17 +58,6 @@ export function markManualAgents(agents: AgentStatusRow[], requests: AgentReques
     }
   }
   return rest;
-}
-
-export const MAX_AGENTS_LIMIT = 8;
-export const DEFAULT_MAX_AGENTS = 2;
-
-export async function readMaxAgents(pool: Pool): Promise<number> {
-  const row = (
-    await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'max_concurrent_agents'`)
-  ).rows[0];
-  const value = Number(row?.value);
-  return Number.isInteger(value) && value >= 1 && value <= MAX_AGENTS_LIMIT ? value : DEFAULT_MAX_AGENTS;
 }
 
 /** Kennung des Dashboard-Assistenten in der Agent-Liste der Kopfzeile. */
