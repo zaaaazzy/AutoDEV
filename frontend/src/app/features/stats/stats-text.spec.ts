@@ -11,10 +11,7 @@ test('Trefferquote je Sprint: Prozent und „x von y“, ohne gemessene Aufträg
 
 test('Korrekturfaktor je Herkunft: Faktor und Anzahl der Messwerte, unter 5 Messwerten Faktor 1', () => {
   const entry = { source: 'author', label: 'Auftragsautor', hours: 0.25, tokens: 1.5, samples: 12 };
-  assert.equal(
-    calibrationText({ ...entry, scope: 'project' }),
-    'Faktor 0,25 (Stunden) / 1,5 (Tokens) · 12 Messwerte',
-  );
+  assert.equal(calibrationText({ ...entry, scope: 'project' }), 'Faktor 0,25 (Stunden) / 1,5 (Tokens) · 12 Messwerte');
   assert.equal(
     calibrationText({ ...entry, scope: 'all' }),
     'Faktor 0,25 (Stunden) / 1,5 (Tokens) · 12 Messwerte, alle Projekte',

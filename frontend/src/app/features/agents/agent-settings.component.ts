@@ -142,8 +142,6 @@ export class AgentSettingsComponent {
   readonly agent = input.required<Agent>();
   /** Freigabe-Kategorien des Projekts (für die Rechte-Auswahl). */
   readonly groups = input<PermissionGroupInfo[]>([]);
-  /** Direkt im Bearbeiten-Modus öffnen (z. B. „✎ Bearbeiten“ in der Tabelle). */
-  readonly startEditing = input(false);
   readonly saved = output<void>();
 
   protected readonly editing = signal(false);
@@ -164,10 +162,6 @@ export class AgentSettingsComponent {
     const target = this.store.data().agents.find((other) => other.id === this.agent().handoffTo);
     return target ? target.name : 'Nächster Agent im Workflow';
   });
-
-  ngOnInit(): void {
-    if (this.startEditing()) this.startEdit();
-  }
 
   /** Noch nicht festgelegt (null): so, wie der Agent heute läuft – vertraute Rollen mit allen Projektbefehlen. */
   private effectiveCommands(agent: Agent): string[] {

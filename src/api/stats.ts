@@ -10,15 +10,25 @@ import {
   calibratedTokens,
   calibrationSummary,
   estimateHit,
+  type EstimateOverrun,
   type HitRate,
   hitRate,
   loadCalibration,
+  loadEstimateOverruns,
 } from '../core/estimate-calibration.js';
 import { realFailureSql } from '../core/interrupted-steps.js';
+import { logged } from '../core/log.js';
 
 type CountRow = { key: string; count: string };
 const counts = (rows: CountRow[]): Record<string, number> =>
   Object.fromEntries(rows.map((row) => [row.key, Number(row.count)]));
+
+/** Schätzfehler (Ist ÷ Schätzung) auf drei Stellen; null bleibt null (Sprint ohne erledigte, gemessene Aufträge). */
+const errorValue = (value: number | string | null | undefined): number | null => {
+  if (value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number * 1000) / 1000 : null;
+};
 
 async function sprintStats(pool: Pool, slug: string): Promise<Record<string, unknown> | null> {
   const timeZone = localTimeZone();
@@ -112,10 +122,32 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
         [slug],
       ),
       sprintStats(pool, slug),
-      pool.query<{ id: string; name: string; status: string; total: string; done: string; hours: string }>(
+      // Schätzfehler je Sprint: Median von Ist ÷ Schätzung (roh, wie geschätzt) der erledigten Aufträge mit Messung;
+      // ohne solche Aufträge null statt 0.
+      pool.query<{
+        id: string;
+        name: string;
+        status: string;
+        total: string;
+        done: string;
+        hours: string;
+        hourError: number | null;
+        tokenError: number | null;
+        errorSamples: string;
+      }>(
         `SELECT s.id, s.name, s.status, COUNT(d.id) AS total, COUNT(d.id) FILTER (WHERE d.status = 'done') AS done,
-              COALESCE(SUM(${calibratedSql('effort_hours', calibration, 'd')}) FILTER (WHERE d.status = 'done'), 0) AS hours
+              COALESCE(SUM(${calibratedSql('effort_hours', calibration, 'd')}) FILTER (WHERE d.status = 'done'), 0) AS hours,
+              percentile_cont(0.5) WITHIN GROUP (ORDER BY m.hours / d.effort_hours)
+                FILTER (WHERE m.hours > 0 AND d.effort_hours > 0) AS "hourError",
+              percentile_cont(0.5) WITHIN GROUP (ORDER BY m.tokens / d.token_estimate)
+                FILTER (WHERE m.tokens > 0 AND d.token_estimate > 0) AS "tokenError",
+              COUNT(d.id) FILTER (WHERE (m.hours > 0 AND d.effort_hours > 0)
+                                     OR (m.tokens > 0 AND d.token_estimate > 0)) AS "errorSamples"
          FROM sprints s LEFT JOIN development_items d ON d.sprint_id = s.id
+         LEFT JOIN LATERAL (
+              SELECT (SUM(st.duration_ms) / 3600000.0)::float8 AS hours, SUM(st.tokens)::float8 AS tokens
+                FROM agent_runs r JOIN agent_run_steps st ON st.run_id = r.id
+               WHERE r.development_id = d.id) m ON d.status = 'done' AND d.kind <> 'express'
         WHERE s.project_slug = $1 GROUP BY s.id ORDER BY s.created_at DESC LIMIT 8`,
         [slug],
       ),
@@ -139,6 +171,8 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
       ),
     ]);
   const hitsBySprint = sprintHitRates(hits.rows, calibration);
+  // Laufende Aufträge über dem Dreifachen ihrer kalibrierten Schätzung; ein Fehler hier lässt die Statistik stehen.
+  const overruns = await loadEstimateOverruns(pool, slug).catch(logged('stats', [] as EstimateOverrun[]));
 
   const finishedTests = tests.rows.filter((run) => run.status !== 'running');
   return {
@@ -179,9 +213,13 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
       done: Number(row.done),
       hours: Number(row.hours),
       hitRate: hitsBySprint.get(row.id) ?? hitRate([]),
+      hourError: errorValue(row.hourError),
+      tokenError: errorValue(row.tokenError),
+      errorSamples: Number(row.errorSamples ?? 0),
     })),
     // Korrekturfaktor je Herkunft (Median Ist ÷ Schätzung) samt Anzahl der Messwerte.
     calibration: calibrationSummary(calibration),
+    overruns,
   };
 }
 

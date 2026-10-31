@@ -160,18 +160,11 @@
             </button>
           </div>
           @if (rejecting()) {
-            <form class="idea-reject" (ngSubmit)="rejectIdea(idea)">
-              <label
-                >Ablehnungsgrund (der Visionär beachtet ihn beim nächsten Lauf)
-                <textarea name="reason" [(ngModel)]="rejectReason" maxlength="1000" required></textarea>
-              </label>
-              <div class="actions">
-                <button class="button secondary" type="button" (click)="rejecting.set(false)">Abbrechen</button>
-                <button class="button primary" type="submit" [disabled]="busy() || !rejectReason.trim()">
-                  Ablehnen
-                </button>
-              </div>
-            </form>
+            <app-reject-reason-form
+              [busy]="busy()"
+              (submitted)="rejectIdea(idea, $event)"
+              (cancelled)="rejecting.set(false)"
+            />
           }
         </div>
       } @else if (idea.status === 'requested' || idea.status === 'drafting') {

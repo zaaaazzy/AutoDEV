@@ -3,15 +3,16 @@ import { ApiService } from './api.service.js';
 import { AuthService } from './auth.service.js';
 import { visibleInterval } from './visible-interval.js';
 
-/** Stand des Neustarts von AIdeation (GET/POST /api/system/restart). */
+/** Stand des Neustarts von AIdeation (GET/POST/DELETE /api/system/restart). */
 export interface RestartState {
-  status: 'requested' | 'building' | 'restarting' | 'done' | 'failed';
+  status: 'requested' | 'building' | 'restarting' | 'done' | 'failed' | 'cancelled';
   requestedAt: string;
   requestedBy: string | null;
   startedAt?: string | null;
   finishedAt?: string | null;
   message?: string | null;
   log?: string | null;
+  cancelledBy?: string | null;
 }
 
 export const RESTART_OPEN: readonly RestartState['status'][] = ['requested', 'building', 'restarting'];
@@ -48,6 +49,18 @@ export class RestartStatusService {
   set(state: RestartState | null): void {
     this.state.set(state);
     this.unreachable.set(false);
+  }
+
+  /** Wartenden Neustart zurücknehmen (nur Status „requested“); die Antwort bringt den aktuellen Stand mit. */
+  async cancel(): Promise<void> {
+    try {
+      const { restart } = await this.api.delete<{ restart: RestartState | null }>('/api/system/restart');
+      this.set(restart);
+    } catch (error) {
+      // 409: der Worker baut schon – den tatsächlichen Stand holen, damit die Leiste ihn zeigt.
+      await this.load();
+      throw error;
+    }
   }
 
   async load(): Promise<void> {

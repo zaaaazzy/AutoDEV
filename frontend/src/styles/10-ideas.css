@@ -64,7 +64,7 @@
   padding: 24px 28px 18px;
   border-bottom: 1px solid var(--line);
   border-radius: 14px 14px 0 0;
-  background: linear-gradient(135deg, #eef5f0 0%, #fbfaf6 60%, #fdf3ea 100%);
+  background: linear-gradient(135deg, var(--success-surface-alt) 0%, #fbfaf6 60%, #fdf3ea 100%);
 }
 .idea-hero h2 {
   margin: 0;
@@ -110,7 +110,7 @@
 .priority-high {
   border-color: #f0c9ad;
   background: #fdf0e6;
-  color: #9a4b17;
+  color: var(--notice-text-warm);
 }
 .idea-description.markdown {
   margin-top: 18px;
@@ -189,8 +189,8 @@
   font-weight: 700;
 }
 .avatar.agent {
-  background: #fde8d7;
-  color: #9a4b17;
+  background: var(--notice-peach);
+  color: var(--notice-text-warm);
   font-size: 16px;
 }
 .bubble {
@@ -225,8 +225,8 @@
 .bubble-badge {
   padding: 0 7px;
   border-radius: 999px;
-  background: #fde8d7;
-  color: #9a4b17;
+  background: var(--notice-peach);
+  color: var(--notice-text-warm);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -250,8 +250,8 @@
   white-space: nowrap;
 }
 .mention-chip.agent {
-  background: #fde8d7;
-  color: #9a4b17;
+  background: var(--notice-peach);
+  color: var(--notice-text-warm);
 }
 .bubble-working {
   margin: 8px 0 0;
@@ -373,7 +373,7 @@
   margin: 0;
 }
 .visionary-bar.done {
-  border-color: #b9d3c4;
+  border-color: var(--success-border-soft-alt);
   background: #f0f7f2;
 }
 .visionary-bar.failed {
@@ -407,6 +407,30 @@
 .idea-reject textarea {
   min-height: 70px;
 }
+/* Popover der Ideenliste: Massenablehnung, Massenpriorität, Schnell ablehnen. Fest am Bildschirm (Position aus dem
+   Knopf), damit die horizontal scrollbare Tabelle es nicht abschneidet. */
+.idea-popover {
+  position: fixed;
+  z-index: 20;
+  display: grid;
+  gap: 8px;
+  width: min(320px, calc(100vw - 16px));
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.idea-popover-title {
+  margin: 0;
+  font-weight: 600;
+}
+.idea-popover .actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
 
 /* ── Express-Anfragen aus dem Dashboard: ungeplant im Sprint ──────────── */
 .express-badge {
@@ -414,7 +438,7 @@
   padding: 1px 8px;
   border-radius: 999px;
   background: #fff3cd;
-  color: #8a5a00;
+  color: var(--notice-text-dark);
   font-size: 0.75rem;
   font-weight: 700;
   white-space: nowrap;

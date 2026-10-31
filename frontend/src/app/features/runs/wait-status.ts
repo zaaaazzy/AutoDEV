@@ -1,5 +1,6 @@
 import type { Sprint, TestRun } from '../../core/models.js';
 import { type LiveRun, liveStepName } from './test-run-live.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 /** Was gerade läuft und den Stand bald ändert: Test, Test-Gate, Merge und Push oder die CI-Prüfung auf GitHub. */
 export interface WaitStatus {
@@ -17,7 +18,7 @@ export interface WaitStatus {
 export function runningStep(steps: Pick<LiveRun, 'steps'>['steps']): string {
   const index = steps.findIndex((step) => step.status === 'running');
   if (index < 0) return '';
-  const step = steps[index]!;
+  const step = defined(steps[index]);
   return [`Schritt ${index + 1} von ${steps.length}`, liveStepName(step.command), step.progress]
     .filter(Boolean)
     .join(' · ');
@@ -31,13 +32,13 @@ export function typicalRunMs(runs: readonly Pick<TestRun, 'trigger' | 'startedAt
   const durations = (filter: (run: Pick<TestRun, 'trigger'>) => boolean): number[] =>
     runs
       .filter((run) => run.completedAt && filter(run))
-      .map((run) => Date.parse(run.completedAt!) - Date.parse(run.startedAt))
+      .map((run) => Date.parse(defined(run.completedAt)) - Date.parse(run.startedAt))
       .filter((ms) => Number.isFinite(ms) && ms > 0)
       .slice(0, 10)
       .sort((left, right) => left - right);
   const same = durations((run) => run.trigger === trigger);
   const pool = same.length ? same : durations(() => true);
-  return pool.length ? pool[Math.floor(pool.length / 2)]! : null;
+  return pool.length ? defined(pool[Math.floor(pool.length / 2)]) : null;
 }
 
 function minutesHint(remainingMs: number): string {

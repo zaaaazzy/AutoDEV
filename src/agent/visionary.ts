@@ -3,12 +3,14 @@ import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
+import { COMPLETE_COVERAGE_SQL } from '../core/coverage-areas.js';
 import { sendPush } from '../core/push.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { CATEGORIES, shortTitle, TITLE_MAX } from '../core/validation.js';
 import type { RunnerOptions } from '../runner/runner.js';
 import { runAuthorAgent } from './requirements.js';
 import { readProjectFile } from './tool-paths.js';
+import { defined } from '../core/defined.js';
 
 /**
  * Visionär: liest das Projekt (nur lesend), schlägt begründete Erweiterungsideen vor und legt sie in Ideation an.
@@ -19,8 +21,6 @@ export const VISIONARY_AUTHOR = 'Visionär';
 export const VISIONARY_LIMIT_KEY = 'visionary_max_ideas';
 export const DEFAULT_VISIONARY_LIMIT = 5;
 export const MAX_VISIONARY_LIMIT = 8;
-/** Offene Läufe (angefragt oder laufend); je Projekt höchstens einer. */
-export const OPEN_RUN_STATUSES = ['requested', 'running'] as const;
 
 const IDEA_MARKER = '@@IDEA' as const;
 /** Datenbezug der Begründung: „stützt sich auf …“ mit einer konkreten Angabe danach. */
@@ -88,7 +88,7 @@ function category(value: unknown): string | null {
 /** Hat die Begründung einen konkreten Datenbezug („stützt sich auf <Bug, Bericht, Coverage …>“)? */
 export function hasDataReference(reason: string): boolean {
   const match = DATA_REFERENCE.exec(reason);
-  return Boolean(match && !VAGUE_REFERENCE.test(match[1]!.trim()));
+  return Boolean(match && !VAGUE_REFERENCE.test(defined(match[1]).trim()));
 }
 
 /** Marker-Zeilen mit JSON am Ende einer Antwort: Ideen (Visionär, Routinen), Bugs und Aufträge (Routinen). */
@@ -123,14 +123,14 @@ export function parseMarkerLines(
     const fenceMatch = CODE_FENCE.exec(raw);
     if (fenceMatch) {
       // Ein Block endet nur mit demselben Zeichen, mindestens so lang wie beim Öffnen.
-      const marks = fenceMatch[1]!;
+      const marks = defined(fenceMatch[1]);
       if (fence === null) fence = marks;
       else if (marks[0] === fence[0] && marks.length >= fence.length) fence = null;
       continue;
     }
     if (fence !== null) continue;
     // Vor dem Marker nur Einrückung und ein Listenpunkt; „@@IDEA“ trifft nicht „@@IDEAS“ o. ä.
-    const rest = raw.slice(LINE_START.exec(raw)![0].length);
+    const rest = raw.slice(defined(LINE_START.exec(raw))[0].length);
     const marker = markers.find((candidate) => new RegExp(`^${candidate}(?![A-Z_])`).test(rest));
     if (!marker) continue;
     const line = rest.trim();
@@ -489,10 +489,11 @@ export async function loadVisionaryContext(pool: Pool, slug: string, cwd: string
     ),
     rows(
       pool.query<{ area: string; lines: number | null; branches: number | null; tests: string }>(
+        // Wie die Übersicht: je Bereichsschlüssel der neueste vollständige Lauf.
         `SELECT DISTINCT ON (a.area) a.area, a.lines, a.branches,
                 a.unit_tests + a.component_tests + a.integration_tests + a.e2e_tests AS tests
            FROM test_coverage_areas a JOIN test_coverage_reports r ON r.id = a.report_id
-          WHERE r.project_slug = $1 ORDER BY a.area, r.created_at DESC`,
+          WHERE r.project_slug = $1 AND ${COMPLETE_COVERAGE_SQL} ORDER BY a.area, r.created_at DESC`,
         [slug],
       ),
     ),

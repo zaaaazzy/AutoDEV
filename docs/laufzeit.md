@@ -1,10 +1,10 @@
 # AIdeation zur Laufzeit
 
-Was der Worker wann tut, welcher Status welchen Schritt auslöst, wann welcher Agent startet und was er darf – abgeleitet aus dem Quellcode (`src/runner`, `src/agent`, `src/db/schema.ts`). Stand: 19.10.2026. Details zu Abläufen und Rechten stehen in „Workflows“ und „Agents und Rechte“.
+Was der Worker wann tut, welcher Status welchen Schritt auslöst, wann welcher Agent startet und was er darf – abgeleitet aus dem Quellcode (`src/runner`, `src/agent`, `src/db/schema.ts`). Erstfassung vom 19.10.2026, seither mit jedem Auftrag nachgeführt, der Worker, Agents oder Rechte ändert (letzter Abgleich: Git-Verlauf dieser Datei). Details zu Abläufen und Rechten stehen in „Workflows“ und „Agents und Rechte“.
 
 ## 1 · Prozesse und Takte
 
-Drei Prozesse laufen dauerhaft. Gearbeitet wird nur im Worker. Er läuft entweder als Compose-Dienst `worker` (Standard, Profil `worker`) oder auf dem Host (Mac, Linux oder Windows). Im Container ist er der einzige Dienst mit dem Docker-Socket. AIdeation-Ordner und Projektordner sind dort mit dem Pfad des Hosts eingebunden (unter Windows `/c/…`), damit die Pfade für `docker run` stimmen. Der Frontend-Container liefert die Oberfläche und leitet `/api` an den Backend-Container weiter. Der Backend-Container schreibt nur Wünsche in die Datenbank. Agents und Projekttests startet der Worker in kurzlebigen Containern der Docker-Sandbox (`DEV_LOG_AGENT_SANDBOX`, Standard `docker`). Der Host selbst führt keinen Code aus, den Agents geschrieben haben. Die Container hängen im internen Netzwerk `aideation-agents`. Hinaus kommen sie nur über den Egress-Proxy, und zwar nur zur Anthropic-API, zur npm-Registry und zu Ollama auf dem Host. LAN und AIdeation-Datenbank sind gesperrt.
+Drei Prozesse laufen dauerhaft. Gearbeitet wird nur im Worker. Er läuft entweder als Compose-Dienst `worker` (Standard, Profil `worker`) oder auf dem Host (Mac, Linux oder Windows). Im Container ist er der einzige Dienst mit dem Docker-Socket. AIdeation-Ordner und Projektordner sind dort mit dem Pfad des Hosts eingebunden (unter Windows `/c/…`), damit die Pfade für `docker run` stimmen. Der Frontend-Container liefert die Oberfläche und leitet `/api` an den Backend-Container weiter. Der Backend-Container schreibt nur Wünsche in die Datenbank. Agents und Projekttests startet der Worker im Arbeitscontainer des Projekts (`DEV_LOG_AGENT_SANDBOX`, Standard `workbench` auf dem Host, `src/core/workbench.ts`; der Compose-Dienst `worker` setzt `docker` und startet kurzlebige Container je Schritt): ein dauerhafter Compose-Stapel `agents_<projekt>` mit eigenem Docker (`docker:dind`) und den Testdiensten aus `.aideation/workbench.json`; lesende Rollen laufen in kurzlebigen Containern. Der Host selbst führt keinen Code aus, den Agents geschrieben haben. Die Container hängen im internen Netzwerk `aideation-agents`. Hinaus kommen sie nur über den Egress-Proxy, und zwar nur zur Anthropic-API, zur npm-Registry, zu Docker Hub und zu Ollama auf dem Host. LAN und AIdeation-Datenbank sind gesperrt.
 
 ```mermaid
 flowchart TB
@@ -18,19 +18,20 @@ flowchart TB
     P[("Projektordner<br/>AIdeation: AIdeation/agent")]
     subgraph SANDBOX["Docker-Sandbox · Netzwerk aideation-agents (intern)"]
       direction TB
-      AG["Agent-Container je Schritt<br/>Label aideation.run · Claude · Ollama-Befehle"]:::ok
-      TC["Testcontainer<br/>Gate · test:full · Abdeckung"]:::ok
+      WB["Arbeitscontainer agents_projekt<br/>workbench · docker:dind · Testdienste<br/>schreibende Schritte · Gate · test:full"]:::ok
+      AG["Kurzlebiger Container je Schritt<br/>Label aideation.run · lesende Rollen · Modus docker"]:::ok
       EG["Egress-Proxy aideation-egress"]:::wait
     end
   end
   API -->|"Wünsche: Status, Chat, Aufträge"| DB[("PostgreSQL")]
   W <-->|"liest Anfragen, schreibt Ergebnisse"| DB
+  W -->|"docker compose · exec"| WB
   W -->|"docker run --rm"| AG
-  W -->|"docker run --rm"| TC
+  WB -->|/workspace| P
   AG -->|"/workspace (lesende Rollen :ro)"| P
-  TC -->|/workspace| P
+  WB --> EG
   AG --> EG
-  EG -->|"nur Anthropic-API, npm, Ollama"| NET(["Internet / Ollama"])
+  EG -->|"nur Anthropic-API, npm, Docker Hub, Ollama"| NET(["Internet / Ollama"])
   AG -.-x|gesperrt| DB
   WD -.->|"prüft Dienst, HTTPS, DB, Worker"| DB
   WD -.->|Push| U
@@ -44,14 +45,18 @@ flowchart TB
 | ------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0,5 s         | Einrichtung        | Host-Aufgaben des Projekt-Assistenten (Ordner, Git, GitHub, Vorlagen, Agent-Tests), bis zu 4 parallel.                                                                                                                                                                                                                                |
 | 1,5 s         | Chat-Takt          | Nacheinander angestoßen, jede Spur höchstens einmal gleichzeitig: Testanforderung → _falls kein Chat läuft:_ Schnellschätzung → Auftragsautor (Ideen) → KI-Kommentar zum Sprintvorschlag → Visionär → Chat-Nachricht → Problemanalyse, danach Abnahmeprüfung.                                                                         |
-| 5 s           | Neustart           | „AIdeation neu starten“ (von Hand oder nach dem Sprint-Abschluss): wartet, bis nichts läuft (max. 15 min), prüft Branch `main` und sauberen Stand, bei geändertem Lockfile `npm ci --ignore-scripts` für den Worker (scheitert es: „fehlgeschlagen“, kein Neubau), `docker compose up -d --build` (im Container alle Dienste ausser `worker`, `worker-volumes` und `watchdog`, danach `docker compose build worker`), prüft bis 2 min `/health`; antwortet AIdeation nicht, zurück aufs vorherige Abbild + Push. Sonst beendet sich der Worker (Exit-Code 75). Neu gestartet wird er von `restart: unless-stopped` (Container), launchd/systemd bzw. unter Windows `run-with-env.ps1`. |
-| 15 s          | Heartbeat          | Worker-Badge, Modelle der System-Agents veröffentlichen; verwaiste Läufe aufräumen (`closeOrphanedRuns`, siehe `docs/workflows.md`); jede Minute Git-Verlauf, alle 5 min Favicon.                                                                                                                                                                                                                              |
+| 5 s           | Neustart           | „AIdeation neu starten“ (von Hand oder nach dem Sprint-Abschluss): wartet, bis nichts läuft (max. 15 min; in dieser Zeit per „Neustart abbrechen“ in der Statusleiste zurücknehmbar, `DELETE /api/system/restart`), prüft Branch `main` und sauberen Stand, bei geändertem Lockfile `npm ci --ignore-scripts` für den Worker (scheitert es: „fehlgeschlagen“, kein Neubau), `docker compose up -d --build` (im Container alle Dienste ausser `worker`, `worker-volumes` und `watchdog`, danach `docker compose build worker`), prüft bis 2 min `/health`; antwortet AIdeation nicht, zurück aufs vorherige Abbild + Push. Sonst beendet sich der Worker (Exit-Code 75). Neu gestartet wird er von `restart: unless-stopped` (Container), launchd/systemd bzw. unter Windows `run-with-env.ps1`. |
+| 5 s           | Review-Container   | `reviewSlots.sync()`: angeforderte Review-Container starten und beenden (Vorschau eines Auftrags- oder Sprint-Stands, eigener Port und Datenbank-Kopie).
+| 15 s          | Heartbeat          | Worker-Badge, Modelle der System-Agents veröffentlichen; verwaiste Läufe aufräumen (`closeOrphanedRuns`, siehe `docs/workflows.md`); bestätigte Git-Lösungen (`git_fix_requests`) und Rollbacks (`processRollback`) ausführen; Produktions-Rückkanal (`production.tick`: Health alle 2 min, Log-Scan alle 15 min); jede Minute Git-Verlauf und Sprint-Commits, alle 5 min Favicon.
+| 1 min         | Routinen-Planer    | Fällige zeitgesteuerte Routinen (`agent_tasks.next_run_at`) als Chat-Nachricht mit Herkunft „Routine“ einreihen (`scheduleRoutines`, `src/agent/routine.ts`); siehe `docs/agents-und-rechte.md`, Abschnitt 6.
+| 1 min         | GitHub-Brücke      | `syncGitHub` je Projekt mit Modus `issues` oder `issues+pr`: Issue-Import alle 5 min, Pull-Request-Status (`pollSprintReviews`) alle 2 min (`src/runner/github-sync.ts`).                                                                                                                                                                                                                              |
 | 30 s · sofort | Arbeitszyklus      | Sofort, wenn die Datenbank neue Arbeit meldet (`NOTIFY devlog_work`: Auftrag eingeplant, Sprint gestartet) oder ein Platz frei wird; sonst alle 30 s. `runWorkflow` je Projekt, höchstens **2 Projekte gleichzeitig** (Einstellung, max. 8); wer am längsten wartet, kommt zuerst. Ablauf in Abschnitt 4.                             |
-| 30 s · Job    | Wartungs-Jobs      | Projektübergreifend, nach jedem Arbeitszyklus im Hintergrund (nie zwei Durchgänge gleichzeitig): fällige aktive Zeilen aus `scheduled_jobs` beanspruchen (`FOR UPDATE SKIP LOCKED`, `next_run_at` + Intervall, Sperre `locked_until`), dann mit Zeitlimit (Standard 20–120 s, max. 300 s) ausführen. Nur feste Job-Arten aus `src/runner/scheduler.ts`; Status und Meldung landen in der Zeile. Einstellbar über `GET`/`PATCH /api/scheduled-jobs` (nur Administration). |
+| 30 s · Job    | Wartungs-Jobs      | Projektübergreifend, nach jedem Arbeitszyklus im Hintergrund (nie zwei Durchgänge gleichzeitig): fällige aktive Zeilen aus `scheduled_jobs` beanspruchen (`FOR UPDATE SKIP LOCKED`, `next_run_at` + Intervall, Sperre `locked_until`), dann mit Zeitlimit (Standard 20–300 s je Art, max. 300 s) ausführen. Nur feste Job-Arten aus `src/runner/scheduler.ts`; Status und Meldung landen in der Zeile. Einstellbar über `GET`/`PATCH /api/scheduled-jobs` (nur Administration). |
 | 6 h           | `backup_check`     | Neuestes `aideation-*.dump` in `./backups` (relativ zum AIdeation-Ordner): jünger als `maxAgeHours` (26), mindestens `minBytes` (1024), `pg_restore --list` mit Tabellendaten lesbar. Fehlender Ordner, fehlendes `pg_restore` oder kaputter Dump = „fehlgeschlagen“ + Push. |
 | 7 Tage        | `restore_probe`    | `scripts/restore.sh --probe` mit dem neuesten Backup: Wegwerf-Container `aideation_restore_probe_<zeit>` auf 127.0.0.1:5439, `pg_restore --exit-on-error --single-transaction`, Entschlüsselungs-Test mit `DEV_LOG_SECRET_KEY`, danach gelöscht (Zeitlimit 300 s). |
 | 15 min        | `watchdog_logs`    | Wächter-Prüfungen (`collectProblems`, ohne `git status`) im Worker; gleiche Probleme erst nach 6 h (`REMIND_MS`) erneut per Push, Merkzustand in der Datenbank.                                                                                                                                                                       |
 | 1 h · Fehler  | `push_alert`       | Push an Projektkreis (`config.project`) oder Administration, wenn ein beobachteter Job fehlgeschlagen ist; nach jedem Fehlschlag sofort fällig. Gleiche Fehlschläge erst nach 6 h wieder, Entwarnung einmal.                                                                                                                       |
+| 1 Tag · einmal | `bug_categories`  | Einmaliger Nachtrag der Bug-Kategorien (Migration 26): nur Bugs mit `category IS NULL`, in Stapeln zu 50, aus Pfaden, sonst lokales Modell (20 s je Bug). Stand in `state.cursor`, am Ende `state.done`; danach ändert kein Lauf mehr etwas. |
 | 1 Tag · aus   | `close_old_sprints`| Standardmäßig aus. Schliesst aktive, nicht pausierte Sprints über `completeSprint`, wenn alle Aufträge erledigt sind (`sprintSettled`), kein Agent läuft und seit `inactiveDays` (14, 1–365) nichts passiert ist.                                                                                                                  |
 | Start         | Wiederherstellung  | Zuerst die Prozessgruppen des alten Workers beenden: jeder Befehl (Agent-Schritte, Chat, Auftragsautor, Visionär, Testanforderungen, `npm test` …) steht während des Laufs mit PID und Startzeit in `agent_processes`. Lebt die PID noch, muss die Startzeit passen (sonst neu vergeben, nicht angefasst); ist nur der Gruppenführer weg, wird die Restgruppe beendet. Danach: unterbrochene Läufe → Auftrag wieder „Geplant“, Chat → „pending“, Testanforderungen „fehlgeschlagen“, Abnahmeprüfungen und Visionär neu angefragt, Neustart als „erledigt“ markiert. Lässt sich ein Altprozess nicht sicher beenden, wird nichts doppelt gestartet: Chat → „failed“, Aufträge nicht neu eingeplant, Eintrag bleibt für den nächsten Start. **Nur eigene oder verwaiste:** Läufe (`agent_runs.worker_id`) und Prozesse (`agent_processes.worker_id`) tragen die ID ihres Workers (`Rechner:Installationsordner:Bereich`, von Hand `DEV_LOG_WORKER_ID`), jeder Worker schreibt alle 20 s `runner_workers.last_seen`. Aufgeräumt wird nur, was dieselbe ID hat (der eigene Vorgänger) oder deren Worker seit 90 s schweigt; Schritte folgen ihrem Lauf. Altzeilen ohne ID: Läufe, wenn `worker_heartbeats` ihres Projekts alt ist, Prozesse immer. Lebt ein anderer Worker, bleiben Chat, Autor, Visionär, Analysen, Testanforderungen, Abnahmen und Git-Lösungen unberührt. Auch `closeOrphanedRuns` lässt die Läufe eines lebenden anderen Workers stehen. |
 | Signal        | Herunterfahren     | Alle Agent-Prozesse werden beendet; laufende Aufträge → „Geplant“, Chat → „pending“, Ideen in Arbeit → „requested“.                                                                                                                                                                                                                   |
@@ -108,20 +113,28 @@ stateDiagram-v2
   state "planned · Geplant" as planned
   state "in_progress · In Arbeit" as inprog
   state "done · Erledigt" as done
+  state "approval · Wartet auf Freigabe" as approval
   state "blocked · Blockiert" as blocked
   state "rejected · Abgelehnt" as rejected
   [*] --> backlog : Auftragsautor oder Mensch
   [*] --> planned : Bug-Auftrag (auto_run, hohe Priorität)
   backlog --> planned : Sprint aktiv (Arbeitszyklus) oder Play-Knopf
+  planned --> backlog : aus dem Sprint nehmen, Sprint abgebrochen
   planned --> inprog : Worker übernimmt (max. 3 je Zyklus)
-  inprog --> done : alle Agents bestanden und Merge ok
+  inprog --> done : alle Agents bestanden, Merge ok, keine Freigabe nötig
+  inprog --> approval : alle Agents bestanden, review_mode ui oder always
+  approval --> done : Mensch gibt frei, Worker mergt (processApprovals)
+  approval --> planned : Mensch weist zurück (erneuter Versuch)
   inprog --> blocked : Agent scheitert, Merge-Konflikt oder Budget erreicht
   inprog --> rejected : Agent meldet Verstoss gegen Projektregel
   inprog --> planned : Worker beendet (Unterbrechung)
   blocked --> planned : Erneut versuchen, Bugfix erfolgreich (max. 2), Ordner wieder da, Budget wieder frei
+  blocked --> backlog : Mensch nimmt ihn aus dem Sprint
   done --> [*]
   rejected --> [*]
 ```
+
+**Review-Freigabe (`projects.review_mode`):** `off` (Standard) mergt sofort nach dem letzten Agent. `ui` hält an, wenn der Auftrag Dateien der Oberfläche geändert hat, `always` bei jeder Änderung (`needsApproval` in `src/runner/review-gate.ts`). Der Auftrag steht dann auf „Wartet auf Freigabe“ mit `review_branch` und `review_base`; ein Mensch sieht ihn im Review-Container an und gibt frei oder weist zurück. Freigaben mergt der Worker zu Beginn jedes Arbeitszyklus und zwischen zwei Aufträgen (`processApprovals`).
 
 ### Play-Knopf (ein Agent)
 
@@ -146,23 +159,31 @@ API und Worker rufen beim Start `createDatabasePool` auf (`src/db/database.ts`).
 
 ## 4 · Arbeitszyklus `runWorkflow` (sofort bei neuer Arbeit, sonst alle 30 s)
 
+Reihenfolge aus `runWorkflow` in `src/runner/runner.ts`. Deploy-Befehle laufen nicht mehr nach jedem erfolgreichen Auftrag, sondern nur beim Live schalten (`goLive`, Teil der Git-Sicherung) und beim Rollback.
+
 Die Reihenfolge ist fest. Aufträge eines Zyklus laufen parallel, aber nur einer hält gleichzeitig die Umsetzungssperre (siehe Abschnitt 5).
 
 ```mermaid
 flowchart TD
-  A["1 Git-Aufträge der Sprints abarbeiten<br/>(Push, Pull, Sicherung abgeschlossener Sprints)"] --> B["2 Backlog-Aufträge im aktiven Sprint → planned"]
-  B --> C["3 Aufträge, die auf den Ordner gewartet haben → planned"]
-  C --> D["4 Sprint-Autopilot<br/>Sprint abschliessen oder nächsten starten"]
-  D --> E["5 Fehler-Nachtrag<br/>Bug-Berichte für alte Blockaden"]
-  E --> F{"6 Aufträge wählen<br/>planned, Sprint aktiv / Play / auto_run<br/>nicht express · max. 3<br/>Reihenfolge: Sprint-Rang, Priorität, Alter"}
-  F -->|keine| Z(["Ende des Zyklus"])
-  F -->|1 bis 3| G["7 Je Auftrag die Agent-Kette<br/>(parallel, Umsetzungssperre)"]:::ok
-  G --> H["8 Repo-Doku ins Dashboard spiegeln"]
-  H --> I{"mindestens ein Auftrag erfolgreich?"}
-  I -->|ja| J["9 Deploy-Befehle des Projekts"]:::ok
-  I -->|nein| K
-  J --> K["10 Sprint-Bericht des aktiven Sprints"]
-  K --> L["11 Git-Aufträge erneut abarbeiten"]
+  D0{"Neustart angefordert<br/>(Drain)?"} -->|ja| Z(["Ende des Zyklus"])
+  D0 -->|nein| A["1 Git-Aufträge der Sprints<br/>Push, Pull, Sicherung, Live schalten (goLive: Deploy)"]
+  A --> B["2 Backlog-Aufträge im aktiven Sprint → planned"]
+  B --> C["3 Aufräumen: Ordner wieder da, hängende Aufträge,<br/>Budget wieder frei, Aufträge aus geschlossenen Sprints lösen"]
+  C --> AP["4 Review-Freigaben mergen (processApprovals)<br/>Sprint fertig? → review_ready_at + Push"]
+  AP --> D["5 Sprint-Autopilot<br/>Sprint abschliessen oder nächsten starten"]
+  D --> E["6 Fehler-Nachtrag<br/>Bug-Berichte für alte Blockaden"]
+  E --> PS{"7 Phase pre_sprint fällig?"}
+  PS -->|"ja: Agent läuft, Zyklus endet"| Z
+  PS -->|nein| F{"8 Aufträge wählen<br/>planned, Sprint aktiv / Play / auto_run<br/>nicht express · max. 3<br/>Reihenfolge: Sprint-Rang, Priorität, Alter"}
+  F -->|keine| Z
+  F -->|"Tages- oder Sprintbudget erreicht"| HB["ein Auftrag wartet sichtbar<br/>(Aktion notwendig: Budget)"]:::wait
+  HB --> Z
+  F -->|1 bis 3| G["9 Je Auftrag die Agent-Kette,<br/>streng nacheinander (runSelectedItems);<br/>zwischen zwei Aufträgen Git-Sicherung und Live schalten"]:::ok
+  G --> SD{"Herunterfahren begonnen?"}
+  SD -->|ja| Z
+  SD -->|nein| H["10 Repo-Doku ins Dashboard spiegeln"]
+  H --> K["11 Sprint-Bericht des aktiven Sprints"]
+  K --> L["12 Git-Aufträge erneut abarbeiten"]
   L --> Z
   classDef ok fill:#e3f1e8,stroke:#2f8a57,color:#1d4d33
   classDef bad fill:#fbe9e4,stroke:#b4472f,color:#6b2717
@@ -172,7 +193,7 @@ flowchart TD
 
 ## 5 · Agent-Kette eines Auftrags
 
-Standard-Workflow jedes neuen Projekts (einmalig angelegt, danach frei änderbar). Reihenfolge: Phase, dann Position. Der erste gescheiterte Schritt beendet den Lauf.
+Standard-Workflow jedes neuen Projekts (`DEFAULT_AGENTS` in `src/api/agents.ts`, einmalig angelegt, danach frei änderbar unter Agents → Workflow). Reihenfolge: Phase, dann Position (`workflow_steps`). Der erste gescheiterte Schritt beendet den Lauf. Neben den drei Auftragsphasen gibt es `pre_sprint` (einmal beim Start eines Sprints, nur lesend, Ergebnis als Sprint-Hinweis in jeder Anweisung) sowie `on_done` und `on_rejected` (am Ende eines erfolgreichen bzw. gescheiterten Auftrags, ohne Einfluss auf sein Ergebnis); Details in `docs/workflows.md`, Abschnitt 4a.
 
 ```mermaid
 flowchart TB
@@ -186,15 +207,15 @@ flowchart TB
   end
   subgraph AFTER["after_task · Nachbereitung"]
     direction LR
-    C1["Tester<br/>Tests, Abnahme"] --> C2["Reviewer<br/>muss freigeben"] --> C3["Dokumentierer"] --> C4["Handbuch-Autoren"]
+    C1["Tester<br/>Tests, Abnahme"] --> C1b["Visueller Tester<br/><i>nur Frontend mit Vorschau-URL</i>"] --> C2["Reviewer<br/>muss freigeben"] --> C3["Dokumentierer"] --> C4["Handbuch-Autor,<br/>Benutzerhandbuch-Autor"]
   end
   A2 --> B0
   B1 --> C1
   C1 -.->|"rot: einmal zurück<br/>mit Rückmeldung"| B1
   C2 -.->|"abgelehnt: einmal zurück"| B1
   C4 --> S{"alle bestanden?"}:::wait
-  S -->|ja| OK["Commit, Merge --no-ff<br/>in den Sprint-Branch → done"]:::ok
-  S -->|nein| NO["WIP-Commit → blocked<br/>Bug + Problemanalyse"]:::bad
+  S -->|ja| OD["on_done-Agents"] --> OK["Commit, Merge --no-ff<br/>in den Sprint-Branch → done<br/>(oder approval, wenn Freigabe nötig)"]:::ok
+  S -->|nein| OR["on_rejected-Agents"] --> NO["WIP-Commit → blocked<br/>Bug + Problemanalyse"]:::bad
   classDef ok fill:#e3f1e8,stroke:#2f8a57,color:#1d4d33
   classDef bad fill:#fbe9e4,stroke:#b4472f,color:#6b2717
   classDef wait fill:#fdf1e0,stroke:#e08a1e,color:#5c3a0a
@@ -205,14 +226,14 @@ flowchart TB
 
 - Exit-Code 0 und nicht abgebrochen. Vorübergehender Fehler des Agents (Modell weg, überlastet, Rate-Limit, Zeitlimit): nach 30 s einmal wiederholt, wenn das Budget es noch erlaubt. Ergebnisse der Projekttests und der visuellen Prüfung werden nie wiederholt.
 - Tester mit eigener CLI: jedes Akzeptanzkriterium und jeder DoD-Punkt erfüllt (`@@ACCEPTANCE`); nur manuell prüfbare Punkte werden „Aktion notwendig“ + Push.
-- Reviewer: eindeutige Freigabe, sonst gescheitert.
+- Reviewer: eindeutige Freigabe, sonst gescheitert. Es zählen alle Urteilszeilen (`@@REVIEW: …` am Zeilenanfang); steht irgendwo „ÄNDERUNGEN NÖTIG“, gilt der Auftrag als abgelehnt, auch wenn später „FREIGEGEBEN“ folgt.
 - Kein `@@REGEL`-Einspruch (sonst Auftrag „rejected“).
 - Entwickler (lokales Modell) hat Dateien geändert oder „KEINE ÄNDERUNG NÖTIG“ gemeldet.
 
 ### Sperre und Parallelität
 
-- Ab dem ersten Agent, der Dateien ändert (Phase while_task, Entwickler, Tester), hält der Auftrag die Umsetzungssperre bis zum Merge.
-- Vorbereitung und Doku-Agents laufen parallel zur Umsetzung eines anderen Auftrags.
+- Aufträge eines Projekts laufen **streng nacheinander** (`runSelectedItems` in `src/runner/runner.ts`): Der Worker nimmt bis zu 3 geplante Aufträge je Zyklus, arbeitet sie aber einen nach dem anderen ab. Parallel laufen nur verschiedene Projekte (`maxConcurrentAgents`).
+- Ab dem ersten Agent, der Dateien ändert (Phase while_task, Entwickler, Tester), hält der Auftrag zusätzlich die Projektsperre (`withProjectLock`): Befehle des Assistenten, Tests und Git-Sync warten so lange.
 - Erneuter Versuch: bereits bestandene Agents werden übersprungen, ihre Ausgabe geht weiter.
 - Einzellauf (nur ein Agent über `agentId`): Die Änderungen werden nur auf dem Auftrags-Branch committet, der Branch bleibt stehen. Ohne Tester, Reviewer und Freigabe wird nichts in Sprint-Branch oder `main` gemergt. Der Auftrag geht zurück auf seinen vorherigen Status. Der nächste normale Ablauf setzt den Branch fort und mergt erst am Ende.
 - Zeitlimit je Schritt 30 min (Standard).
@@ -230,10 +251,11 @@ Wenn ein Schritt endgültig scheitert (nach Nachbesserung bzw. Wiederholung; Dok
 flowchart TD
   F["Schritt endgültig gescheitert<br/>(alle Phasen ausser Doku-Agents)"]:::bad --> R{"@@REGEL?"}
   R -->|ja| RJ["Status rejected<br/>+ Aktion notwendig"]:::bad
-  R -->|nein| EV{"Projektordner<br/>nicht erreichbar?"}
-  EV -->|ja| EN["blocked + Aktion notwendig<br/>startet von selbst neu,<br/>sobald der Ordner da ist"]:::wait
+  R -->|nein| EV{"Umgebung schuld?<br/>Projektordner weg oder<br/>Arbeitscontainer defekt"}
+  EV -->|"Ordner weg"| EN["blocked + Aktion notwendig<br/>startet von selbst neu,<br/>sobald der Ordner da ist"]:::wait
+  EV -->|"Sandbox defekt"| ES["blocked + Aktion notwendig<br/>Arbeitscontainer prüfen, kein Bug"]:::wait
   EV -->|nein| BUG{"Ist es selbst ein<br/>Bug-Auftrag?"}
-  BUG -->|ja| B1["Fix-Notiz am Bug,<br/>Problemanalyse angefragt<br/>kein weiterer Bug"]
+  BUG -->|ja| B1["Fix-Notiz am Bug,<br/>kein weiterer Bug;<br/>Problemanalyse nur mit auto_bugfix"]
   BUG -->|nein| AF{"Agent selbst gescheitert?<br/>Zeitlimit, Schleife, Schrittlimit,<br/>nichts geändert, Modell/Befehl fehlt"}
   AF -->|ja| A1["blocked, kein Bug-Bericht,<br/>Problemanalyse angefragt"]
   AF -->|nein| A2["Bug-Bericht (source agent)<br/>+ Problemanalyse angefragt<br/>(wenn auto_bugfix an)"]
@@ -284,7 +306,9 @@ stateDiagram-v2
   direction TB
   state "planned · Geplant" as sp
   state "active · Aktiv" as sa
+  state "review · Pull Request offen" as sr
   state "completed · Abgeschlossen" as sc
+  state "cancelled · Abgebrochen" as sx
   state "Git-Sicherung" as git {
     state "pending" as gp
     state "running" as gr
@@ -300,9 +324,17 @@ stateDiagram-v2
   }
   [*] --> sp : Mensch oder Übernehmen
   sp --> sa : Starten oder Autopilot in Arbeitszeit
-  sa --> sc : Mensch oder Autopilot, sobald nichts mehr offen
+  sa --> sa : fertig (sprintSettled) → review_ready_at, Push „Sprint fertig“
+  sa --> sc : Live schalten (Mensch) oder Autopilot mit „selbst live“
+  sa --> sr : Live schalten im GitHub-Modus issues+pr (gh pr create)
+  sr --> sc : CI grün und PR gemergt (pollSprintReviews, alle 2 min)
+  sp --> sx : Abbrechen
+  sa --> sx : Abbrechen (Agents stoppen, offene Aufträge ins Backlog)
+  sx --> sp : wieder planen
   sc --> gp : Datenbank-Trigger
 ```
+
+Live schalten (`goLive` in `src/runner/go-live.ts`) läuft als Teil der Git-Sicherung: Test-Gate, Merge nach `main`, Tag, Push, danach den Projektordner auf `main` nachziehen und die Deploy-Befehle ausführen (`production_deploys`).
 
 ### Autopilot (Beginn jedes Arbeitszyklus)
 
@@ -360,7 +392,14 @@ Jeder dieser Knöpfe (und „Erneut versuchen“, „Sprintvorschlag übernehmen
 | Aktionen → System → AIdeation neu starten (Admin)  | `app_settings` system:restart            | Neustart-Takt 5 s                                                                       |
 | Auftrag → Analysieren                              | `analysis_status` requested              | Analyse-Spur                                                                            |
 | Sprint → KI-Kommentar                              | `sprint_proposal_comments`               | Auftragsautor, nur Text                                                                 |
-| Sprint → Git hoch / runter                         | `git_sync` pending, push oder pull       | Arbeitszyklus, Schritt 1 und 11                                                         |
+| Sprint → Git hoch / runter                         | `git_sync` pending, push oder pull       | Arbeitszyklus, Schritt 1 und 12                                                         |
+| Sprint → Live schalten                             | Sprint `completed` (bzw. `review` im PR-Modus), `git_sync` pending | Arbeitszyklus, Schritt 1: Test-Gate, Merge, Tag, Push, Deploy (`goLive`)      |
+| Sprint / Auftrag → ▶ Review-Container              | `review_slots` requested                 | Review-Takt 5 s (`reviewSlots.sync()`)                                                 |
+| Auftrag → Freigeben / Zurückweisen                 | `review_approved_at` bzw. Status `planned` | Arbeitszyklus, Schritt 4 (`processApprovals`)                                         |
+| Bug → Für Agents freigeben                         | `bugs.approved_at` (`POST /api/bugs/:id/approve`) | Arbeitszyklus: der Behebungsauftrag darf starten                              |
+| Bug → Rollback bestätigen                          | `production_rollbacks` requested         | Heartbeat 15 s (`processRollback`), sobald kein Agent und kein Deploy läuft             |
+| Dashboard → Git-Hinweis → Lösung ausführen         | `git_fix_requests`                       | Heartbeat 15 s (`processGitFix`)                                                        |
+| Aktionen → Routine mit Zeitplan                    | `agent_tasks.next_run_at`                | Routinen-Planer 1 min → Chat-Spur mit Rolle `routine`                                   |
 
 Der Komplettlauf prüft im Agent-Worktree immer `main` (losgelöst ausgecheckt). Hat der Worktree offene Änderungen, etwa weil ein Auftrag nach dem Nutzungslimit mit halbfertigem Stand wartet, startet kein Test und es werden keine Bugs angelegt. Die Anforderung steht dann auf „fehlgeschlagen“ mit dem Grund „Offene Änderungen im Agent-Worktree … – Test auf main nicht möglich“.
 
@@ -376,18 +415,22 @@ Legende: ✅ erlaubt · ⚠️ eingeschränkt · ⛔ gesperrt
 | **Bug-Wächter** · `bug_reviewer`                                                          | direkt nach dem Autor; im Workflow nur, wenn keine Risiken da                                        | ✅ ja               | ⚠️ teils anlegen + ändern            | ⛔ nein                                                               | nur lesen                                       |
 | **Entwickler** · `developer`                                                              | while_task, mit Sperre und Auftrags-Branch                                                           | ✅ ja               | ✅ ja im Projekt                     | ✅ ja alle freigeschalteten Gruppen                                   | schreiben + Befehle + SQL, 80 Schritte, Backups |
 | **Tester** · `tester`                                                                     | after_task; auch Abnahmeprüfung auf Anfrage                                                          | ✅ ja               | ✅ ja                                | ✅ ja alle Gruppen                                                    | kein Modell: führt nur die Projekttests aus     |
+| **Visueller Tester** · `visual_tester`                                                    | after_task, nach dem Tester; nur Frontend/Fullstack mit Vorschau-URL                                 | ✅ ja               | ⛔ nein (Bilder nur temporär unter `.dev-log/visual/`) | ⛔ nein; eigener Befehl nur für das KI-Urteil                 | Playwright-Aufnahmen, optional Bildmodell       |
 | **Reviewer** · `reviewer`                                                                 | after_task, nach dem Tester                                                                          | ✅ ja               | ✅ ja                                | ✅ ja alle Gruppen                                                    | nur lesen                                       |
 | **Dokumentierer, Handbuch-Autoren** · `documenter`, `manual_writer`, `user_manual_writer` | after_task; Ausgabe wird Doku                                                                        | ✅ ja               | ⚠️ teils anlegen + ändern            | ⛔ nein                                                               | nur lesen                                       |
 | **Eigene Rolle** · `custom`                                                               | frei gewählte Phase                                                                                  | ✅ ja               | ⚠️ teils anlegen + ändern            | ⛔ nein                                                               | nur lesen                                       |
-| **Dashboard-Assistent** · `assistant`                                                     | Chat-Nachricht, Aktion                                                                               | ✅ ja + Dienst-Logs | ✅ ja                                | ✅ ja alle Gruppen; mit `--dangerously-skip-permissions` ohne Wächter | schreiben + Befehle + SQL + Docker/Git-Clone    |
+| **Dashboard-Assistent** · `assistant`                                                     | Chat-Nachricht, Aktion                                                                               | ✅ ja + Dienst-Logs | ✅ ja                                | ✅ ja alle Gruppen; mit `--dangerously-skip-permissions` ohne Wächter | schreiben + Befehle + SQL + Dienst-Aktionen (`service_action`) + Git-Clone |
+| **Routine** · `routine` (Assistent mit Zeitplan)                                          | Routinen-Planer, jede Minute                                                                         | ✅ ja               | ⛔ nein                              | ✅ ja freigegebene Gruppen unter dem Wächter, nie Vollzugriff          | Befehle, keine Datei-Werkzeuge                  |
 | **Problemanalyse** · `analyst`                                                            | analysis_status requested                                                                            | ✅ ja               | ⛔ nein                              | ⛔ nein                                                               | nur lesen                                       |
 | **Visionär** · `visionary`                                                                | Knopfdruck                                                                                           | ✅ ja               | ⛔ nein                              | ⛔ nein                                                               | nur lesen                                       |
+| **Vor dem Sprint** · `pre_sprint`                                                         | einmal beim Sprint-Start                                                                             | ✅ ja               | ⛔ nein                              | ⛔ nein                                                               | nur lesen                                       |
 
 ### Gruppen, die Projekte freischalten
 
 - **Dateien** (immer), **Diagnose** (ps, lsof, netstat, WebFetch localhost), **Dienst-Logs** (~/Library/Logs), **Projekt-Datenbank** (nur lokales Modell).
-- **Build und Tests** (npm test/run, npx --no-install ng/tsc/vitest/playwright), **Pakete** (npm install/ci --ignore-scripts), **Git** (status, diff, log, fetch, pull --ff-only – kein checkout: den Branch eines Auftrags verwaltet AIdeation), **Docker** (compose ps/logs/up/stop/…), **Projekt-Dienste** (launchctl kickstart ch.*).
-- Eigene Gruppen je Projekt, nur Administration; Regeln mit „DevLog“, .env oder .ssh werden abgelehnt.
+- **Build und Tests** (npm test/run, npx --no-install ng/tsc/vitest/playwright), **Pakete** (npm install/ci --ignore-scripts), **Git** (status, diff, log, fetch, pull --ff-only – kein checkout: den Branch eines Auftrags verwaltet AIdeation), **Projekt-Dienste** (`services.status|logs|restart|up|stop` über den Worker, keine Shell-Regel). Eine Gruppe „Docker“ gibt es nicht mehr.
+- **Prüfbefehle** (`checks`: `npm audit`, `npm outdated`, `git ls-files`, `git grep`) nur für Routinen.
+- Eigene Gruppen je Projekt, nur Administration; Regeln mit `.env`, `.ssh`, `.aws`, `.gnupg`, DevLog bzw. AIdeation werden abgelehnt.
 
 ### Was der Wächter immer sperrt
 
@@ -429,6 +472,14 @@ Modell nicht erreichbar, überlastet, Rate-Limit, Verbindungsabbruch oder Zeitli
 - Geschwärzt wird vor dem Kürzen. Ein Secret, das über eine Schnittkante reicht, wird dort ganz entfernt. Geschnitten wird nie mitten in einem Emoji (Surrogate-Paar). stdout und stderr haben je einen eigenen UTF-8-Decoder, deshalb bleiben Umlaute auf Chunk-Grenzen ganz.
 - Claude-CLI (`stream-json`): stdout und stderr haben getrennte Zeilenpuffer, und nur stdout wird als Ereignis gelesen. stderr kann so keine JSON-Zeile zerreissen und kein gefälschtes `result` einschleusen. Die letzte Zeile ohne Zeilenumbruch wird beim Abschluss gelesen. Fehlt das `result`-Ereignis bei Exit-Code 0, gilt der Schritt als fehlgeschlagen, nicht als Erfolg mit Kosten 0. Die Live-Ausgabe wird höchstens alle 500 ms neu zusammengesetzt, der lesbare Text ist auf die letzten rund 120 000 Zeichen begrenzt.
 
+### Fehlerantworten der API
+
+`src/api/error-handler.ts` ist die letzte Middleware in `createDevLogApp`. Unbekannte Pfade (jede Methode) ergeben ein JSON-404, ein zu grosser Body 413, kaputtes JSON 400, alles andere 500. Die Antwort ist immer `{ "message": … }` und enthält nie Stacktrace oder Fehlertext; der Fehler steht nur im Server-Log. Das JSON-Limit ist 256 KB (Doku-Höchstlänge `MAX_DOC_CONTENT` = 30 000 Zeichen, bis 6 Byte je Zeichen). Ein Session-Cookie mit ungültiger Prozentkodierung gilt als nicht angemeldet (401).
+
+### Transaktionen
+
+Mehrstufige Änderungen der API laufen über `withTransaction(pool, async (client) => …)` aus `src/db/transaction.ts`: eine feste Verbindung, `BEGIN`/`COMMIT`, bei Fehler `ROLLBACK`, `release()` immer im `finally` (scheitert das `ROLLBACK`, wird die Verbindung verworfen). Alle Abfragen in der Funktion müssen über `client` laufen. Je Idee gibt es höchstens einen Auftrag (Teilindex `development_items_ideation_idx`, Migration 19); ein Verstoss (`23505`, `isUniqueViolation`) ergibt beim Übernehmen und beim Anlegen eines Auftrags 409. Transaktional sind Übernehmen und Löschen eines Auftrags, Projekt löschen (mit Ordner-Job), Kategorie löschen (mit Bereinigung der Agents) sowie Benutzer anlegen und ändern.
+
 ### Sofortstart
 
 Datenbank-Trigger melden neue Arbeit per `NOTIFY`; der Worker legt sofort los. Das 30-s-Intervall bleibt als Absicherung.
@@ -436,6 +487,8 @@ Datenbank-Trigger melden neue Arbeit per `NOTIFY`; der Worker legt sofort los. D
 ### Budget und Modell-Routing
 
 Einstellungen → Budget: Limits je Tag, Sprint und Auftrag (Tokens/USD), Anzeige in USD oder CHF zum festen Kurs, Routing-Regeln und Modell je Stufe. Dashboard-Kachel „Budget heute / Sprint“, Statistik mit Verbrauch gegen Budget, Verbrauch je Modell und geschätzter Ersparnis durch das Routing. Der Auftragsautor bekommt die Median-Ist-Werte erledigter Aufträge derselben Kategorie in den Prompt (sichtbar im Prompt-Protokoll der Statistik). „Erneut versuchen“ startet ein neues Auftragsbudget.
+
+Kostenlimits werden auf Cent gerundet (Spalte `NUMERIC(10, 2)`). Werte unter 0,01 USD lehnt `PUT /api/projects/:slug/budget` mit 400 ab. Alle Änderungen eines Speicherns laufen in einer Transaktion: Scheitert ein Teil, bleibt nichts halb gespeichert.
 
 #### Token-Limits je Agent-Rolle
 
@@ -472,7 +525,7 @@ Neustart des Workers: Nach „restarting“ beendet sich der Worker mit `RESTART
 - **Backoff statt harter Sperre:** Die ersten 10 Fehlversuche je Schlüssel sind frei. Danach heißt es 1 min warten, jeder weitere Fehlversuch verdoppelt die Wartezeit bis höchstens 15 min. Nach 15 min ohne Fehlversuch beginnt der Zähler neu, eine erfolgreiche Anmeldung setzt ihn zurück. Die Antwort ist 429 mit `Retry-After`.
 - **Limit je Herkunft:** höchstens 300 Fehlversuche pro Minute über alle Benutzernamen. Massen-Logins mit Zufallsnamen kosten dadurch weder CPU noch Speicher, andere Adressen bleiben frei.
 - **Speicher:** Beide Tabellen haben höchstens 10 000 Einträge. Beim Einfügen werden zuerst abgelaufene, dann die ältesten Einträge gelöscht.
-- **Client-IP:** kommt aus `X-Forwarded-For`, aber nur von Proxys aus `DEV_LOG_TRUST_PROXY`. Erlaubt sind `1` (genau ein Hop, Compose), `loopback`, `linklocal`, `uniquelocal` sowie IP- oder CIDR-Angaben. `true`, `*` oder andere Hop-Zahlen werden mit Warnung verworfen; dann gilt die Socket-Adresse (`trustProxySetting`). `1` setzt voraus, dass nginx den Header durch genau eine Adresse ersetzt (`deploy/frontend/nginx.conf`, siehe `installation.md`, „Client-IP hinter nginx“).
+- **Client-IP:** kommt aus `X-Forwarded-For`, aber nur von Proxys aus `DEV_LOG_TRUST_PROXY`. Erlaubt sind `1` (genau ein Hop, Compose), `loopback`, `linklocal`, `uniquelocal` sowie IP- oder CIDR-Angaben. `true`, `*` oder andere Hop-Zahlen werden mit Warnung verworfen; dann gilt die Socket-Adresse (`trustProxySetting`). `1` setzt voraus, dass nginx den Header durch genau eine Adresse ersetzt (`deploy/frontend/nginx.conf`, siehe `betrieb.md`, „Client-IP hinter nginx“).
 
 ### Log-Scan im Produktions-Rückkanal
 
@@ -495,6 +548,14 @@ Der Review-Container (Worker-Takt 5 s, `src/runner/review-slots.ts`) führt Code
 - **npm-Cache je Projekt:** Volume `aideation_review_npm_<projekt>` statt eines gemeinsamen Caches.
 - **Eigener DB-User:** `DEV_LOG_REVIEW_DATABASE_URL` im Worker zeigt auf einen User ohne Superuser-Rechte und auf dessen Basis-Datenbank (`scripts/setup-review-db.sh` legt beides an und entzieht `PUBLIC` das `CONNECT` auf `aideation` und `postgres`). Projekte ohne eigene Datenbank bekommen damit die leere Slot-Datenbank `aideation_review_<n>` (`REVIEW_DATABASE_URL`, `DATABASE_URL`). Angelegt wird sie vom Worker, und zwar über die Basis-Datenbank, nie über `postgres`. Projekte mit eigener Datenbank bekommen wie bisher eine Kopie `<db>_review_<n>`.
 - **Kein Rückfall:** Fehlt der Review-User, gleicht er dem Haupt-User (User, Passwort oder Datenbank) oder enthielte das Env das Haupt-DB-Passwort, den Haupt-User oder die DB `postgres`, dann wird der Container gar nicht erst gestartet. Der Slot steht dann auf „fehlgeschlagen“ mit Meldung, Docker-Ausgaben werden maskiert. Das betrifft nur den Review-Container, nicht den Auftrag und nicht den Autofix.
+
+### Frontend-Polling: Git-Verlauf und Review-Container
+
+- Alle Takte im Frontend laufen über `visibleInterval` und pausieren in verborgenen Tabs.
+- Der Git-Verlauf (`git-graph.store.ts`) behält bei einem Ladefehler den letzten Stand und setzt nur `error`. Leer wird er nur beim Projektwechsel.
+- `/api/review-slots` laden alle `app-sprint-review`-Instanzen über einen gemeinsamen Poll (`core/shared-poll.ts`, `ReviewLaunchService.watchSlots()`): ein Abruf je Takt, egal wie viele Sprints aufgeklappt sind.
+- `app-sprint-review` wird nur bei Sprints mit Status `planned`, `active` oder `review` eingebunden (`sprintReviewable`).
+- Details: `docs/auftraege/git-verlauf-sprint-review-fehlerzustand-polling-2026-10-29.md`.
 
 ## Parallele Testläufe
 

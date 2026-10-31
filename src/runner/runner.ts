@@ -126,14 +126,10 @@ async function resumePosition(
   const corrected = [...count(rows.map(keyOf))].some(([key, times]) => times > (planned.get(key) ?? times));
   const steps = corrected ? ordered.map((agent) => latest.get(keyOfAgent(agent))) : rows;
   let position = 0;
-  while (
-    position < ordered.length &&
-    steps[position] &&
-    ordered[position] &&
-    keyOf(steps[position]!) === keyOfAgent(ordered[position]!)
-  ) {
+  while (position < ordered.length) {
     const step = steps[position];
-    if (!step) break;
+    const agent = ordered[position];
+    if (!step || !agent || keyOf(step) !== keyOfAgent(agent)) break;
     if (step.status !== AGENT_STEP_STATUS.passed) break;
     done.push({ agentName: step.agent_name, phase: step.phase, status: 'passed', output: step.output });
     position += 1;
@@ -271,6 +267,8 @@ export async function runWorkItem(
   const folderAtStart = folderAvailable(options.cwd);
   let budgetStop: BudgetState | null = null;
   let overrunStop: OverrunState | null = null;
+  // Vom Benutzer abgebrochen (auch Sprint-Abbruch): danach startet kein Agent des Auftrags mehr.
+  let cancelled = false;
   // Agents that change the working tree (developer, tester) hold the project lock from their first step until the
   // order is settled, so no other order edits files while this one is tested and committed.
   let releaseTree: (() => void) | undefined;
@@ -378,6 +376,12 @@ export async function runWorkItem(
       const outcome = await runStep(ctx, agent, position, ordered.length, { stepPosition, canCorrect });
       stepPosition += 1;
       if (outcome.interrupted) interrupted = true;
+      // Abgebrochen: keine Nachbesserung, kein nächster Agent und kein „Bei abgelehnt“.
+      if (outcome.cancelled) {
+        cancelled = true;
+        passed = false;
+        break;
+      }
       // Budget vor dem neuen Versuch nach einem vorübergehenden Fehler erreicht: anhalten wie vor einem Schritt.
       if (outcome.budget) {
         budgetStop = outcome.budget;
@@ -405,9 +409,9 @@ export async function runWorkItem(
       position += 1;
     }
     // Ende des Auftrags: „Bei abgeschlossen“ bzw. „Bei abgelehnt“ – noch vor dem Abschluss, damit ihre Änderungen im
-    // Commit des Auftrags landen. Sie ändern das Ergebnis nicht. Nicht bei Unterbrechung, Kostenbremse oder
+    // Commit des Auftrags landen. Sie ändern das Ergebnis nicht. Nicht bei Unterbrechung, Kostenbremse, Abbruch oder
     // überschrittener Schätzung (der Stopp soll gerade keinen weiteren Agent starten).
-    if (!interrupted && !budgetStop && !overrunStop && !item.agentId && !isShuttingDown()) {
+    if (!interrupted && !budgetStop && !overrunStop && !cancelled && !item.agentId && !isShuttingDown()) {
       const phase = passed ? 'on_done' : 'on_rejected';
       const observers = agents.filter((agent) => agent.phase === phase);
       const last = ctx.done.at(-1);
@@ -428,11 +432,13 @@ export async function runWorkItem(
           ctx.sprintName = sprint?.name ?? null;
           ctx.branch = await enterOrderBranch(options.cwd, item, sprint, ctx.execute);
         }
-        await runStep(ctx, agent, ordered.length + index, ordered.length + observers.length, {
+        const observed = await runStep(ctx, agent, ordered.length + index, ordered.length + observers.length, {
           stepPosition,
           observer: { outcome },
         });
         stepPosition += 1;
+        // Ein Beobachter abgebrochen: die übrigen starten auch nicht mehr.
+        if (observed.cancelled) break;
       }
     }
   } catch (error) {

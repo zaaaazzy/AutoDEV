@@ -81,7 +81,7 @@ export function requireDatabaseUrl(environment: NodeJS.ProcessEnv = process.env)
   if (url) return url;
   throw new Error(
     'DEV_LOG_DATABASE_URL fehlt – weder in der Umgebung noch in der .env der Installation. ' +
-      './start.sh --setup ausführen (schreibt die .env) und den Dienst neu installieren (docs/installation.md).',
+      './start.sh --setup ausführen (schreibt die .env) und den Dienst neu installieren (docs/betrieb.md).',
   );
 }
 

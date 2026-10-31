@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { DEMO_SLUG, seedDemoProject } from '../../e2e/demo/seed.js';
+import { defined } from '../../src/core/defined.js';
 
 /** Ordner des Beispielprojekts im Projektbereich; er bleibt leer, das Projekt besteht nur aus Daten. */
 export const DEMO_FOLDER = 'velowerk-beispiel';
@@ -92,14 +93,16 @@ export async function installDemoProject(
   log(`Lege das Beispielprojekt „Velowerk“ an (Ordner ${folder}) …`);
   await seedDemoProject(pool, folder);
   await freezeDemoProject(pool);
-  const counts = (
-    await pool.query<{ sprints: string; orders: string; bugs: string }>(
-      `SELECT (SELECT count(*) FROM sprints WHERE project_slug = $1) AS sprints,
+  const counts = defined(
+    (
+      await pool.query<{ sprints: string; orders: string; bugs: string }>(
+        `SELECT (SELECT count(*) FROM sprints WHERE project_slug = $1) AS sprints,
               (SELECT count(*) FROM development_items WHERE project_slug = $1) AS orders,
               (SELECT count(*) FROM bugs WHERE project_slug = $1) AS bugs`,
-      [DEMO_SLUG],
-    )
-  ).rows[0]!;
+        [DEMO_SLUG],
+      )
+    ).rows[0],
+  );
   log(
     `Beispielprojekt angelegt: ${counts.sprints} Sprints, ${counts.orders} Aufträge, ${counts.bugs} Bugs. Der laufende Sprint ist pausiert – Agents starten erst, wenn du ihn fortsetzt.`,
   );

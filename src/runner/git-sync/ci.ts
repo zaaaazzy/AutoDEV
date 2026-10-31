@@ -5,9 +5,10 @@ import { join } from 'node:path';
 import { type CommandExecutor, redactOutput } from '../../core/command.js';
 import { GIT_TIMEOUT_MS, type GitHelpers, SECRET_CONTENT } from './git-helpers.js';
 import { gitEnvironment, runProjectCommand } from '../project-command.js';
+import { defined } from '../../core/defined.js';
 
 // Projekttests können den kompletten Oberflächentest mit Playwright enthalten (Desktop und Handy).
-const TEST_TIMEOUT_MS = 45 * 60_000;
+export const TEST_TIMEOUT_MS = 45 * 60_000;
 
 const CI_WORKFLOW = join('.github', 'workflows', 'devlog-ci.yml');
 const CI_WAIT_MS = 30 * 60_000;
@@ -182,7 +183,7 @@ const SUMMARY_CHARS = 1_000;
  * das bestand sonst oft aus bestandenen Tests vom Ende des Laufs und verschwieg die Ursache.
  */
 export function gateFailureSummary(output: string): string {
-  const red = [...new Set([...output.matchAll(/━━ (.+?): rot ━━/g)].map((match) => match[1]!.trim()))];
+  const red = [...new Set([...output.matchAll(/━━ (.+?): rot ━━/g)].map((match) => defined(match[1]).trim()))];
   const findings = [
     ...new Set(
       output
@@ -241,5 +242,6 @@ export function ciLogExcerpt(log: string, environment: NodeJS.ProcessEnv = proce
     .split('\n')
     .filter((line) => line.trim());
   const tail = lines.slice(-CI_LOG_LINES).join('\n');
-  return tail.length > CI_LOG_CHARS ? `…${tail.slice(-CI_LOG_CHARS)}` : tail;
+  // Mit dem Auslassungszeichen höchstens CI_LOG_CHARS Zeichen.
+  return tail.length > CI_LOG_CHARS ? `…${tail.slice(-(CI_LOG_CHARS - 1))}` : tail;
 }

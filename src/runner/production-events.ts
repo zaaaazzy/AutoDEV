@@ -5,6 +5,7 @@ import { BUG_STATUS } from '../core/status.js';
 import { maskSecrets } from '../core/secret-mask.js';
 import { shortTitle } from '../core/validation.js';
 import { queueBugFix } from './autofix.js';
+import { defined } from '../core/defined.js';
 
 /**
  * Produktions-Rückkanal: Fehler der betreuten Anwendung (Health-URL, Compose-Logs, Ingest-Endpunkt) werden
@@ -259,17 +260,19 @@ export async function recordEvent(
   let result: RecordResult;
   try {
     await client.query('BEGIN');
-    const event = (
-      await client.query<{ id: string; bugId: string | null }>(
-        `INSERT INTO production_events (project_slug, fingerprint, source, origin, count, sample, first_seen, last_seen)
+    const event = defined(
+      (
+        await client.query<{ id: string; bugId: string | null }>(
+          `INSERT INTO production_events (project_slug, fingerprint, source, origin, count, sample, first_seen, last_seen)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
          ON CONFLICT (project_slug, fingerprint) DO UPDATE
            SET count = production_events.count + EXCLUDED.count, last_seen = EXCLUDED.last_seen,
                sample = EXCLUDED.sample, origin = EXCLUDED.origin
          RETURNING id, bug_id AS "bugId"`,
-        [project, print, error.source, (error.origin ?? '').slice(0, 200), count, sample, now],
-      )
-    ).rows[0]!;
+          [project, print, error.source, (error.origin ?? '').slice(0, 200), count, sample, now],
+        )
+      ).rows[0],
+    );
     const perHour = Number(
       (
         await client.query<{ count: number }>(
@@ -306,20 +309,22 @@ export async function recordEvent(
     }
     let bugId = bug ? event.bugId : null;
     if (action === 'create') {
-      bugId = (
-        await client.query<{ id: string }>(
-          `INSERT INTO bugs (project_slug, title, description, severity, source, category)
+      bugId = defined(
+        (
+          await client.query<{ id: string }>(
+            `INSERT INTO bugs (project_slug, title, description, severity, source, category)
            VALUES ($1, $2, $3, $4, 'production', $5) RETURNING id`,
-          [
-            project,
-            error.title ??
-              `Betrieb: ${shortTitle(firstLine(plainExternalText(maskSecrets(error.message), 500)) || 'Unbekannter Fehler', 90)}`,
-            bugDescription(error, print, sample),
-            severity,
-            categoryFor(error),
-          ],
-        )
-      ).rows[0]!.id;
+            [
+              project,
+              error.title ??
+                `Betrieb: ${shortTitle(firstLine(plainExternalText(maskSecrets(error.message), 500)) || 'Unbekannter Fehler', 90)}`,
+              bugDescription(error, print, sample),
+              severity,
+              categoryFor(error),
+            ],
+          )
+        ).rows[0],
+      ).id;
       await client.query('UPDATE production_events SET bug_id = $2, deploy_suspect = $3 WHERE id = $1', [
         event.id,
         bugId,
@@ -333,7 +338,7 @@ export async function recordEvent(
                 fix_notes = CASE WHEN fix_notes = '' THEN $4 ELSE fix_notes || E'\n\n' || $4 END,
                 approved_at = NULL, approved_by = NULL
           WHERE id = $1`,
-        [bugId, now, higherSeverity(bug!.severity, severity), note],
+        [bugId, now, higherSeverity(defined(bug).severity, severity), note],
       );
       await client.query('UPDATE production_events SET deploy_suspect = $2 WHERE id = $1', [
         event.id,

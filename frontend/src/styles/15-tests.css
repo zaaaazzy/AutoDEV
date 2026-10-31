@@ -63,7 +63,7 @@
   box-shadow: 0 0 0 2px rgb(36 99 78 / 18%);
 }
 .test-category.has-failures {
-  border-left: 4px solid #c2604b;
+  border-left: 4px solid var(--error-muted);
 }
 .test-category.idle {
   background: var(--surface-soft);
@@ -96,7 +96,7 @@
   background: #3f8a63;
 }
 .test-bar .fail {
-  background: #c2604b;
+  background: var(--error-muted);
 }
 .test-bar .skip {
   background: #b9c0b8;
@@ -275,7 +275,7 @@
   background: #3f8a63;
 }
 .test-history-bars .bar.failed {
-  background: #c2604b;
+  background: var(--error-muted);
 }
 
 /* Der gerade angezeigte Lauf: höher und mit Markierung darunter */
@@ -406,7 +406,7 @@
   overflow-wrap: anywhere;
 }
 .step-issues li.issue-error {
-  border-left-color: #c2604b;
+  border-left-color: var(--error-muted);
   background: #fdf3f0;
 }
 .issue-level {

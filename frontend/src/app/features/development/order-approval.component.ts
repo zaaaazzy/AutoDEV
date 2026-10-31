@@ -1,8 +1,9 @@
 import { Component, DestroyRef, computed, inject, input } from '@angular/core';
-import type { DevelopmentItem, ReviewSlot } from '../../core/models.js';
+import type { DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
-import { WaitStatusComponent } from '../runs/wait-status.component.js';
 import { OrderService } from './order.service.js';
+import { freeReviewSlot, orderReviewSlot, reviewLaunchable } from './review-box.js';
+import { ReviewSlotStatusComponent } from './review-slot-status.component.js';
 import { ReviewStateService } from './review-state.service.js';
 import { GitAlertComponent } from '../../shared/git-alert.component.js';
 
@@ -13,7 +14,7 @@ import { GitAlertComponent } from '../../shared/git-alert.component.js';
 @Component({
   selector: 'app-order-approval',
   standalone: true,
-  imports: [GitAlertComponent, WaitStatusComponent],
+  imports: [GitAlertComponent, ReviewSlotStatusComponent],
   template: `
     @let item = order();
     <div class="approval-box">
@@ -37,17 +38,7 @@ import { GitAlertComponent } from '../../shared/git-alert.component.js';
         @if (!review.configured) {
           <p class="muted">Kein Review-Befehl eingestellt – unter Einstellungen → Review-Freigabe ergänzen.</p>
         } @else if (shown(); as slot) {
-          <p class="approval-instance">
-            <span class="approval-dot" [class]="slot.status"></span>
-            {{ slot.status === 'running' && wait.status() ? 'Review ' + slot.slot : instanceLabel() }}
-            @if (slot.status === 'running') {
-              · <a [href]="slot.url" target="_blank" rel="noopener">Review {{ slot.slot }} öffnen ↗</a>
-            }
-          </p>
-          <app-wait-status #wait />
-          @if (slot.status === 'failed' && slot.message) {
-            <pre class="approval-log">{{ slot.message }}</pre>
-          }
+          <app-review-slot-status [slot]="slot" />
         } @else if (!review.slots.some(free)) {
           <p class="muted">
             Alle Review-Container sind belegt – mit „Im Review-Container anzeigen“ übernimmst du einen.
@@ -67,7 +58,7 @@ import { GitAlertComponent } from '../../shared/git-alert.component.js';
               ↩ Zurückweisen
             </button>
           }
-          @if (state()?.configured && (!shown() || shown()?.status === 'failed')) {
+          @if (state()?.configured && launchable()) {
             <button class="button secondary" type="button" [disabled]="busy()" (click)="show(item)">
               {{ shown() ? '↻ Review-Container neu starten' : '👀 Im Review-Container anzeigen' }}
             </button>
@@ -88,23 +79,9 @@ export class OrderApprovalComponent {
   readonly withActions = input(true);
   protected readonly state = this.review.state;
   /** Review-Container, der diesen Auftrag zeigt (bzw. für ihn angefordert ist). */
-  protected readonly shown = computed(
-    () => this.state()?.slots.find((slot) => slot.developmentId === this.order().id && slot.status !== 'idle') ?? null,
-  );
-  protected readonly free = (slot: ReviewSlot): boolean => slot.enabled && slot.status === 'idle';
-  protected readonly instanceLabel = computed(() => {
-    const slot = this.shown();
-    switch (slot?.status) {
-      case 'running':
-        return `Review ${slot.slot} läuft`;
-      case 'starting':
-        return `Review ${slot.slot} startet (Abhängigkeiten, Datenbank-Kopie) …`;
-      case 'failed':
-        return `Review ${slot.slot} konnte nicht starten`;
-      default:
-        return 'Wird gestartet …';
-    }
-  });
+  protected readonly shown = computed(() => orderReviewSlot(this.state()?.slots, this.order().id));
+  protected readonly launchable = computed(() => reviewLaunchable(this.shown()));
+  protected readonly free = freeReviewSlot;
 
   constructor() {
     // Solange der Auftrag wartet, den Stand der Review-Instanz nachladen – ein gemeinsamer Poll für alle Boxen.
@@ -119,9 +96,7 @@ export class OrderApprovalComponent {
     return this.orders.rejectReview(item);
   }
 
-  protected async show(item: DevelopmentItem): Promise<void> {
-    const slug = this.store.activeProject();
-    await this.orders.showReview(item);
-    if (this.store.isActive(slug)) await this.review.refresh();
+  protected show(item: DevelopmentItem): Promise<void> {
+    return this.review.launch(item);
   }
 }

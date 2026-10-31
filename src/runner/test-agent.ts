@@ -223,7 +223,8 @@ export async function runTestAgent(options: TestAgentOptions, pool: Pool): Promi
           onSpawn: (value) => {
             pid = value;
           },
-          // Im Testcontainer beendet erst docker kill den Lauf, nicht das Signal an den Client allein.
+          // Im Container beendet erst der Executor den Lauf (docker kill bzw. kill der Prozessgruppe im
+          // Arbeitscontainer), nicht das Signal an den Client allein.
           ...(options.execute ? { signal: options.signal } : {}),
         });
     options.signal?.removeEventListener('abort', abort);

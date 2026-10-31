@@ -118,20 +118,26 @@ test('Nutzungslimit des Agent-Kontos: Agent-Fehler ohne Bug, Neustart erst nach 
   const now = new Date('2026-10-20T23:16:00+02:00');
   const reset = usageLimitReset(output, now);
   assert.ok(reset, 'Reset-Zeit erkannt');
-  // 00:40 Uhr des Folgetags plus drei Minuten Reserve.
-  assert.equal(reset.getHours(), 0);
-  assert.equal(reset.getMinutes(), 43);
+  // 00:40 Uhr (Zürich, MESZ) des Folgetags plus drei Minuten Reserve – unabhängig von der Zeitzone des Workers.
+  assert.equal(reset.toISOString(), '2026-10-20T22:43:00.000Z');
   assert.ok(reset.getTime() > now.getTime());
   // Wochenlimit mit Datum, Nachmittagszeit.
   const weekly = usageLimitReset("You've hit your weekly limit · resets Oct 24 at 3pm (Europe/Zurich)", now);
-  assert.equal(weekly?.getMonth(), 9);
-  assert.equal(weekly?.getDate(), 24);
-  assert.equal(weekly?.getHours(), 15);
-  // Ausgabenlimit (zwei Wörter vor „limit“): ebenfalls Agent-Fehler, Reset aus der Meldung.
+  assert.equal(weekly?.toISOString(), '2026-10-24T13:03:00.000Z');
+  // Ausgabenlimit (zwei Wörter vor „limit“): ebenfalls Agent-Fehler, Reset aus der Meldung (heute schon vorbei).
   const spend =
     "You've hit your monthly spend limit · raise it at https://claude.ai/settings/usage · your session limit resets 8:50pm (Europe/Zurich)";
   assert.equal(isAgentFailure(spend), true);
-  assert.equal(usageLimitReset(spend, now)?.getHours(), 20);
+  assert.equal(usageLimitReset(spend, now)?.toISOString(), '2026-10-21T18:53:00.000Z');
+  // Limit der Organisation (drei Wörter, Apostroph), Reset in UTC: ebenfalls Agent-Fehler, kein Bug.
+  const org =
+    "You've hit your org's monthly spend limit · ask your admin to raise it at https://claude.ai/admin-settings/usage · your session limit resets 10:20pm (UTC)";
+  assert.equal(isAgentFailure(org), true);
+  assert.equal(usageLimitReset(org, now)?.toISOString(), '2026-10-20T22:23:00.000Z');
+  assert.equal(isAgentFailure(org.replace("org's", 'org’s')), true, 'typografischer Apostroph');
+  // Mittagszeit in UTC, Reset noch am selben Tag.
+  const orgReset = usageLimitReset(org.replace('10:20pm', '12:20pm'), new Date('2026-10-30T12:15:58Z'));
+  assert.equal(orgReset?.toISOString(), '2026-10-30T12:23:00.000Z');
   // Ohne lesbare Zeit: eine Stunde später. Ohne Limit-Meldung: nichts.
   const vague = usageLimitReset("You've hit your usage limit.", now);
   assert.equal(vague?.getTime(), now.getTime() + 60 * 60_000);
@@ -148,4 +154,23 @@ test('failureDetail: abgelehnte Abnahme oder nur grüne Tests ergeben keine irre
   assert.equal(failureDetail(green), null);
   const rejected = `${green}\n## Abnahme nicht bestanden\n- DoD 1 „Kriterium“: Abdeckung nicht messbar`;
   assert.equal(failureDetail(rejected), null);
+});
+
+test('Defekter Arbeitscontainer wird erkannt, ein roter Test oder ein fehlendes Fixture nicht', async () => {
+  const { isSandboxFailure } = await import('./autofix.js');
+  for (const output of [
+    'Sandbox: Der Befehl ist im Image „aideation-agent“ nicht ausführbar (Exit-Code 127).',
+    'Arbeitscontainer: Abhängigkeiten liessen sich nicht installieren (Exit-Code 254). Befehl nicht gestartet.',
+    'npm error Log files were not written due to an error writing to the directory: /home/agent/.npm/_logs',
+    'Error response from daemon: No such exec instance: 7b6620d2a9e1',
+  ]) {
+    assert.equal(isSandboxFailure(output), true, output);
+  }
+  for (const output of [
+    'AssertionError: expected 2 to equal 3',
+    "ENOENT: no such file or directory, open 'fixtures/a.json'",
+    'Die Sandbox: ein Begriff im Fliesstext',
+  ]) {
+    assert.equal(isSandboxFailure(output), false, output);
+  }
 });

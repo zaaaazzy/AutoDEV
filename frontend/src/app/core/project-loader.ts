@@ -7,7 +7,8 @@ import {
   type DocRevision,
   type Agent,
   type Attachment,
-  CoverageReport,
+  type CoverageHistoryPoint,
+  type CoverageReport,
   type Bug,
   type DevelopmentItem,
   type DocumentEntry,
@@ -17,6 +18,7 @@ import {
   type ProjectStats,
   type Sprint,
   type SprintReport,
+  type TestEvidence,
   type TestRun,
   type WorkerStatus,
 } from './models.js';
@@ -42,9 +44,11 @@ export async function fetchProjectData(api: ApiService, slug: string): Promise<L
     api.get<{ docs?: DocumentEntry[] }>(`${base}/docs`),
     api.get<{ reports?: SprintReport[] }>(`${base}/sprint-reports`),
     api.get<{ attachments?: Attachment[] }>(`${base}/attachments`),
-    api.get<{ report?: CoverageReport | null }>(`${base}/coverage`),
+    api.get<{ report?: Omit<CoverageReport, 'history'> | null }>(`${base}/coverage`),
     api.get<{ checks?: AcceptanceCheck[]; defaults?: AcceptanceDefaults }>(`${base}/acceptance`),
     api.get<{ revisions?: DocRevision[] }>(`${base}/doc-revisions`),
+    api.get<{ evidence?: TestEvidence[]; testRunning?: boolean }>(`${base}/test-evidence`),
+    api.get<{ history?: CoverageHistoryPoint[] }>(`${base}/coverage/history`),
   ]);
 
   const data = emptyProjectData();
@@ -64,15 +68,25 @@ export async function fetchProjectData(api: ApiService, slug: string): Promise<L
     coverage,
     acceptance,
     revisions,
+    evidence,
+    coverageHistory,
   ] = results;
+  if (evidence.status === 'fulfilled') {
+    data.evidence = evidence.value.evidence ?? [];
+    data.testRunning = evidence.value.testRunning === true;
+  } else failed.push('evidence', 'testRunning');
   if (revisions.status === 'fulfilled') data.docRevisions = revisions.value.revisions ?? [];
   else failed.push('docRevisions');
   if (acceptance.status === 'fulfilled') {
     data.acceptance = acceptance.value.checks ?? [];
     data.acceptanceDefaults = acceptance.value.defaults ?? null;
   } else failed.push('acceptance', 'acceptanceDefaults');
-  if (coverage.status === 'fulfilled') data.coverage = coverage.value.report ?? null;
-  else failed.push('coverage');
+  // Ohne Verlauf bleibt die Übersicht vollständig; der Verlauf ist dann leer.
+  if (coverage.status === 'fulfilled') {
+    const report = coverage.value.report ?? null;
+    const history = coverageHistory.status === 'fulfilled' ? (coverageHistory.value.history ?? []) : [];
+    data.coverage = report ? { ...report, history } : null;
+  } else failed.push('coverage');
   if (attachments.status === 'fulfilled') data.attachments = attachments.value.attachments ?? [];
   else errors.attachments = errorMessage(attachments.reason, 'Bilder konnten nicht geladen werden.');
   if (board.status === 'fulfilled') {

@@ -1,8 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CommandExecutor } from '../core/command.js';
-import type { CoverageArea, CoverageReport } from './coverage.js';
+import { canonicalArea, COVERAGE_AREA_KEYS, type CoverageAreaKey } from '../core/coverage-areas.js';
+import { type CoverageArea, type CoverageReport, validateCoverage } from './coverage.js';
 import { runProjectCommand } from './project-command.js';
+import { defined } from '../core/defined.js';
 
 /**
  * Eigene Abdeckungsmessung von AIdeation: Für Testbefehle, deren npm-Skript den Node-Test-Runner nutzt
@@ -33,19 +35,22 @@ export function parseNodeCoverage(
   };
 }
 
-/** Lesbarer Bereichsname aus dem Workspace-Namen („mainty-backend“ → „Backend“). */
-export function areaName(workspace: string): string {
+/**
+ * Fester Bereich zum Workspace-Namen über dieselbe Zuordnung wie Migration 25 („mainty-backend“ → backend). Ohne
+ * Workspace (Messung im Projektordner selbst) ist es „gesamt“. Ein Workspace ohne passenden Bereich (z. B.
+ * „builder“) ergibt null: Die Messung wird verworfen, statt einen neuen Bereich anzulegen.
+ */
+export function areaName(workspace: string | null): CoverageAreaKey | null {
+  if (!workspace) return 'gesamt';
   const name = workspace.replace(/^@[^/]+\//, '');
+  const exact = canonicalArea(name);
+  if (exact) return exact;
   // Nur ganze Namensteile (getrennt durch -, _, / usw.): „builder“ ist kein „ui“, „rapid“ keine „api“.
-  const word = (words: string) => new RegExp(`(?:^|[^a-z0-9])(?:${words})s?(?=$|[^a-z0-9])`, 'i');
-  for (const [pattern, label] of [
-    [word('backend|server|api'), 'Backend'],
-    [word('frontend|web|ui|client'), 'Frontend'],
-    [word('contract|shared|common'), 'Contracts'],
-  ] as const) {
-    if (pattern.test(name)) return label;
+  for (const part of name.toLowerCase().split(/[^a-z0-9]+/)) {
+    const area = canonicalArea(part) ?? canonicalArea(part.replace(/s$/, ''));
+    if (area && area !== 'gesamt' && area !== 'auftrag') return area;
   }
-  return name || 'Projekt';
+  return null;
 }
 
 export interface TestRunner {
@@ -121,6 +126,15 @@ async function workspaceDir(cwd: string, name: string): Promise<string | null> {
   return null;
 }
 
+/**
+ * Bereich einer Messung im Projektordner selbst: über den Paketnamen („shop-backend“ → backend, „dev-log“ → gesamt);
+ * passt er zu keinem Bereich, deckt der Lauf das ganze Projekt ab („gesamt“).
+ */
+async function projectArea(dir: string): Promise<CoverageAreaKey> {
+  const name = (await packageJson(dir))?.name;
+  return (name && areaName(name)) || 'gesamt';
+}
+
 export async function measureCoverage(
   cwd: string,
   commands: string[][],
@@ -134,13 +148,22 @@ export async function measureCoverage(
     const direct = directRunner(command);
     if (direct) {
       const measured = await coverageRun(cwd, direct, execute);
-      if (measured) areas.push(coverageArea(areaName((await packageJson(cwd))?.name ?? 'Projekt'), measured));
+      if (measured) areas.push(coverageArea(await projectArea(cwd), measured));
       continue;
     }
     if (command[0] !== 'npm' || command[1] !== 'test') continue;
     const workspace = command.find((part) => part.startsWith('--workspace='))?.slice('--workspace='.length);
     const dir = workspace ? await workspaceDir(cwd, workspace) : cwd;
     if (!dir) continue;
+    const area = workspace
+      ? (areaName(workspace) ?? areaName((await packageJson(dir))?.name ?? workspace))
+      : await projectArea(dir);
+    if (!area) {
+      const message = `Abdeckung nicht gemessen: Workspace „${workspace}“ passt zu keinem Bereich (${COVERAGE_AREA_KEYS.join(', ')}).`;
+      console.warn(`[coverage] ${message}`);
+      onRefused?.(message);
+      continue;
+    }
     const scripts = (await packageJson(dir))?.scripts ?? {};
     const runner = testRunnerOf(scripts.test?.trim() ?? '', scripts);
     if (!runner) {
@@ -163,7 +186,7 @@ export async function measureCoverage(
     if (!prepared) continue;
     const measured = await coverageRun(dir, runner, execute);
     if (!measured) continue;
-    areas.push(coverageArea(areaName(workspace ?? (await packageJson(dir))?.name ?? 'Projekt'), measured));
+    areas.push(coverageArea(area, measured));
   }
   return areas;
 }
@@ -178,7 +201,7 @@ export function directRunner(command: string[]): Pick<TestRunner, 'binary' | 'ar
   const index = command.findIndex((part, position) => /^(tsx|node)$/.test(part) && command[position + 1] === '--test');
   if (index < 0 || !RUNNER_PREFIXES.has(command.slice(0, index).join(' '))) return null;
   const args = command.slice(index + 2).filter((part) => !part.startsWith('--test-coverage') && part !== COVERAGE_FLAG);
-  return { binary: command[index]!, args };
+  return { binary: defined(command[index]), args };
 }
 
 /** Startet den Testläufer mit Abdeckung (gefiltertes Environment) und liest das Ergebnis. */
@@ -208,7 +231,10 @@ async function coverageRun(
   return result && parseNodeCoverage(result.output);
 }
 
-function coverageArea(area: string, measured: NonNullable<ReturnType<typeof parseNodeCoverage>>): CoverageArea {
+function coverageArea(
+  area: CoverageAreaKey,
+  measured: NonNullable<ReturnType<typeof parseNodeCoverage>>,
+): CoverageArea {
   return {
     area,
     unit: measured.passed + measured.failed,
@@ -220,12 +246,25 @@ function coverageArea(area: string, measured: NonNullable<ReturnType<typeof pars
   };
 }
 
-/** Ergänzt den Bericht des Testers um die gemessenen Werte (gemessene Prozente haben Vorrang). */
-export function mergeCoverage(report: CoverageReport | null, measured: CoverageArea[]): CoverageReport | null {
-  if (!measured.length) return report;
-  const areas = [...(report?.areas ?? [])];
-  for (const entry of measured) {
-    const existing = areas.find((area) => area.area.toLowerCase() === entry.area.toLowerCase());
+/**
+ * Ergänzt den (bereits geprüften) Bericht des Testers um die gemessenen Werte; gemessene Prozente haben Vorrang.
+ * Jede Messung läuft durch denselben Validator wie die Meldung des Testers: Ungültige Messungen (z. B. 0 Tests)
+ * werden verworfen, errors nennt den Grund. report = null, wenn kein gültiger Bericht übrig bleibt.
+ */
+export function mergeCoverage(
+  report: CoverageReport | null,
+  measured: CoverageArea[],
+): { report: CoverageReport | null; errors: string[] } {
+  const errors: string[] = [];
+  const valid = measured.filter((entry) => {
+    const checked = validateCoverage({ areas: [entry] });
+    if (!checked.ok) errors.push(...checked.errors.map((error) => `Messung durch AIdeation verworfen: ${error}`));
+    return checked.ok;
+  });
+  if (!valid.length) return { report, errors };
+  const areas = (report?.areas ?? []).map((area) => ({ ...area }));
+  for (const entry of valid) {
+    const existing = areas.find((area) => area.area === entry.area);
     if (existing) {
       Object.assign(existing, {
         lines: entry.lines,
@@ -235,12 +274,14 @@ export function mergeCoverage(report: CoverageReport | null, measured: CoverageA
         failed: existing.failed || entry.failed,
         unit: existing.unit + existing.component + existing.integration + existing.e2e ? existing.unit : entry.unit,
       });
-    } else areas.push(entry);
+    } else areas.push({ ...entry });
   }
-  const note = `**Gemessen von AIdeation:** ${measured
+  const note = `**Gemessen von AIdeation:** ${valid
     .map(
       (area) => `${area.area} ${area.lines} % Zeilen, ${area.branches} % Verzweigungen, ${area.functions} % Funktionen`,
     )
     .join(' · ')}`;
-  return { summary: report?.summary ? `${report.summary}\n\n${note}` : note, areas };
+  const merged = validateCoverage({ summary: report?.summary ? `${report.summary}\n\n${note}` : note, areas });
+  if (!merged.ok) return { report: null, errors: [...errors, ...merged.errors] };
+  return { report: merged.report, errors };
 }

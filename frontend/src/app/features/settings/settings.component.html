@@ -43,9 +43,14 @@
             <label class="wide"
               >Docker-Sandbox für Agents und Projekttests
               <select name="agentSandbox" [(ngModel)]="settings.agentSandbox">
-                <option value="">Wie global (DEV_LOG_AGENT_SANDBOX, Standard Docker)</option>
+                <option value="">Wie global (DEV_LOG_AGENT_SANDBOX, Standard Arbeitscontainer)</option>
+                <option value="workbench">
+                  Arbeitscontainer – eigener Container je Projekt mit eigenem Docker und Testdiensten
+                </option>
+                <option value="docker">
+                  Docker – jeder Agent-Schritt läuft in einem neuen Container „aideation-agent“
+                </option>
                 <option value="off">Aus (Notfallmodus) – Agents und Tests laufen direkt auf dem Rechner</option>
-                <option value="docker">Docker – jeder Agent-Schritt läuft im Container „aideation-agent“</option>
               </select>
             </label>
             <label class="wide"
@@ -326,7 +331,7 @@
                 @if (!githubRemote()) {
                   Nur mit einem GitHub-Repository (github.com) möglich.
                 } @else if ((project.githubMode ?? 'aus') === 'aus') {
-                  Aus – Dev Log ruft GitHub nicht auf. Die Anmeldung wird geprüft, sobald ein Modus gespeichert ist.
+                  Aus – AIdeation ruft GitHub nicht auf. Die Anmeldung wird geprüft, sobald ein Modus gespeichert ist.
                 } @else if (project.githubAuth === 'ok') {
                   ✓ Angemeldet (gh auth status{{
                     project.githubAuthCheckedAt
@@ -350,7 +355,8 @@
               Issues mit Label <code>idea</code> bzw. <code>bug</code> werden alle 5 Minuten als Idee bzw. Bug
               übernommen (Bilder nur als Link); Statuswechsel kommen als Kommentar ins Issue, „erledigt“ schließt es. Im
               PR-Modus öffnet der Sprint-Abschluss einen Pull Request und merged erst nach grüner CI. Es wird kein Token
-              gespeichert: Dev Log nutzt die Anmeldung der GitHub CLI (<code>gh auth login</code>) des Worker-Benutzers.
+              gespeichert: AIdeation nutzt die Anmeldung der GitHub CLI (<code>gh auth login</code>) des
+              Worker-Benutzers.
             </p>
           </div>
         </details>

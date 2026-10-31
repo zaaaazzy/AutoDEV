@@ -10,10 +10,13 @@ import {
 import { categoryColumn } from '../../shared/data-table/columns.js';
 import { formatHours, formatMoney, formatNumber } from '../../shared/format.js';
 import type { BudgetOverview, ProjectStats } from '../../core/models.js';
+import { errorText, estimateTrend } from './estimate-trend.js';
 import { BudgetMeterComponent } from '../../shared/budget-meter.component.js';
 import { categoryLabel } from '../../shared/labels.js';
 import { DateTimePipe, HoursPipe, LocaleNumberPipe } from '../../shared/pipes.js';
+import { CHART_HEIGHT, CHART_WIDTH, chartY, COVERAGE_TARGET, coverageSeries } from './coverage-history.js';
 import { QualityPanelComponent } from './quality-panel.component.js';
+import { CoverageTrendComponent } from './coverage-trend.component.js';
 import { calibrationText, hitRateText } from './stats-text.js';
 
 interface Usage {
@@ -107,6 +110,7 @@ type SprintVelocity = ProjectStats['velocity'][number];
     HoursPipe,
     LocaleNumberPipe,
     QualityPanelComponent,
+    CoverageTrendComponent,
     BudgetMeterComponent,
     DateTimePipe,
   ],
@@ -120,8 +124,13 @@ export class StatsComponent {
   protected readonly budget = signal<BudgetOverview | null>(null);
   protected readonly prompts = signal<PromptEntry[]>([]);
   protected readonly error = signal('');
+  protected readonly coverage = computed(() => coverageSeries(this.store.data().coverage?.history ?? []));
+  protected readonly chart = { width: CHART_WIDTH, height: CHART_HEIGHT, target: chartY(COVERAGE_TARGET) };
+  protected readonly coverageTarget = COVERAGE_TARGET;
   protected readonly ratioText = ratioText;
   protected readonly shortRatio = shortRatio;
+  protected readonly errorText = errorText;
+  protected readonly estimateTrend = computed(() => estimateTrend(this.store.data().stats?.velocity ?? []));
   protected readonly kindLabel = (key: string): string => KIND_LABELS[key] ?? key;
   protected readonly categoryLabel = (key: string): string => (key === 'none' ? 'Ohne Bereich' : categoryLabel(key));
 

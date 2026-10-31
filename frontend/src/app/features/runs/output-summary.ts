@@ -1,4 +1,5 @@
 import { summarizeTestOutput } from '../../shared/test-output.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 /** Eine Meldung aus der Ausgabe (gleiche Meldungen zusammengefasst), z. B. eine Build-Warnung mit Datei:Zeile. */
 export interface OutputIssue {
@@ -20,7 +21,7 @@ export interface OutputSummary {
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
 const MAX_ISSUES = 30;
 
-/** Absolute Pfade auf den Projektteil kürzen (…/DevLog/frontend/src/x.ts → frontend/src/x.ts). */
+/** Absolute Pfade auf den Projektteil kürzen (…/AIdeation/frontend/src/x.ts → frontend/src/x.ts). */
 function shortPath(path: string): string {
   return path.trim().replace(/^.*?\/((?:src|frontend|e2e|scripts|docs|test|tests|lib|app)\/)/, '$1');
 }
@@ -49,18 +50,24 @@ function parseBuild(lines: string[], summary: OutputSummary): boolean {
     const inTable = (index: number) =>
       lines[index]?.includes('|') || (!lines[index]?.trim() && lines[index + 1]?.includes('|'));
     for (let index = header + 1; index < lines.length && inTable(index); index++) {
-      if (!lines[index]!.trim()) continue;
-      const cells = lines[index]!.split('|').map((cell) => cell.trim());
+      if (!defined(lines[index]).trim()) continue;
+      const cells = defined(lines[index])
+        .split('|')
+        .map((cell) => cell.trim());
       if (cells.every((cell) => !cell)) continue;
       rows.push(cells);
     }
-    const headers = lines[header]!.split('|').map((cell) => cell.trim());
+    const headers = defined(lines[header])
+      .split('|')
+      .map((cell) => cell.trim());
     summary.table = { title: 'Bundle', headers: ['Datei', ...headers.slice(1)], rows };
     const total = rows.find((row) => /total/i.test(row[1] ?? ''));
     if (total) summary.facts.push({ label: 'Gesamtgröße', value: `${total[2]} (übertragen ${total[3]})` });
   }
   for (let index = 0; index < lines.length; index++) {
-    const match = /^[▲✘X]\s*\[(WARNING|ERROR)\]\s*(?:(\w+\d+):\s*)?(.+?)(?:\s*\[plugin [^\]]+\])?$/.exec(lines[index]!);
+    const match = /^[▲✘X]\s*\[(WARNING|ERROR)\]\s*(?:(\w+\d+):\s*)?(.+?)(?:\s*\[plugin [^\]]+\])?$/.exec(
+      defined(lines[index]),
+    );
     if (!match) continue;
     found = true;
     const location = lines
@@ -70,7 +77,7 @@ function parseBuild(lines: string[], summary: OutputSummary): boolean {
     addIssue(summary.issues, {
       level: match[1] === 'ERROR' ? 'error' : 'warning',
       code: match[2] ?? '',
-      message: match[3]!.trim(),
+      message: defined(match[3]).trim(),
       location: location ? shortPath(location) : '',
     });
   }
@@ -100,15 +107,15 @@ function parseLint(lines: string[], summary: OutputSummary): boolean {
     else
       byRule.set(key, {
         level: match[3] as 'error' | 'warning',
-        code: match[5]!,
-        message: match[4]!,
+        code: defined(match[5]),
+        message: defined(match[4]),
         location: `${file}:${match[1]}`,
         count: 1,
       });
   }
   if (!total && !byRule.size) return false;
   if (total) {
-    summary.facts.push({ label: 'Fehler', value: total[2]! }, { label: 'Warnungen', value: total[3]! });
+    summary.facts.push({ label: 'Fehler', value: defined(total[2]) }, { label: 'Warnungen', value: defined(total[3]) });
   }
   summary.issues.push(
     ...[...byRule.values()].sort((left, right) =>
@@ -127,9 +134,9 @@ function parseTypeScript(lines: string[], summary: OutputSummary): boolean {
     found = true;
     addIssue(summary.issues, {
       level: 'error',
-      code: match[4]!,
-      message: match[5]!,
-      location: `${shortPath(match[1]!)}:${match[2]}`,
+      code: defined(match[4]),
+      message: defined(match[5]),
+      location: `${shortPath(defined(match[1]))}:${match[2]}`,
     });
   }
   return found;
@@ -161,7 +168,7 @@ function parseTap(text: string, lines: string[], summary: OutputSummary): boolea
   if (duration !== null) summary.facts.push({ label: 'Dauer', value: `${(duration / 1000).toFixed(1)} s` });
   for (const line of lines) {
     const failed = /^not ok \d+ - (.+)$/.exec(line);
-    if (failed) addIssue(summary.issues, { level: 'error', code: 'Test', message: failed[1]!, location: '' });
+    if (failed) addIssue(summary.issues, { level: 'error', code: 'Test', message: defined(failed[1]), location: '' });
   }
   return true;
 }
@@ -180,7 +187,12 @@ function parsePlaywright(text: string, lines: string[], summary: OutputSummary):
   for (const line of lines) {
     const match = /^\s*✘\s+\d+\s+\[([^\]]+)\]\s+›\s+(\S+?):\d+:\d+\s+›\s+(.+?)(?:\s+\([\d.]+m?s\))?\s*$/.exec(line);
     if (match)
-      addIssue(summary.issues, { level: 'error', code: match[1]!, message: match[3]!, location: shortPath(match[2]!) });
+      addIssue(summary.issues, {
+        level: 'error',
+        code: defined(match[1]),
+        message: defined(match[3]),
+        location: shortPath(defined(match[2])),
+      });
   }
   return true;
 }

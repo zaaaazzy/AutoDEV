@@ -9,6 +9,8 @@ import { NgClass } from '@angular/common';
 import { Component, computed, inject } from '@angular/core';
 import { AgentActivityService } from '../../core/agent-activity.service.js';
 import type { DevelopmentItem } from '../../core/models.js';
+import { OVERRUN_FACTOR } from '../../../../../src/core/estimate-overrun.js';
+import { overrunText } from './estimate-overruns.js';
 import { ProjectStore } from '../../core/project-store.js';
 import {
   CATEGORIES,
@@ -26,6 +28,7 @@ import { ideaPhase, OPEN_IDEA_STATUSES, type IdeaPhase } from '../ideation/idea-
 import { agentWorkload, newestSprints, opensActions, ORDER_STATUSES, ORDER_TONES } from './order-shares.js';
 import { GitAlertComponent } from '../../shared/git-alert.component.js';
 import { WaitStatusComponent } from '../runs/wait-status.component.js';
+import { ProviderLimitAlertComponent } from './provider-limit-alert.component.js';
 
 const RECENT_RUNS = 20;
 /** Farbtöne der Agents in der Verteilung; Rot und Orange bleiben Fehlern und Warnungen vorbehalten. */
@@ -40,6 +43,7 @@ const WORKLOAD_TONES = ['active', 'plain', 'ok', 'info', 'wait'];
   standalone: true,
   imports: [
     GitAlertComponent,
+    ProviderLimitAlertComponent,
     WaitStatusComponent,
     NgClass,
     AgentListComponent,
@@ -72,6 +76,11 @@ export class DashboardComponent {
   protected readonly data = this.store.data;
   protected readonly worker = this.store.worker;
   protected readonly recentRuns = RECENT_RUNS;
+
+  /** Laufende Aufträge über der Dreifach-Schwelle (berechnet in der API, siehe src/core/estimate-overrun.ts). */
+  protected readonly overruns = computed(() => this.data().stats?.overruns ?? []);
+  protected readonly overrunFactor = OVERRUN_FACTOR;
+  protected readonly overrunText = overrunText;
 
   protected readonly activeSprint = computed(
     () => this.data().sprints.find((sprint) => sprint.status === 'active') ?? null,
