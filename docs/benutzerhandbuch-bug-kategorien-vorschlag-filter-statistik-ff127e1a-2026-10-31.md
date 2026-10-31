@@ -6,7 +6,7 @@ Auftrag ff127e1a-6b7d-4358-a136-f9be1f6ca313 (Feature). Dieses Kapitel beschreib
 
 > **Printscreens:** keine. Auf dem Agent-Host ist kein Browser installiert, und der Browser-Cache ist für den Agenten gesperrt. Die Aufnahmen stehen in Abschnitt 9 als Liste mit dem nötigen Zustand. Die Beschreibungen stammen aus dem Code (`src/api/bugs.ts`, `src/agent/bug-category.ts`, `src/agent/bug-classifier.ts`, `src/api/stats.ts`, `frontend/src/app/features/bugs/bugs.component.html` und `.ts`, `bug-stats.ts`, `bug-category-matrix.component.ts`, `frontend/src/app/features/stats/stats.component.html`).
 
-> **Tests:** In diesem Lauf wurden keine Tests ausgeführt. Ob die Oberfläche so arbeitet, wie hier beschrieben, bestätigt der Tester.
+> **Tests:** Der Tester-Lauf meldet 95 Tests, davon 93 bestanden und 2 fehlgeschlagen. Welche zwei es sind, steht im Testprotokoll nicht. Der Entwickler behebt sie, danach prüft der Tester erneut. In diesem Lauf habe ich selbst keine Tests ausgeführt. Ob die Oberfläche so arbeitet, wie hier beschrieben, bestätigt der Tester.
 
 ---
 
@@ -220,7 +220,7 @@ Diese Aufnahmen fehlen noch. Sie entstehen auf einem Host mit laufender App und 
 
 Die folgenden Prüfungen sind **nicht** erfolgt:
 
-1. `npm run typecheck`, `npm test`, die Frontend-Specs (`bug-stats.spec.ts`, `bug-form.spec.ts`) und `e2e/full-ui.check.ts`. Die Tests zuerst ohne Abdeckungs-Flags starten (`npx --no-install tsx --test …`).
+1. Die zwei fehlgeschlagenen Tests aus dem Tester-Lauf (95 Tests, 93 bestanden) sind noch nicht benannt und nicht behoben. Danach `npm run typecheck`, `npm test`, die Frontend-Specs (`bug-stats.spec.ts`, `bug-form.spec.ts`) und `e2e/full-ui.check.ts`. Die Tests zuerst ohne Abdeckungs-Flags starten (`npx --no-install tsx --test …`).
 2. Summe der Tabelle Kategorie × Sprint gleich der Zahl aller Bugs.
 3. Altbestandslauf: genau ein Vorschlag je Bug ohne Kategorie und ohne Vorschlag; `bug_category` bleibt dabei unverändert. Ein zweiter Start während eines Laufs startet nichts.
 4. Modell nicht erreichbar: Bug wird angelegt, ohne Vorschlag. Ungültige Modellantwort: keine Kategorie.
