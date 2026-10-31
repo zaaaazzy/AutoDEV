@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { after, mock, test } from 'node:test';
 import type { Pool } from 'pg';
 import type { CommandExecutor } from '../core/command.js';
+import { COMPLETE_COVERAGE_SQL } from '../core/coverage-areas.js';
 import { decodePolicy, guardProblem } from './agent-guard.js';
 import { READ_ONLY_ROLES, roleDefaultCommands, withAgentPermissions } from './tool-permissions.js';
 import {
@@ -476,7 +477,12 @@ test('Kontextpaket: Doku mit Budget, Berichte, Bugs je Kategorie, Coverage und A
           ],
         };
       if (sql.includes('action_todo')) return { rows: [{ title: 'Deploy', todo: 'Schlüssel' }] };
-      if (sql.includes('test_coverage_areas')) return { rows: [{ area: 'api', lines: 70, branches: 50, tests: '12' }] };
+      if (sql.includes('test_coverage_areas')) {
+        // Neuester vollständiger Lauf je Bereichsschlüssel, wie die Übersicht.
+        assert.match(sql, /DISTINCT ON \(a\.area\)/);
+        assert.ok(sql.includes(COMPLETE_COVERAGE_SQL), 'nur vollständige Läufe');
+        return { rows: [{ area: 'backend', lines: 70, branches: 50, tests: '12' }] };
+      }
       if (sql.includes('AS actual')) return { rows: [{ title: 'Export', estimate: '1000', actual: '5000' }] };
       throw new Error('Tabelle fehlt');
     },
@@ -493,7 +499,7 @@ test('Kontextpaket: Doku mit Budget, Berichte, Bugs je Kategorie, Coverage und A
   assert.deepEqual(Object.keys(context.bugsByCategory), ['ohne Kategorie', 'backend']);
   assert.equal(context.bugsByCategory.backend!.length, 2);
   assert.deepEqual(context.actionTodos, [{ title: 'Deploy', todo: 'Schlüssel' }]);
-  assert.deepEqual(context.coverage, [{ area: 'api', lines: 70, branches: 50, tests: 12 }]);
+  assert.deepEqual(context.coverage, [{ area: 'backend', lines: 70, branches: 50, tests: 12 }]);
   assert.deepEqual(context.estimateDeviations, [{ title: 'Export', estimate: 1000, actual: 5000 }]);
   // Eine fehlgeschlagene Abfrage (Ideen) liefert einfach nichts.
   assert.deepEqual([context.openIdeas, context.rejectedIdeas], [[], []]);

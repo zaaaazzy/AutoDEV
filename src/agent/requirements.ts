@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { logged } from '../core/log.js';
+import { noteProviderOutcome } from '../core/provider-limits.js';
 import {
   readOnlyWorkspace,
   SANDBOX_GUARD,
@@ -17,7 +18,8 @@ import { type CommandExecutor, redactOutput, runCommand } from '../core/command.
 import { loadKnownBugs } from '../api/bugs.js';
 import { isUniqueViolation } from '../db/transaction.js';
 import { knownBugLine } from '../core/known-bugs.js';
-import { type ActualReference, loadActualReference, referenceSection, splitEstimate } from './estimation.js';
+import { type ActualReference, loadAuthorReference, referenceSection, splitEstimate } from './estimation.js';
+import { stepClassOf } from '../core/estimate-overrun.js';
 import { budgetTodo, checkBudget } from '../runner/budget.js';
 import { runOllamaAgent } from './ollama-agent.js';
 import {
@@ -32,7 +34,13 @@ import { executeAgentCommand, isClaudeCommand } from './claude-stream.js';
 import { DEFAULT_DEFINITION_OF_READY, loadDefinitions } from '../runner/acceptance.js';
 import { shortTitle, TITLE_MAX } from '../core/validation.js';
 import { containsUntrusted, UNTRUSTED_HINT } from '../runner/hoster.js';
-import { agentEnvironment, buildInvocation, defaultAgentCommand, type RunnerOptions } from '../runner/runner.js';
+import {
+  agentEnvironment,
+  buildInvocation,
+  defaultAgentCommand,
+  loadWorkflow,
+  type RunnerOptions,
+} from '../runner/runner.js';
 import { defined } from '../core/defined.js';
 
 const MIN_REQUIREMENT_CHARS = 80;
@@ -288,6 +296,13 @@ export async function runAuthorAgent(
         ],
       )
       .catch(logged('requirements'));
+    // Anbieterstatus fürs Dashboard: Limit-Meldung festhalten, nach einem erfolgreichen Lauf zurücksetzen.
+    if (command && !signal?.aborted) {
+      await noteProviderOutcome(pool, configured, {
+        exitCode: result.exitCode,
+        output: redactOutput(result.output, process.env),
+      }).catch(logged('requirements'));
+    }
     // Nach dem Buchen: 80-%-Warnung, falls dieser Lauf die Schwelle überschritten hat.
     if (budget?.states.length) await checkBudget(pool, options.project, { role }).catch(logged('requirements', null));
     return {
@@ -419,9 +434,15 @@ export async function draftRequirements(
     )
   ).rows[0];
   const definitions = await loadDefinitions(pool, options.project);
-  const reference = await loadActualReference(pool, options.project, idea.category ?? null).catch(
-    logged('requirements', null),
-  );
+  // Ideen werden zu Feature-Aufträgen; die Schrittklasse schätzt die Länge des Workflows (ein Lauf ohne Wiederholung).
+  const workflowSteps = await loadWorkflow(pool, options.project)
+    .then((steps) => steps.length)
+    .catch(logged('requirements', 0));
+  const reference = await loadAuthorReference(pool, options.project, {
+    kind: 'feature',
+    category: idea.category ?? null,
+    stepClass: workflowSteps > 0 ? stepClassOf(workflowSteps) : null,
+  }).catch(logged('requirements', null));
   console.info(`[idea ${idea.id}] Anforderung erstellen`);
   const { exitCode, output: rawOutput } = await runAuthorAgent(
     pool,

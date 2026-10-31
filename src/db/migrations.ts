@@ -452,6 +452,142 @@ export const MIGRATIONS: readonly Migration[] = [
     sql: `
       INSERT INTO scheduled_jobs (key, enabled, interval_seconds, job_kind, config)
         VALUES ('restore_probe', TRUE, 604800, 'restore_probe', '{"dir": "backups"}')
+        ON CONFLICT (key) DO NOTHING;
+    `,
+  },
+  // Offene Testnachweise (@@NACHWEIS von Tester und Dokumentierer): je Auftrag und Befehl eine Zeile. Ein Mensch
+  // startet den Befehl unter „Aktion notwendig“ als Projekttestlauf (test_requests mit Umfang „befehl“). Die Prüfung
+  // des Umfangs behält jeden Wert, den der Code schreibt ('full', 'ui'), sonst scheitert sie an bestehenden Zeilen.
+  {
+    version: 23,
+    name: 'testnachweise',
+    sql: `
+      CREATE TABLE IF NOT EXISTS test_evidence (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        development_id UUID NOT NULL REFERENCES development_items(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL DEFAULT 1,
+        datei TEXT NOT NULL DEFAULT '',
+        befehl TEXT NOT NULL CHECK (char_length(befehl) BETWEEN 1 AND 500),
+        grund TEXT NOT NULL CHECK (grund IN ('nicht_freigegeben', 'gegenprobe_fehlt')),
+        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'passed', 'failed', 'nicht_freigegeben')),
+        agent_name TEXT,
+        run_id UUID REFERENCES test_runs(id) ON DELETE SET NULL,
+        checked_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (development_id, befehl)
+      );
+      ALTER TABLE test_requests DROP CONSTRAINT IF EXISTS test_requests_scope_check;
+      ALTER TABLE test_requests ADD CONSTRAINT test_requests_scope_check
+        CHECK (scope IN ('full', 'ui', 'befehl'));
+      ALTER TABLE test_requests ADD COLUMN IF NOT EXISTS evidence_id UUID REFERENCES test_evidence(id) ON DELETE SET NULL;
+    `,
+  },
+  // Testabdeckung nur noch unter festen Bereichsschlüsseln (COVERAGE_AREA_KEYS in src/core/coverage-areas.ts). Bisher
+  // speicherte der Tester freie Bezeichnungen („Frontend“, „Contracts/Shared“, „Backend (Express)“), die Übersicht
+  // zeigte fast gleiche Namen mit widersprüchlichen Werten. Zuordnung wie coverageAreaKey (Ganzwort, „gesamt“ zuerst);
+  // Zeilen ohne Prozentwerte oder ohne Zuordnung fallen weg, je Bericht und Schlüssel bleibt der höchste Zeilenwert.
+  // Vorher eine Sicherung der Tabelle; die Berichte selbst bleiben als Verlauf erhalten. Im Auftrag als Version 20
+  // geplant; die Versionen 19–22 belegte inzwischen Sprint 30, darum Version 24.
+  {
+    version: 24,
+    name: 'testabdeckung-feste-bereiche',
+    sql: `
+      CREATE TABLE IF NOT EXISTS test_coverage_areas_backup_24 AS TABLE test_coverage_areas;
+      ALTER TABLE test_coverage_areas DROP CONSTRAINT IF EXISTS test_coverage_areas_area_check;
+
+      CREATE TEMP TABLE coverage_area_keys ON COMMIT DROP AS
+      SELECT report_id, area, CASE
+               WHEN label ~ '(^|[^a-z0-9äöüß])(gesamt|zusammen|insgesamt)s?($|[^a-z0-9äöüß])'
+                 OR (label ~ '(^|[^a-z0-9äöüß])(backend|server|api)s?($|[^a-z0-9äöüß])'
+                     AND label ~ '(^|[^a-z0-9äöüß])(frontend|web|ui|client)s?($|[^a-z0-9äöüß])') THEN 'gesamt'
+               WHEN label ~ '(^|[^a-z0-9äöüß])(backend|server|api)s?($|[^a-z0-9äöüß])' THEN 'backend'
+               WHEN label ~ '(^|[^a-z0-9äöüß])(frontend|web|ui|client)s?($|[^a-z0-9äöüß])' THEN 'frontend'
+               WHEN label ~ '(^|[^a-z0-9äöüß])(contract|shared|common)s?($|[^a-z0-9äöüß])' THEN 'contracts'
+               WHEN label ~ '(^|[^a-z0-9äöüß])(script|skripte?)s?($|[^a-z0-9äöüß])' THEN 'scripts'
+               WHEN label ~ '(^|[^a-z0-9äöüß])(e2e|end-to-end|playwright)s?($|[^a-z0-9äöüß])' THEN 'e2e'
+             END AS key
+        FROM (SELECT report_id, area, lower(btrim(area)) AS label FROM test_coverage_areas) a;
+
+      DELETE FROM test_coverage_areas a USING coverage_area_keys k
+       WHERE a.report_id = k.report_id AND a.area = k.area
+         AND (k.key IS NULL OR (a.lines IS NULL AND a.statements IS NULL AND a.branches IS NULL AND a.functions IS NULL));
+
+      DELETE FROM test_coverage_areas a USING (
+        SELECT k.report_id, k.area,
+               row_number() OVER (PARTITION BY k.report_id, k.key ORDER BY c.lines DESC NULLS LAST, k.area) AS rank
+          FROM coverage_area_keys k JOIN test_coverage_areas c ON c.report_id = k.report_id AND c.area = k.area
+      ) r
+       WHERE a.report_id = r.report_id AND a.area = r.area AND r.rank > 1;
+
+      UPDATE test_coverage_areas a SET area = k.key FROM coverage_area_keys k
+       WHERE a.report_id = k.report_id AND a.area = k.area AND a.area <> k.key;
+
+      ALTER TABLE test_coverage_areas ADD CONSTRAINT test_coverage_areas_area_check
+        CHECK (area IN ('backend', 'frontend', 'contracts', 'scripts', 'e2e', 'gesamt'));
+    `,
+  },
+  // Auftrag „Feste Coverage-Bereiche mit Pflichtwerten“ (geplant als Version 20; 20–24 belegte inzwischen Sprint 30 bzw. main):
+  // Zuordnungstabelle der bekannten Schreibweisen (COVERAGE_AREA_ALIASES in src/core/coverage-areas.ts) und neuer
+  // Bereich „auftrag“. Bestehende Bereichsnamen werden über die Zuordnung umgeschrieben; mehrere Einträge eines
+  // Berichts, die auf denselben Bereich zeigen, werden vorher zusammengeführt (Testzahlen summiert, Prozentwerte
+  // gemittelt, NULL bleibt NULL), damit der Primärschlüssel (report_id, area) nicht kollidiert. Einträge ohne Zuordnung
+  // bleiben unverändert; nichts wird gelöscht. Der CHECK gilt deshalb nur für neue Zeilen (NOT VALID).
+  {
+    version: 25,
+    name: 'coverage-feste-bereiche',
+    sql: `
+      ALTER TABLE test_coverage_areas DROP CONSTRAINT IF EXISTS test_coverage_areas_area_check;
+      CREATE TABLE IF NOT EXISTS coverage_area_aliases (
+        alias TEXT PRIMARY KEY,
+        area TEXT NOT NULL CHECK (area IN ('backend', 'frontend', 'contracts', 'scripts', 'e2e', 'gesamt', 'auftrag'))
+      );
+      INSERT INTO coverage_area_aliases (alias, area) VALUES
+        ('backend', 'backend'), ('back-end', 'backend'), ('backend (src)', 'backend'), ('backend/api', 'backend'),
+        ('server', 'backend'), ('api', 'backend'),
+        ('frontend', 'frontend'), ('front-end', 'frontend'), ('frontend (angular)', 'frontend'),
+        ('angular', 'frontend'), ('web', 'frontend'), ('ui', 'frontend'), ('client', 'frontend'),
+        ('oberfläche', 'frontend'),
+        ('contracts', 'contracts'), ('contract', 'contracts'), ('contracts/shared', 'contracts'),
+        ('shared', 'contracts'), ('common', 'contracts'),
+        ('scripts', 'scripts'), ('script', 'scripts'), ('skripte', 'scripts'), ('skript', 'scripts'),
+        ('tools', 'scripts'),
+        ('e2e', 'e2e'), ('e2e-tests', 'e2e'), ('end-to-end', 'e2e'), ('playwright', 'e2e'),
+        ('gesamt', 'gesamt'), ('total', 'gesamt'), ('all files', 'gesamt'), ('alle', 'gesamt'),
+        ('projekt', 'gesamt'), ('project', 'gesamt'), ('dev-log', 'gesamt'), ('devlog', 'gesamt'),
+        ('aideation', 'gesamt'),
+        ('auftrag', 'auftrag'), ('order', 'auftrag'), ('geänderter code', 'auftrag'), ('changed code', 'auftrag')
+      ON CONFLICT (alias) DO NOTHING;
+
+      CREATE TEMP TABLE coverage_area_merge ON COMMIT DROP AS
+        SELECT t.report_id, a.area,
+               SUM(t.unit_tests)::int AS unit_tests, SUM(t.component_tests)::int AS component_tests,
+               SUM(t.integration_tests)::int AS integration_tests, SUM(t.e2e_tests)::int AS e2e_tests,
+               SUM(t.passed)::int AS passed, SUM(t.failed)::int AS failed,
+               CASE WHEN COUNT(t.lines) = COUNT(*) THEN AVG(t.lines)::real END AS lines,
+               CASE WHEN COUNT(t.statements) = COUNT(*) THEN AVG(t.statements)::real END AS statements,
+               CASE WHEN COUNT(t.branches) = COUNT(*) THEN AVG(t.branches)::real END AS branches,
+               CASE WHEN COUNT(t.functions) = COUNT(*) THEN AVG(t.functions)::real END AS functions
+          FROM test_coverage_areas t JOIN coverage_area_aliases a ON a.alias = lower(btrim(t.area))
+         GROUP BY t.report_id, a.area;
+      DELETE FROM test_coverage_areas t USING coverage_area_aliases a WHERE a.alias = lower(btrim(t.area));
+      INSERT INTO test_coverage_areas (report_id, area, unit_tests, component_tests, integration_tests, e2e_tests,
+                                       passed, failed, lines, statements, branches, functions)
+        SELECT report_id, area, unit_tests, component_tests, integration_tests, e2e_tests,
+               passed, failed, lines, statements, branches, functions
+          FROM coverage_area_merge;
+
+      ALTER TABLE test_coverage_areas ADD CONSTRAINT test_coverage_areas_area_check
+        CHECK (area IN ('backend', 'frontend', 'contracts', 'scripts', 'e2e', 'gesamt', 'auftrag')) NOT VALID;
+    `,
+  },
+  // Wartungsjob bug_categories (src/runner/bug-category-job.ts): trägt einmalig die Kategorie bei Bugs ohne Kategorie
+  // nach (nur category IS NULL) und merkt sich in state.done, dass er fertig ist. Ändert keine Bugs selbst.
+  {
+    version: 26,
+    name: 'bug-kategorien-nachtragen',
+    sql: `
+      INSERT INTO scheduled_jobs (key, enabled, interval_seconds, job_kind, config)
+      VALUES ('bug_categories', TRUE, 86400, 'bug_categories', '{}')
       ON CONFLICT (key) DO NOTHING;
     `,
   },

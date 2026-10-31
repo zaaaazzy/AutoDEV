@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { basename, isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path';
 import { READ_ONLY_ROLES } from '../agent/permission-rules.js';
 import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
@@ -22,6 +22,8 @@ export const SANDBOX_IMAGE = 'aideation-agent';
 export const SANDBOX_LABEL = 'aideation.run';
 export const SANDBOX_WORKDIR = '/workspace';
 export const SANDBOX_HOME = '/home/agent';
+/** npm-Cache im Container: /tmp ist für jede UID beschreibbar (ein ~/.npm aus dem Image-Build gehört root). */
+const SANDBOX_NPM_CACHE = '/tmp/npm-cache';
 /** Wächter im Image (deploy/agent/Dockerfile bündelt agent-guard.ts dorthin). */
 export const SANDBOX_GUARD = { node: 'node', script: '/opt/aideation/agent-guard.mjs' } as const;
 /** Internes Docker-Netzwerk der Agent-Container: keine Route nach aussen, nur zum Egress-Proxy. */
@@ -238,6 +240,8 @@ export function sandboxRunArgs(
     '-e',
     `HOME=${SANDBOX_HOME}`,
     '-e',
+    `npm_config_cache=${SANDBOX_NPM_CACHE}`,
+    '-e',
     `CLAUDE_PROJECT_DIR=${SANDBOX_WORKDIR}`,
     '-e',
     `DEV_LOG_OLLAMA_URL=${SANDBOX_OLLAMA_URL}`,
@@ -379,6 +383,23 @@ export async function prepareModulesVolume(
     cwd,
     { timeoutMs: CHECK_TIMEOUT_MS * 3, env },
   ).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: String(error) }));
+}
+
+/**
+ * Eigene Agent-Worktrees verlinken node_modules des Hauptordners (agent-workspace.ts). Im Container zeigt der Link auf
+ * einen Host-Pfad: Docker hängt das Volume dann dort ein, und npm scheitert an „/workspace/node_modules“ (ENOTDIR).
+ * Der Link wird darum durch einen leeren Ordner ersetzt (nur der Link, nie sein Ziel); linkDependencies stellt ihn
+ * ohne Sandbox wieder her.
+ */
+export function replaceLinkedModules(worktree: string): void {
+  const path = join(worktree, 'node_modules');
+  try {
+    if (!lstatSync(path).isSymbolicLink()) return;
+    rmSync(path);
+    mkdirSync(path);
+  } catch {
+    // Kein node_modules oder nicht änderbar: Der Lauf geht trotzdem weiter.
+  }
 }
 
 /** Stempel im node_modules-Volume: Hash der package-lock.json, mit dem zuletzt installiert wurde. */
@@ -622,6 +643,7 @@ export async function runInSandbox(
     return blocked(missing, redactWith);
   }
   if (options.workspace !== false) {
+    replaceLinkedModules(worktree);
     const volume = await prepareModulesVolume(docker, options, env, worktree);
     if (volume.exitCode !== 0) {
       const message = `Sandbox: node_modules-Volume „${modulesVolume(options.project)}“ liess sich nicht vorbereiten (Exit-Code ${volume.exitCode}). Der Agent wurde nicht gestartet.\n${volume.output.trim().slice(-500)}`;

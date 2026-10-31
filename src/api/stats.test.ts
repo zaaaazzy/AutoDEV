@@ -35,3 +35,101 @@ test('Burndown rechnet Tage in Ortszeit (DEV_LOG_TIMEZONE), nicht in UTC der Dat
     else process.env.DEV_LOG_TIMEZONE = previous;
   }
 });
+
+type Overrun = { id: string; exceeded: { hours: boolean; tokens: boolean }; ratio: { hours: number | null } };
+
+/** Laufender Auftrag ohne Messwerte anderer Aufträge: Faktor 1, kalibriert = 1 h und 1000 Tokens. */
+const running = (id: string, hours: number, tokens: number) => ({
+  id,
+  title: `Auftrag ${id}`,
+  status: 'in_progress',
+  kind: 'feature',
+  category: 'backend',
+  effortHours: 1,
+  tokenEstimate: 1000,
+  estimateSource: 'author',
+  steps: '4',
+  hours: String(hours),
+  tokens: String(tokens),
+});
+
+/** Sprintzeile der Velocity-Abfrage; ohne erledigte, gemessene Aufträge liefert der Median null. */
+const sprint = (name: string, hourError: number | null, tokenError: string | null, errorSamples: string) => ({
+  name,
+  status: hourError === null ? 'active' : 'completed',
+  total: '2',
+  done: hourError === null ? '0' : '2',
+  hours: '1',
+  hourError,
+  tokenError,
+  errorSamples,
+});
+
+test('Schätzfehler je Sprint: ältester zuerst, ohne erledigte Aufträge null statt 0; Laufwarnung über 3×', async () => {
+  const queries: string[] = [];
+  const pool = {
+    query: async (sql: string) => {
+      queries.push(sql);
+      if (sql.includes('"hourError"')) {
+        // Neueste zuerst (ORDER BY created_at DESC), wie aus der Datenbank.
+        return {
+          rows: [sprint('S3', null, null, '0'), sprint('S2', 2.34567, '0.5', '3'), sprint('S1', 0.04, null, '1')],
+        };
+      }
+      if (sql.includes("d.status IN ('in_progress', 'blocked')")) {
+        return {
+          rows: [
+            running('genau', 3, 3000),
+            running('stunden', 3.5, 100),
+            running('tokens', 0.5, 3001),
+            running('weit', 9, 9),
+          ],
+        };
+      }
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+  const stats = await collectStats(pool, 'mainty');
+
+  const velocity = stats.velocity as {
+    name: string;
+    hourError: number | null;
+    tokenError: number | null;
+    errorSamples: number;
+  }[];
+  assert.deepEqual(
+    velocity.map((row) => [row.name, row.hourError, row.tokenError, row.errorSamples]),
+    [
+      ['S1', 0.04, null, 1],
+      ['S2', 2.346, 0.5, 3],
+      ['S3', null, null, 0],
+    ],
+  );
+  const trendSql = queries.find((sql) => sql.includes('"hourError"')) ?? '';
+  assert.match(trendSql, /d\.status = 'done'/, 'nur erledigte Aufträge zählen');
+  assert.match(trendSql, /percentile_cont\(0\.5\)/, 'Median, nicht Mittelwert');
+
+  const overruns = stats.overruns as Overrun[];
+  assert.deepEqual(
+    overruns.map((entry) => [entry.id, entry.exceeded.hours, entry.exceeded.tokens]),
+    [
+      ['weit', true, false],
+      ['stunden', true, false],
+      ['tokens', false, true],
+    ],
+    'genau das Dreifache warnt nicht; Stunden oder Tokens genügen, sortiert nach Überschreitung',
+  );
+  assert.equal(overruns[1]!.ratio.hours, 3.5);
+});
+
+test('Laufwarnung: Fehler bei der Prüfung lässt die Statistik stehen und erzeugt keine Warnung', async () => {
+  const pool = {
+    query: async (sql: string) => {
+      if (sql.includes("d.status IN ('in_progress', 'blocked')")) throw new Error('Verbindung weg');
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+  const stats = await collectStats(pool, 'mainty');
+  assert.deepEqual(stats.overruns, []);
+  assert.deepEqual(stats.velocity, []);
+});

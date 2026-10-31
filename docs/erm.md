@@ -57,7 +57,8 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 
 ## Anmeldung, Benutzer und Mandanten
 
-- `app_settings` (`key` PK, `value`): globale Einstellungen, u. a. `auth_totp_secret` / `auth_totp_pending` (TOTP-Schlüssel des Systemadministrators aus der `.env`, mit `DEV_LOG_SECRET_KEY` verschlüsselt), `push_vapid_keys`, `visionary_max_ideas`.
+- `app_settings` (`key` PK, `value`): globale Einstellungen, u. a. `auth_totp_secret` / `auth_totp_pending` (TOTP-Schlüssel des Systemadministrators aus der `.env`, mit `DEV_LOG_SECRET_KEY` verschlüsselt), `push_vapid_keys`, `visionary_max_ideas`, `provider_limit:<anbieter>`.
+- `app_settings.provider_limit:<anbieter>` (Anbieter `claude` | `copilot` | `gemini`, JSON `{ "since", "resetAt", "scope", "paymentUrl" }`): Nutzungslimit des Agent-Kontos, erkannt an der CLI-Meldung („You've hit your … limit · resets …“, `src/core/provider-limits.ts`). `scope` ist `account` oder `org` (Limit der Organisation). `paymentUrl` kommt aus der Meldung, wenn sie https auf dem Host des Anbieters ist, sonst ist es die feste Seite. Beim Lesen wird sie erneut gegen diese Hosts geprüft. Ein erfolgreicher Lauf desselben Anbieters oder „Fortsetzen“ löscht den Eintrag; nach `resetAt` gilt er als abgelaufen.
 - `users` (`id` UUID, `username` – eindeutig ohne Gross-/Kleinschreibung, `display_name`, `password_hash`, `roles` TEXT[], `active`, `totp_secret`, `totp_pending` (beide verschlüsselt), `last_login_at`, `created_at`, `updated_at`): benannte Benutzer zusätzlich zum Systemadministrator.
 - `auth_sessions` (`token_hash` PK, `created_at`, `last_seen`, `expires_at`, `user_agent`, `user_id` → `users` (`ON DELETE CASCADE`, NULL = Systemadministrator), `credential_version` (an das Passwort gebunden, `src/db/migrations.ts`)) – n:1 zu `users`.
 - `push_subscriptions` (`endpoint` PK, `p256dh`, `auth`, `user_agent`, `created_at`, `user_id` → `users` (`ON DELETE CASCADE`), `system_admin`) – n:1 zu `users`; Push geht nur an Geräte mit Zugriff auf das Projekt.
@@ -89,6 +90,11 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 - `production_status` (je Projekt): Health-Fehlschläge in Folge, `down`, letzter Fehler, Zeitpunkt der Prüfung bzw. des letzten erfolgreichen Log-Scans (`logs_scanned_at`, untere Grenze des nächsten Scan-Fensters), letzter Scan-Fehler (`log_error`, höchstens 300 Zeichen, beim nächsten Erfolg leer), zuletzt vermerkte Lücke (`log_gap`) und – wie beim Wächter – gemeldete Probleme (`problems`, `notified_at`).
 - Aufbewahrung: Der Worker löscht stündlich Ereignisse, Verlauf und Deploys, die älter als `production_retention_days` sind.
 
+## Erweiterung: Offene Testnachweise (Migration 23)
+
+- `test_evidence` (`id` UUID, `development_id` → `development_items`, `position`, `datei`, `befehl`, `grund` `nicht_freigegeben`/`gegenprobe_fehlt`, `status` `open`/`passed`/`failed`/`nicht_freigegeben`, `run_id` → `test_runs`, `checked_at`). Eindeutig je `(development_id, befehl)`.
+- `test_requests.evidence_id` → `test_evidence`; `test_requests.scope` zusätzlich `befehl` (alle bisherigen Werte bleiben erlaubt).
+
 ## Erweiterung: Visuelle Abnahme (Screenshots vor und nach dem Auftrag)
 
 - `projects`: `preview_url` (http(s), ohne Zugangsdaten; leer = Schritt übersprungen), `preview_pages` (JSONB-Liste von Pfaden wie `/#dashboard`), `visual_settings` (JSONB: `tolerance` in Prozent, `threshold` Farbabstand, `masks` CSS-Selektoren, `login` mit Seite, Selektoren und den **Namen** der Testwerte aus der `.env.example`, `aiJudge`, `visionModel`).
@@ -98,8 +104,8 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 
 ## Erweiterung: Wartungs-Jobs im Worker
 
-- `scheduled_jobs` (eigenständig, ohne Fremdschlüssel): `key` (PK, `[a-z0-9_-]`, max. 64), `enabled`, `start_at`, `interval_seconds` (60 s bis 30 Tage), `job_kind` (Schlüssel der festen Registry in `src/runner/scheduler.ts`: `backup_check`, `restore_probe`, `watchdog_logs`, `close_old_sprints`, `push_alert`; anderes wird nicht ausgeführt, sondern mit `failed` gespeichert), `config` (JSONB-Objekt, je Art z. B. `dir`, `maxAgeHours`, `minBytes`, `inactiveDays`, `project`, `jobs`, `timeoutSeconds`), `next_run_at`, `last_run_at`, `last_status` (running/ok/warning/failed), `last_message`, `state` (JSONB, bereits gemeldete Probleme und Zeitpunkt wie beim Wächter), `locked_until` (Sperre eines beanspruchten Laufs gegen andere Worker; nach höchstem Zeitlimit + 30 s, also 330 s, frei), `updated_at`.
-- Die fünf Standardjobs legt das Schema über `ON CONFLICT (key) DO NOTHING` an; Migration 22 ergänzt `restore_probe` in bestehenden Datenbanken. `close_old_sprints` ist aus, weil er den Sprint-Status ändert. Ändert ein Administrator Intervall oder Startzeit (`PATCH /api/scheduled-jobs/<key>`), wird `next_run_at` ab dem letzten Lauf neu berechnet, frühestens ab der Startzeit.
+- `scheduled_jobs` (eigenständig, ohne Fremdschlüssel): `key` (PK, `[a-z0-9_-]`, max. 64), `enabled`, `start_at`, `interval_seconds` (60 s bis 30 Tage), `job_kind` (Schlüssel der festen Registry in `src/runner/scheduler.ts`: `backup_check`, `restore_probe`, `watchdog_logs`, `close_old_sprints`, `push_alert`, `bug_categories`; anderes wird nicht ausgeführt, sondern mit `failed` gespeichert), `config` (JSONB-Objekt, je Art z. B. `dir`, `maxAgeHours`, `minBytes`, `inactiveDays`, `project`, `jobs`, `timeoutSeconds`), `next_run_at`, `last_run_at`, `last_status` (running/ok/warning/failed), `last_message`, `state` (JSONB, bereits gemeldete Probleme und Zeitpunkt wie beim Wächter), `locked_until` (Sperre eines beanspruchten Laufs gegen andere Worker; nach höchstem Zeitlimit + 30 s, also 330 s, frei), `updated_at`.
+- Die fünf Standardjobs legt das Schema über `ON CONFLICT (key) DO NOTHING` an; Migration 22 ergänzt `restore_probe` in bestehenden Datenbanken, Migration 26 den einmaligen Job `bug_categories`. `close_old_sprints` ist aus, weil er den Sprint-Status ändert. Ändert ein Administrator Intervall oder Startzeit (`PATCH /api/scheduled-jobs/<key>`), wird `next_run_at` ab dem letzten Lauf neu berechnet, frühestens ab der Startzeit.
 
 ## Weitere Tabellen (Kurzüberblick)
 

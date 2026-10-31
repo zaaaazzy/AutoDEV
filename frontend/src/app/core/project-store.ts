@@ -81,7 +81,9 @@ export class ProjectStore {
     () => this.data().development.filter((item) => !isFinished(item.status)).length,
   );
   /** Aufträge mit Handlungsbedarf (Seite „Aktionen“, Menü-Bubble). */
-  readonly attention = computed(() => orderAttention(this.data().development, this.data().acceptance));
+  readonly attention = computed(() =>
+    orderAttention(this.data().development, this.data().acceptance, this.data().evidence),
+  );
   /** Bleibt dasselbe Objekt, solange sich die Menge nicht ändert: Effekte daran laufen nicht bei jedem Poll neu. */
   readonly attentionIds = computed(() => new Set(this.attention().map((entry) => entry.item.id)), {
     equal: sameIds,
@@ -220,17 +222,21 @@ export class ProjectStore {
     }));
   }
 
-  /** Fehler landen in der Meldung oben; das Ergebnis sagt, ob die Aktion geklappt hat. */
-  async perform(action: () => Promise<unknown>, success: string, refresh = true): Promise<boolean> {
+  /**
+   * Fehler landen in der Meldung oben; das Ergebnis sagt, ob die Aktion geklappt hat.
+   * success als Funktion: Meldung aus dem Ergebnis der Aktion (wird erst danach gebildet).
+   */
+  async perform(action: () => Promise<unknown>, success: string | (() => string), refresh = true): Promise<boolean> {
     this.busy.set(true);
     this.notice.set('');
     try {
       this.applyItem(await action());
       // Im Hintergrund nachladen: Die Seite bleibt stehen, aufgeklappte Zeilen und Dialoge bleiben offen.
       if (refresh && this.activeProject()) await this.loadProject(this.activeProject(), true);
-      this.notice.set(success);
+      const message = typeof success === 'function' ? success() : success;
+      this.notice.set(message);
       setTimeout(() => {
-        if (this.notice() === success) this.notice.set('');
+        if (this.notice() === message) this.notice.set('');
       }, NOTICE_MS);
       return true;
     } catch (error) {

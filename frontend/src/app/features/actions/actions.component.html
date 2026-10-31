@@ -87,6 +87,58 @@
                 }
               </section>
 
+              @if (entry.evidence.length) {
+                <section class="attention-section attention-evidence" aria-label="Offene Testnachweise">
+                  <h3>Offene Testnachweise</h3>
+                  <ul class="todo-list evidence-list">
+                    @for (proof of entry.evidence; track proof.id) {
+                      <li class="evidence-item">
+                        <span class="todo-text">
+                          <strong>{{ proof.datei || '(ohne Datei)' }}</strong>
+                          <code class="evidence-command">{{ proof.befehl }}</code>
+                          <small class="muted"
+                            >Grund: {{ evidenceReason(proof)
+                            }}{{ proof.agentName ? ' · gemeldet von ' + proof.agentName : '' }}
+                            @if (proof.status === 'failed') {
+                              · letzter Lauf rot
+                            }
+                          </small>
+                        </span>
+                        <span class="evidence-actions">
+                          @if (canStartEvidence(proof)) {
+                            @if (auth.can('run')) {
+                              <button
+                                class="button secondary"
+                                type="button"
+                                [disabled]="busy() || testRunning() || proof.running"
+                                [title]="
+                                  testRunning()
+                                    ? 'Ein kompletter Test läuft – danach kannst du den Befehl starten.'
+                                    : 'Startet den Befehl als Projekttestlauf im Testcontainer.'
+                                "
+                                (click)="runEvidence(proof)"
+                              >
+                                {{ proof.running ? 'Testlauf läuft …' : 'Testlauf starten' }}
+                              </button>
+                            }
+                          } @else {
+                            <a href="#settings" class="evidence-rights" (click)="$event.preventDefault(); openRights()"
+                              >Rechte-Gruppen des Agents{{
+                                proof.agentName ? ' „' + proof.agentName + '“' : ''
+                              }}
+                              anpassen</a
+                            >
+                          }
+                          @if (proof.runId; as runId) {
+                            <a href="#runs" (click)="$event.preventDefault(); openRun(runId)">Letzter Lauf</a>
+                          }
+                        </span>
+                      </li>
+                    }
+                  </ul>
+                </section>
+              }
+
               @if (showVisual(item)) {
                 <section class="attention-section attention-visual">
                   <app-order-visual [order]="item" [open]="true" />

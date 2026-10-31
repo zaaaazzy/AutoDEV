@@ -1165,6 +1165,22 @@ a.app-link {
 .meter.cost .meter-bar i {
   background: var(--orange);
 }
+/* Nutzen/Kosten in der Tabelle „Offene Ideen“: Balken und Zahl nebeneinander. */
+.meter.table-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 64px;
+}
+.table-meter .meter-bar {
+  flex: 1;
+  min-width: 40px;
+}
+.table-meter .meter-value {
+  min-width: 1.4em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .md-table {
   margin: 0 0 14px;
   overflow-x: auto;

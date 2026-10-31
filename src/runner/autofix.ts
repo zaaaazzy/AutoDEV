@@ -8,7 +8,10 @@ import { shortTitle } from '../core/validation.js';
 import type { Pool } from 'pg';
 import { reportAgentBug } from '../api/bugs.js';
 import { UNTRUSTED_START } from './hoster.js';
-import { defined } from '../core/defined.js';
+
+import { USAGE_LIMIT } from '../core/provider-limits.js';
+
+export { usageLimitReset } from '../core/provider-limits.js';
 
 const MAX_AUTO_RETRIES = 2;
 
@@ -20,15 +23,6 @@ interface FailedItem {
   bugId?: string | null;
   sprintId?: string | null;
 }
-
-/**
- * Nutzungslimit des Agent-Kontos (Claude-CLI): „You've hit your session limit · resets 12:40am (Europe/Zurich)“,
- * auch mit mehreren Wörtern („monthly spend limit“, „org's monthly spend limit“).
- */
-const USAGE_LIMIT = /hit your (?:[\w'’-]+ ){1,3}limit/i;
-const LIMIT_RESET =
-  /resets?\s+(?:(?:on\s+)?([A-Z][a-z]{2})\s+(\d{1,2}),?\s+)?(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b(?:\s*\((UTC)\))?/i;
-const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
 /**
  * Fehler des Agents selbst (Zeitlimit, Schleife, Modell nicht erreichbar, Befehl fehlt …) sind keine Fehler im Code.
@@ -52,34 +46,6 @@ const AGENT_FAILURE_PATTERNS = [
   /Unterbrochen: Der Worker wurde beendet/,
   USAGE_LIMIT,
 ];
-
-/**
- * Nutzungslimit des Agent-Kontos erreicht: kein Fehler im Code und nichts, was eine Wiederholung in Minuten löst.
- * Liefert den Zeitpunkt, ab dem der Auftrag wieder starten darf (Reset laut Meldung plus kleine Reserve, in der
- * Zeitzone des Workers); ohne lesbare Zeit eine Stunde später. Null, wenn die Ausgabe kein Limit meldet.
- */
-export function usageLimitReset(output: string, now = new Date()): Date | null {
-  const tail = output.slice(-3000);
-  if (!USAGE_LIMIT.test(tail)) return null;
-  const match = tail.match(LIMIT_RESET);
-  if (!match) return new Date(now.getTime() + 60 * 60_000);
-  const [, month, day, hour, minute, meridiem, utc] = match;
-  const hours = (Number(hour) % 12) + (defined(meridiem).toLowerCase() === 'pm' ? 12 : 0);
-  const reset = new Date(now);
-  // Organisationslimits melden die Zeit in UTC („resets 12:20pm (UTC)“), sonst in der Zeitzone des Workers.
-  if (utc) reset.setUTCHours(hours, Number(minute ?? 0), 0, 0);
-  else reset.setHours(hours, Number(minute ?? 0), 0, 0);
-  const monthIndex = month ? MONTHS.indexOf(month.toLowerCase()) : -1;
-  if (monthIndex >= 0 && day) {
-    if (utc) reset.setUTCMonth(monthIndex, Number(day));
-    else reset.setMonth(monthIndex, Number(day));
-    if (reset.getTime() <= now.getTime()) reset.setFullYear(reset.getFullYear() + 1);
-  } else if (reset.getTime() <= now.getTime()) {
-    if (utc) reset.setUTCDate(reset.getUTCDate() + 1);
-    else reset.setDate(reset.getDate() + 1);
-  }
-  return new Date(reset.getTime() + 3 * 60_000);
-}
 
 /**
  * Vorübergehende Fehler: Modell oder Dienst kurz nicht erreichbar, überlastet, Verbindung abgebrochen, Zeitlimit.
