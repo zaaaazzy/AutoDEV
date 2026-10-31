@@ -7,7 +7,7 @@ von Dev Log ändert sich nichts. Auftrag 95b15d69, Stand 29.10.2026.
 **Status: noch nicht abgeschlossen.** Die Code-Umstellung ist da. Der Schritt `npm install -D @angular/cdk@^20.3.0` mit
 anschließender Prüfung ist offen. Agents können `npm install` und `npx` in dieser Umgebung nicht ausführen. Die Angaben zu
 npm-Abhängigkeiten und Audit unten stammen aus den Vermerken des Entwicklers und der Tester, nicht aus einem eigenen Lauf.
-Am 30.10.2026 wurden `angular.json`, `package.json`, `start.sh`, `scripts/start.ps1`, `.github/dependabot.yml` und die Dockerfiles gegen diesen Text geprüft. Sie stimmen überein. `@angular/cdk` steht weiter auf 20.2.14, und `package-lock.json` enthält `build-angular` noch 29-mal.
+Am 30.10.2026 wurden `angular.json`, `package.json`, `start.sh`, `scripts/start.ps1`, `.github/dependabot.yml` und die Dockerfiles gegen diesen Text geprüft. Sie stimmen überein. Am 31.10.2026 wurde erneut geprüft: `package-lock.json` enthält kein `build-angular` mehr (0 Treffer, vorher 29). `@angular/cdk` steht weiter auf 20.2.14 (`package.json:44`, `package-lock.json:22` und `:874`).
 
 ## 1. Was sich ändert
 
@@ -19,7 +19,8 @@ Am 30.10.2026 wurden `angular.json`, `package.json`, `start.sh`, `scripts/start.
 - **Node.js 22.12 ist die Mindestversion, im Projekt festgeschrieben.** `package.json` enthält jetzt `"engines": {"node": ">=22.12"}`.
   Die Startskripte `start.sh` und `scripts/start.ps1` prüften schon vorher Node ≥ 22.12. Sie sind unverändert.
 - **Eine Dev-Abhängigkeit ist ausgetauscht.** `@angular-devkit/build-angular` ist aus `package.json` entfernt, dafür steht
-  `@angular/build` (^20.3.40) drin. Die Lockfile enthält den alten Eintrag noch (siehe Abschnitt 7).
+  `@angular/build` (^20.3.40) drin. Die Lockfile enthält den alten Eintrag nicht mehr. Übrig sind nur Pakete aus dem
+  Angular-Devkit, die `@angular/build` und `@angular/cli` als Abhängigkeit brauchen (`architect`, `core`, `schematics`).
 - **Neue Datei `.github/dependabot.yml`.** GitHub öffnet wöchentlich Pull Requests für:
   - `npm`: alle `@angular/*`- und `@angular-devkit/*`-Pakete zusammen in einem Pull Request,
   - `docker`: `/`, `deploy/agent`, `deploy/frontend`, `deploy/review`, `deploy/worker`,
@@ -56,11 +57,13 @@ Die Prüfung gilt beim Start über die Skripte. Ein direkter Aufruf von `npm ci`
 
 - **Beim Start mit `./start.sh` oder `scripts/start.ps1`:** Bei zu alter Node-Version bricht das Skript mit der Meldung aus
   Abschnitt 2 ab, bevor etwas installiert wird. Ein Start mit korrekter Version sieht aus wie bisher.
-- **Beim `npm run dev:ui`:** Die Konsole meldet `Local: http://localhost:<Port>/`. Der Entwickler hat den Start mit Port 4299
-  geprüft. Ob die Seite dort lädt, ist nicht geprüft (siehe Abschnitt 7).
+- **Beim `npm run dev:ui`:** Die Konsole meldet `Local: http://localhost:<Port>/`. Im Repo ist kein fester Port gesetzt
+  (`angular.json` und `frontend/proxy.conf.json` enthalten keinen Port), der Standard von Angular ist 4200. Den tatsächlichen
+  Port zeigt die Konsole. Ob die Seite lädt, ist nicht geprüft (siehe Abschnitt 7).
 - **Beim `npm run build:ui`:** Der Produktionsbuild kann Warnungen ausgeben. Die Start-Größe liegt laut Entwickler bei 1,06 MB
   und damit über der Warnschwelle von 950 kB. Die Fehlergrenze von 1,1 MB wird nicht erreicht, der Build bricht also nicht ab.
-  Der Entwickler meldet außerdem die Hinweise NG8113 und NG8107. Ob die Warnungen schon vor der Umstellung kamen, ist nicht geprüft.
+  Der Entwickler meldet außerdem die Hinweise NG8113 und NG8107. Die Warnschwelle steht in `angular.json` (Zeile 59, 950 kB),
+  die Fehlergrenze in Zeile 60 (1,1 MB). Ob die Warnungen schon vor der Umstellung kamen, ist nicht geprüft.
 - **Auf GitHub im Tab „Pull requests“:** Wöchentlich erscheinen Pull Requests von Dependabot. Die Angular-Pakete kommen als ein
   gemeinsamer Pull Request, damit ihre Versionen nicht wieder auseinanderlaufen.
 
@@ -68,7 +71,7 @@ Die Prüfung gilt beim Start über die Skripte. Ein direkter Aufruf von `npm ci`
 
 Für dieses Kapitel gibt es keine Printscreens. Die Änderung wirkt auf Build und Entwicklungsserver, nicht auf die Oberfläche
 von Dev Log, und es gibt keine neue Bildschirmansicht, die man zeigen könnte. In dieser Umgebung ist kein Chromium installiert
-(`which chromium` ohne Ergebnis). Außerdem erlaubt der Workspace-Wächter `node` nur mit `--version` und `--check`. Ein Dev-Server
+(`which chromium` ohne Ergebnis, geprüft am 31.10.2026). Außerdem erlaubt der Workspace-Wächter `node` nur mit `--version` und `--check`. Ein Dev-Server
 oder Playwright lässt sich damit nicht starten, und es wurden keine Bilder erzeugt oder ersetzt. Die Beschreibung stammt aus
 `angular.json`, `package.json`, den Startskripten, `.github/dependabot.yml` und den Dockerfiles.
 
@@ -87,7 +90,7 @@ oder Playwright lässt sich damit nicht starten, und es wurden keine Bilder erze
 | Zustand | Ursache | Was du tust |
 |---|---|---|
 | „Node.js … ist zu alt“ beim Start | Installierte Node-Version liegt unter 22.12. | Node.js auf 22.12 oder neuer aktualisieren und das Skript erneut starten. |
-| `npm ci` schlägt fehl, obwohl Node 22.12 oder neuer installiert ist | Nicht geprüft. Die Lockfile ist nicht von npm erzeugt und enthält noch den alten Eintrag `@angular-devkit/build-angular`. | `npm ci` mit der Fehlermeldung melden. Siehe Abschnitt 7. |
+| `npm ci` schlägt fehl, obwohl Node 22.12 oder neuer installiert ist | Nicht geprüft. Die Lockfile ist nicht von npm erzeugt worden, und `@angular/cdk` (20.2.14) passt nicht zur Vorgabe ^20.3. | `npm ci` mit der Fehlermeldung melden. Siehe Abschnitt 7. |
 | `ng serve` startet, die Seite lädt nicht | Nicht geprüft. Die Konsole zeigt den Grund, meist Proxy oder Port. | Die Konsole ansehen und `frontend/proxy.conf.json` prüfen. |
 | `npm audit` zeigt noch Funde | Die Umstellung ist noch nicht vollständig (siehe Abschnitt 7). | Nicht als Fehler dieser Änderung werten, bis die offenen Punkte erledigt sind. |
 
@@ -99,8 +102,9 @@ oder Playwright lässt sich damit nicht starten, und es wurden keine Bilder erze
 - **`@angular/cdk` steht noch auf 20.2.14.** Der Auftrag verlangt ^20.3.x. Der Entwickler hat cdk bewusst nicht von Hand
   angehoben, weil `npm ci` sonst mit einer unstimmigen Lockfile bricht. Dieser Widerspruch ist mit dem manuellen Schritt
   aufzulösen.
-- **Die Lockfile ist nicht von npm erzeugt.** Sie enthält noch den Paketeintrag `@angular-devkit/build-angular` mit der
-  Webpack-Kette. Der manuelle Schritt erneuert sie vollständig.
+- **Die Lockfile ist nicht von npm erzeugt.** Der Eintrag `@angular-devkit/build-angular` mit der Webpack-Kette ist entfernt
+  (0 Treffer am 31.10.2026). Ob die Lockfile vollständig und konsistent ist, zeigt erst `npm ci` auf dem Host. Der manuelle
+  Schritt erneuert sie in jedem Fall.
 - **Die `npm audit`-Funde sind nicht nachgeprüft.** Die 17 Funde aus dem Review bleiben bis zu diesem Schritt bestehen. Die Funde
   über `@modelcontextprotocol/sdk` aus `@angular/cli` behebt die Umstellung nicht.
 - **Tests des Entwicklers:** `build:ui`, `typecheck` und `test:unit` laufen laut Entwickler grün (1822 Tests; ein Bug-Eintrag
@@ -113,6 +117,6 @@ oder Playwright lässt sich damit nicht starten, und es wurden keine Bilder erze
 
 - `angular.json`: Builder für `build` und `serve`.
 - `package.json`: `engines`, `@angular/build` statt `@angular-devkit/build-angular`.
-- `package-lock.json`: oberster Eintrag angeglichen, nicht von npm erzeugt.
+- `package-lock.json`: `build-angular`- und `webpack`-Einträge entfernt (Stand 31.10.2026), nicht von npm erzeugt.
 - `.github/dependabot.yml`: neu.
 - `docs/ci.md`: Abschnitt „Angular-Builder und Node-Version“.
