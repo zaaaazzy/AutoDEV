@@ -49,6 +49,15 @@ Im PR-Modus (`issues+pr`) führt der Worker die Prüfschritte aus `.github/workf
 - **Liegengebliebene Ausgaben:** Der Spiegel läuft im Worktree, nicht in einem frischen Checkout. Gitignorierte Testausgaben (`test-results/`) schließt `eslint.config.mjs` deshalb aus; sonst wäre `lint` lokal rot, obwohl die echte CI diese Dateien nie sieht.
 - **Laufzeit:** Die vier Schritte verlängern die Sicherung im PR-Modus (Zeitlimit je Schritt wie beim Test-Gate: 45 Minuten).
 
+## Gegenprobe im Tester-Schritt (Bugfix-Aufträge)
+
+Nach einem grünen Tester-Schritt prüft `src/runner/counter-probe.ts` bei `kind = 'bug'`, ob die im Auftrag neuen Testfälle den Fehler belegen. Sie laufen in einem eigenen, detached Worktree auf `merge-base` von HEAD und Basis-Branch, mit den Testdateien des Auftrags und altem Produktivcode. Es laufen nur die neuen Fälle (`--test-name-pattern`), über `runProjectCommand` (gefiltertes Environment) und `gateExecutor` (Testcontainer). Der Worktree wird in `finally` entfernt, Reste älter als zwei Stunden räumt der nächste Lauf ab.
+
+- **Urteil:** `proven` (alle scheitern), `unproven` (mindestens einer besteht, nach einer Wiederholung), `inconclusive` (Import-/Kompilierfehler, Zeitüberschreitung, Filter ohne Treffer; weder Beleg noch Rückgabegrund), `none` (keine neuen Fälle, kein Lauf).
+- **Bei `unproven`:** Tester-Schritt rot mit „Test belegt den Fix nicht“, Rückgabe über den Weg für rote Tests (einmal je Lauf, dann Bug-Bericht).
+- **Ablage:** `development_items.counter_check` (Felder `cases`, `verdict`, `reason`), Abschnitt „## Gegenprobe“ im jüngsten `docs/tests/<Lauf>/bericht.md`, sonst `docs/tests/<Datum_Uhrzeit>_gegenprobe/`.
+- **Grenzen:** nur `node:test`/`tsx --test`; kein E2E. Die Sprint-Prüfung je Datei (`git-sync/counter-check.ts`) bleibt Rückfall für Aufträge ohne Ergebnis. Bericht: `docs/auftraege/gegenprobe-neue-testfaelle-2026-10-31.md`.
+
 ## Typprüfung der Tests
 
 `npm run typecheck` prüft jetzt vier Konfigurationen:
