@@ -42,17 +42,18 @@ test('Startskripte prüfen die Nebenversion 22.12', () => {
   assert.match(ps1, /\[version\]'22\.12\.0'/);
 });
 
-test('package.json: @angular/cdk steht auf 20.3.x wie die übrigen Angular-Pakete', () => {
+// Von @angular/cdk gibt es keine 20.3.x (letzte 20er-Version: 20.2.14), daher gilt Hauptversion 20 mit Caret.
+test('package.json: @angular/cdk ist nicht mehr fest gepinnt und gehört zu Angular 20', () => {
   const pkg = readJson('package.json');
   const cdk: string = pkg.devDependencies['@angular/cdk'];
-  assert.match(cdk, /^\^?20\.3\./, `cdk ist ${cdk}`);
+  assert.match(cdk, /^\^20\./, `cdk ist ${cdk}`);
 });
 
-test('package-lock.json: Webpack-Kette entfernt, cdk auf 20.3.x', () => {
+test('package-lock.json: Webpack-Kette entfernt, cdk in Hauptversion 20', () => {
   const packages: Record<string, { version?: string }> = readJson('package-lock.json').packages;
   const stale = Object.keys(packages).filter((path) =>
     /node_modules\/(@angular-devkit\/build-(angular|webpack)|@ngtools\/webpack|webpack(-dev-server|-dev-middleware)?)$/.test(path),
   );
   assert.deepEqual(stale, [], 'Lockfile mit npm neu erzeugen');
-  assert.match(packages['node_modules/@angular/cdk']?.version ?? '', /^20\.3\./);
+  assert.match(packages['node_modules/@angular/cdk']?.version ?? '', /^20\./);
 });
