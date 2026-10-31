@@ -591,6 +591,33 @@ export const MIGRATIONS: readonly Migration[] = [
       ON CONFLICT (key) DO NOTHING;
     `,
   },
+  // Vorschläge aus den Abschnitten „Offen“, „TODO“, „Bekannter Befund“ und „Folgeauftrag“ der Auftragsdoku
+  // (src/runner/follow-up-proposals.ts). Erst ein Mensch macht daraus einen Bug oder eine Idee (result_id).
+  // project_slug für die Mandantenprüfung der Routen; gleiche Titel je Doku nur einmal (UNIQUE).
+  {
+    version: 27,
+    name: 'folgevorschlaege-aus-doku',
+    sql: `
+      CREATE TABLE IF NOT EXISTS follow_up_proposals (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+        development_id UUID NOT NULL REFERENCES development_items(id) ON DELETE CASCADE,
+        doc_id UUID REFERENCES docs(id) ON DELETE SET NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('bug', 'idea')),
+        section TEXT NOT NULL DEFAULT '',
+        title TEXT NOT NULL CHECK (char_length(title) BETWEEN 1 AND 180),
+        description TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'proposed' CHECK (status IN ('proposed', 'accepted', 'dismissed')),
+        result_id UUID,
+        decided_by TEXT,
+        decided_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (development_id, title)
+      );
+      CREATE INDEX IF NOT EXISTS follow_up_proposals_open_idx ON follow_up_proposals (development_id, created_at)
+        WHERE status = 'proposed';
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

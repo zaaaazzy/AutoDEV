@@ -1,10 +1,22 @@
 // Status- und Routing-Typen kommen aus dem Backend (dort die einzige Definition), damit beide Seiten nicht
 // auseinanderlaufen.
 import type { BudgetPeriod, RoutingRule } from '../../../../src/core/shared-types.js';
-import type { BugStatus, DevelopmentStatus, SprintStatus } from '../../../../src/core/status.js';
+import type {
+  BugStatus,
+  DevelopmentStatus,
+  FollowUpKind,
+  FollowUpStatus,
+  SprintStatus,
+} from '../../../../src/core/status.js';
 
 export type { BudgetPeriod, RoutingCondition, RoutingRule, RuleEffect } from '../../../../src/core/shared-types.js';
-export type { BugStatus, DevelopmentStatus, SprintStatus } from '../../../../src/core/status.js';
+export type {
+  BugStatus,
+  DevelopmentStatus,
+  FollowUpKind,
+  FollowUpStatus,
+  SprintStatus,
+} from '../../../../src/core/status.js';
 
 import type { CoverageAreaKey } from '../../../../src/core/coverage-areas.js';
 
@@ -278,6 +290,20 @@ export interface Bug {
   approvedBy?: string | null;
   /** Betriebs-Bugs: Vorkommen der letzten 24 Stunden. */
   productionCount?: number | null;
+}
+
+/** Vorschlag aus einem Doku-Abschnitt („Offen“, „TODO“, „Bekannter Befund“, „Folgeauftrag“) eines Auftrags. */
+export interface FollowUpProposal {
+  id: string;
+  developmentId: string;
+  docId: string | null;
+  kind: FollowUpKind;
+  section: string;
+  title: string;
+  description: string;
+  status: FollowUpStatus;
+  resultId: string | null;
+  createdAt: string;
 }
 
 /** Produktions-Rückkanal: Zustand fürs Dashboard und die Einstellungen. */

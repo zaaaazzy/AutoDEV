@@ -175,6 +175,28 @@ export async function reportAgentBug(
   return existing.id;
 }
 
+/**
+ * Bug aus einem vom Menschen angenommenen Vorschlag (Quelle „agent“, ohne Sprint und ohne development_id: sonst
+ * käme er per Trigger auf den Friedhof, sobald der Auftrag erledigt ist). Titel wie bei POST /bugs auf TITLE_MAX
+ * begrenzt. Läuft in der Transaktion des Aufrufers; afterBugCreated erst nach dem Commit aufrufen.
+ */
+export async function insertProposalBug(
+  db: Pick<Pool, 'query'>,
+  bug: { projectSlug: string; title: string; description: string },
+): Promise<{ id: string; category: string | null }> {
+  if (!validText(bug.title, TITLE_MAX)) throw new Error('Titel des Vorschlags ist leer oder zu lang.');
+  const description = bug.description.slice(0, 10_000);
+  const category = categoryFromBug({ title: bug.title, description });
+  const result = await db.query<{ id: string }>(
+    `INSERT INTO bugs (project_slug, title, description, severity, source, sprint_id, category)
+     VALUES ($1, $2, $3, 'medium', 'agent', NULL, $4) RETURNING id`,
+    [bug.projectSlug, bug.title.trim(), description, category],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error('Bug aus dem Vorschlag wurde nicht angelegt.');
+  return { id: row.id, category };
+}
+
 export interface KnownBug {
   title: string;
   description: string;

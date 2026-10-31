@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
-import type { AcceptanceCheck, DevelopmentItem, Estimate } from '../../core/models.js';
+import type { AcceptanceCheck, DevelopmentItem, Estimate, FollowUpProposal } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { ConfirmService, type ConfirmOptions } from '../../core/confirm.service.js';
 import { GitGuardService } from '../../core/git-guard.service.js';
@@ -320,6 +320,23 @@ export class OrderService {
     await this.store.perform(
       () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/analyze`),
       'Der Assistent analysiert den Auftrag.',
+    );
+  }
+
+  /** Offene Vorschläge aus der Doku des Auftrags (Bestätigungsliste). */
+  async followUpProposals(item: DevelopmentItem): Promise<FollowUpProposal[]> {
+    const result = await this.api.get<{ proposals: FollowUpProposal[] }>(
+      `/api/development/${encodeURIComponent(item.id)}/follow-up-proposals`,
+    );
+    return result.proposals;
+  }
+
+  /** Vorschlag annehmen (legt genau einen Bug bzw. eine Idee an) oder verwerfen; false bei Fehler (z. B. 409). */
+  decideProposal(proposal: FollowUpProposal, decision: 'accept' | 'dismiss'): Promise<boolean> {
+    const what = proposal.kind === 'bug' ? 'Bug' : 'Idee';
+    return this.store.perform(
+      () => this.api.post(`/api/follow-up-proposals/${encodeURIComponent(proposal.id)}/${decision}`),
+      decision === 'accept' ? `${what} „${proposal.title}“ angelegt.` : 'Vorschlag verworfen.',
     );
   }
 

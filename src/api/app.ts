@@ -10,6 +10,7 @@ import { registerVisualRoutes } from './visual.js';
 import { type DevLogAuth, registerLoginRoutes, registerSecurityRoutes, requireCredentials } from './auth.js';
 import { registerBoardRoutes } from './board.js';
 import { registerBugRoutes } from './bugs.js';
+import { registerFollowUpProposalRoutes } from './follow-up-proposals.js';
 import { registerChatRoutes } from './chat-routes.js';
 import { registerAgentTaskRoutes } from './agent-tasks.js';
 import { registerTestRequestRoutes } from './test-requests.js';
@@ -132,6 +133,7 @@ export function createApiRouter(pool: Pool, auth: DevLogAuth | null): Router {
   registerAgentRoutes(api, pool);
   registerPermissionGroupRoutes(api, pool);
   registerBugRoutes(api, pool);
+  registerFollowUpProposalRoutes(api, pool);
   registerProductionRoutes(api, pool);
   registerAttachmentRoutes(api, pool);
   registerVisualRoutes(api, pool);
