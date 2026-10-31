@@ -109,6 +109,53 @@
 .bug-stats-bar .buried {
   background: #9aa29c;
 }
+/* Tabelle Kategorie × Sprint: bei vielen Sprints seitlich scrollen statt die Seite zu verbreitern */
+.bug-category-sprints {
+  margin-top: 14px;
+}
+.bug-category-matrix {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.bug-category-matrix .bug-stats-table th,
+.bug-category-matrix .bug-stats-table td {
+  max-width: none;
+  width: auto;
+  white-space: nowrap;
+}
+.bug-category-matrix tbody th,
+.bug-category-matrix tfoot th {
+  padding: 5px 6px;
+  border-top: 1px solid var(--line);
+  color: inherit;
+  font-size: 13px;
+  font-weight: 500;
+}
+.bug-category-matrix tfoot th,
+.bug-category-matrix tfoot td {
+  font-weight: 600;
+}
+
+/* Bug-Kategorie in der Tabelle: offener Vorschlag des lokalen Modells */
+.bug-category-cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+.bug-category-suggested {
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--muted);
+}
+.bug-category-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
 .production-ok {
   background: #e3f3ea;
   color: #1f6e49;

@@ -646,15 +646,16 @@ test('Bugs: anlegen, Status ändern, bearbeiten, löschen', async ({ page, isMob
   const form = page.locator('form.create-form');
   await form.locator('[name=title]').fill(title);
   await form.locator('select[name=category]').selectOption({ label: 'Backend' });
+  await form.locator('select[name=bugCategory]').selectOption({ label: 'Oberfläche' });
   await button(form, 'Bug melden').click();
   const row = page.locator('.dt-table tbody tr').filter({ hasText: title });
   await expect(row).toBeVisible();
-  // Mitgeschickte Kategorie bleibt; der Kategoriefilter „Backend“ lässt nur Bugs dieser Kategorie stehen.
-  await expect(row.locator('td[data-label="Kategorie"]')).toHaveText('Backend');
+  // Mitgeschickter Bereich bleibt; der Bereichsfilter „Backend“ lässt nur Bugs dieses Bereichs stehen.
+  await expect(row.locator('td[data-label="Bereich"]')).toHaveText('Backend');
   const openTable = page.locator('.dt-table').first();
-  await button(openTable, 'Kategorie filtern').click();
+  await button(openTable, 'Bereich filtern').click();
   const menu = page.locator('.dt-filter-menu');
-  await expect.soft(menu.locator('.dt-option span'), 'Filter bietet alle Kategorien an').toContainText([
+  await expect.soft(menu.locator('.dt-option span'), 'Filter bietet alle Bereiche an').toContainText([
     'Alle',
     'Frontend',
     'Backend',
@@ -668,11 +669,43 @@ test('Bugs: anlegen, Status ändern, bearbeiten, löschen', async ({ page, isMob
   await page.keyboard.press('Escape');
   await expect(row).toBeVisible();
   await expect
-    .poll(async () => [...new Set(await openTable.locator('tbody td[data-label="Kategorie"]').allInnerTexts())])
+    .poll(async () => [...new Set(await openTable.locator('tbody td[data-label="Bereich"]').allInnerTexts())])
     .toEqual(['Backend']);
+  await button(page, 'Zurücksetzen').click();
+  await expect(page.locator('.dt-chip')).toHaveCount(0);
+
+  // Gewählte Bug-Kategorie ist bestätigt; der Kategoriefilter wirkt zusätzlich zu den anderen Filtern.
+  await expect(row.locator('td[data-label="Kategorie"]')).toHaveText('Oberfläche');
+  await button(openTable, 'Kategorie filtern').click();
+  await expect.soft(menu.locator('.dt-option span'), 'Filter bietet alle Bug-Kategorien an').toContainText([
+    'Alle',
+    'Sicherheit',
+    'Git-Abgleich',
+    'CI & Build',
+    'Oberfläche',
+    'API & Server',
+    'Agent-Wächter',
+    'Budget',
+    'Dokumentation',
+    'Vorschlag offen',
+    'Ohne Kategorie',
+  ]);
+  await menu
+    .locator('.dt-option')
+    .filter({ has: page.locator('span', { hasText: /^Oberfläche$/ }) })
+    .locator('input')
+    .check();
+  await page.keyboard.press('Escape');
+  await expect(row).toBeVisible();
+  await expect
+    .poll(async () => [...new Set(await openTable.locator('tbody td[data-label="Kategorie"]').allInnerTexts())])
+    .toEqual(['Oberfläche']);
   await expect(
     page.locator('.bug-stats-card').filter({ has: page.locator('h3', { hasText: 'Nach Kategorie' }) }),
-  ).toContainText('Backend');
+  ).toContainText('Oberfläche');
+  await expect(
+    page.locator('.bug-stats-card').filter({ has: page.locator('h3', { hasText: 'Kategorie × Sprint' }) }),
+  ).toContainText('Kein Sprint');
   await button(page, 'Zurücksetzen').click();
   await expect(page.locator('.dt-chip')).toHaveCount(0);
   await row.locator('.dt-expand').click();

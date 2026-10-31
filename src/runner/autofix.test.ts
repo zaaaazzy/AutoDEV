@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { backfillFailures, failureDetail, isAgentFailure, isEnvironmentFailure, queueBugFix } from './autofix.js';
+import {
+  backfillFailures,
+  failureBugCategory,
+  failureDetail,
+  isAgentFailure,
+  isEnvironmentFailure,
+  queueBugFix,
+} from './autofix.js';
 import { changesWorkingTree } from './runner.js';
 
 test('agent failures without code cause are recognised', () => {
@@ -98,6 +105,18 @@ test('ENOENT in einem Test ist kein Umgebungsfehler (Auftrag ea3a49b1)', () => {
   const out = "not ok 3 - liest Fixture\n  Error: ENOENT: no such file or directory, scandir '/tmp/fixtures/missing'";
   assert.equal(isEnvironmentFailure(out), false);
   assert.equal(isEnvironmentFailure('Path "/x/fixtures" does not exist'), false);
+});
+
+test('Bug-Kategorie aus der Fehlerausgabe: nur eine Wächter-Sperre ist sicher „agent-guard“, sonst Vorschlag', () => {
+  assert.equal(
+    failureBugCategory('Agent „Entwickler“ scheiterte:\nAIdeation-Wächter: „cd /x“: Shell-Builtins sind gesperrt'),
+    'agent-guard',
+  );
+  for (const out of ['not ok 3 - speichert', 'Error: ENOENT: no such file or directory', '']) {
+    assert.equal(failureBugCategory(out), null, out);
+  }
+  // Die Einordnung ändert nichts an Umgebungs- oder Agent-Fehler: kein Neustart wegen der Kategorie.
+  assert.equal(isEnvironmentFailure('AIdeation-Wächter: gesperrt'), false);
 });
 
 test('EROFS, EACCES und EPERM (z. B. read_only-Container) sind Code-Fehler, kein endloser Neustart als Umgebung', () => {
