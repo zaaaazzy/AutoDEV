@@ -4,7 +4,8 @@ import { manualTodo, setActionTodo } from './action-todo.js';
 import { withProjectContext } from '../core/project-context.js';
 import { sendPush } from '../core/push.js';
 import { AGENT_STEP_STATUS } from '../core/status.js';
-import { isTransientFailure, registerFailure, ruleRefusal, usageLimitReset } from './autofix.js';
+import { isTransientFailure, registerFailure, ruleRefusal } from './autofix.js';
+import { noteProviderOutcome, USAGE_LIMIT_REASON, usageLimitReset } from '../core/provider-limits.js';
 import { startProgress } from '../agent/chat-progress.js';
 import { folderAvailable, hadOutage, missingFolderMessage } from '../core/folder-guard.js';
 import { isShuttingDown, killGroup } from '../core/shutdown.js';
@@ -45,6 +46,7 @@ import {
 } from './runner-context.js';
 import {
   type AgentResult,
+  configuredCommand,
   findResumableSession,
   invokeAgent,
   routeStep,
@@ -342,10 +344,18 @@ export async function runStep(
   let output = redactOutput(result.output, process.env);
   // Nutzungslimit des Agent-Kontos: kein Fehler im Auftrag, kein Bug, keine Wiederholung in Minuten. Der Auftrag bleibt
   // geplant und startet erst nach dem Reset wieder (retry_after); bisherige Schritte gelten wie bei einer Unterbrechung.
+  // Der Anbieterstatus (Dashboard) merkt sich das Limit bzw. setzt es nach einem erfolgreichen Schritt zurück.
+  const providerCommand =
+    configuredCommand(ctx, agent, routed) ?? (agent.role === 'tester' && !routed.model ? ctx.fallbackCommand : null);
   const limitReset = result.exitCode !== 0 && !cancelled ? usageLimitReset(output) : null;
+  if (!cancelled) {
+    await noteProviderOutcome(pool, providerCommand, { exitCode: result.exitCode, output }).catch(
+      logged('runner-steps'),
+    );
+  }
   if (limitReset) {
     const until = limitReset.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
-    const reason = `Unterbrochen: Nutzungslimit des Agent-Kontos erreicht – der Auftrag startet ab ${until} Uhr wieder.`;
+    const reason = `${USAGE_LIMIT_REASON} – der Auftrag startet ab ${until} Uhr wieder.`;
     await markInterrupted(pool, stepId, result, `${output}\n${reason}`);
     await pool
       .query(`UPDATE development_items SET retry_after = $2, failure = $3 WHERE id = $1`, [item.id, limitReset, reason])

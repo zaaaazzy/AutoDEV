@@ -37,6 +37,9 @@ const GLOBAL = new Set([
   // Ideen kommen im Body; die Abfragen filtern nach allowedProjects.
   'POST /ideation/bulk/reject',
   'POST /ideation/bulk/priority',
+  // Agent-Konto gilt für alle Projekte; Fortsetzen verlangt selbst Zugriff auf alle (provider-limits.ts).
+  'GET /agent-limits',
+  'POST /agent-limits/:provider/resume',
 ]);
 
 test('Jede registrierte API-Route deklariert Rolle und Mandanten', () => {

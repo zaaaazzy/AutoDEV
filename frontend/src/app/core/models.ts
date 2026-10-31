@@ -886,3 +886,16 @@ export interface BudgetOverview {
   };
   ollamaModels: string[];
 }
+
+/** Nutzungslimit eines Agent-Anbieters (GET /agent-limits); die Aktionen gibt der Server je Benutzer frei. */
+export interface ProviderLimit {
+  provider: string;
+  label: string;
+  status: 'ok' | 'limited';
+  since: string | null;
+  resetAt: string | null;
+  /** „org“: Limit der Organisation, erhöhen kann es nur ein Admin dort. */
+  scope?: 'account' | 'org';
+  paymentUrl: string;
+  actions: { pay: boolean; resume: boolean };
+}

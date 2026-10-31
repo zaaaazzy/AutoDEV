@@ -118,20 +118,23 @@ test('Nutzungslimit des Agent-Kontos: Agent-Fehler ohne Bug, Neustart erst nach 
   const now = new Date('2026-10-20T23:16:00+02:00');
   const reset = usageLimitReset(output, now);
   assert.ok(reset, 'Reset-Zeit erkannt');
-  // 00:40 Uhr des Folgetags plus drei Minuten Reserve.
-  assert.equal(reset.getHours(), 0);
-  assert.equal(reset.getMinutes(), 43);
+  // 00:40 Uhr (Zürich, MESZ) des Folgetags plus drei Minuten Reserve – unabhängig von der Zeitzone des Workers.
+  assert.equal(reset.toISOString(), '2026-10-20T22:43:00.000Z');
   assert.ok(reset.getTime() > now.getTime());
   // Wochenlimit mit Datum, Nachmittagszeit.
   const weekly = usageLimitReset("You've hit your weekly limit · resets Oct 24 at 3pm (Europe/Zurich)", now);
-  assert.equal(weekly?.getMonth(), 9);
-  assert.equal(weekly?.getDate(), 24);
-  assert.equal(weekly?.getHours(), 15);
-  // Ausgabenlimit (zwei Wörter vor „limit“): ebenfalls Agent-Fehler, Reset aus der Meldung.
+  assert.equal(weekly?.toISOString(), '2026-10-24T13:03:00.000Z');
+  // Ausgabenlimit (zwei Wörter vor „limit“): ebenfalls Agent-Fehler, Reset aus der Meldung (heute schon vorbei).
   const spend =
     "You've hit your monthly spend limit · raise it at https://claude.ai/settings/usage · your session limit resets 8:50pm (Europe/Zurich)";
   assert.equal(isAgentFailure(spend), true);
-  assert.equal(usageLimitReset(spend, now)?.getHours(), 20);
+  assert.equal(usageLimitReset(spend, now)?.toISOString(), '2026-10-21T18:53:00.000Z');
+  // Limit der Organisation (drei Wörter, Apostroph), Reset in UTC: ebenfalls Agent-Fehler, kein Bug.
+  const org =
+    "You've hit your org's monthly spend limit · ask your admin to raise it at https://claude.ai/admin-settings/usage · your session limit resets 10:20pm (UTC)";
+  assert.equal(isAgentFailure(org), true);
+  assert.equal(usageLimitReset(org, now)?.toISOString(), '2026-10-20T22:23:00.000Z');
+  assert.equal(isAgentFailure(org.replace("org's", 'org’s')), true, 'typografischer Apostroph');
   // Ohne lesbare Zeit: eine Stunde später. Ohne Limit-Meldung: nichts.
   const vague = usageLimitReset("You've hit your usage limit.", now);
   assert.equal(vague?.getTime(), now.getTime() + 60 * 60_000);
