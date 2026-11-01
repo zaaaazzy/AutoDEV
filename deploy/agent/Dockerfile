@@ -5,7 +5,7 @@
 # Gebaut aus dem Wurzelordner: docker build -t aideation-agent -f deploy/agent/Dockerfile .
 
 # Wächter (agent-guard.ts) als eine Datei bündeln: der PreToolUse-Hook prüft auch im Container jeden Zugriff.
-FROM node:22.22.3-bookworm-slim AS guard
+FROM node:26.13.0-bookworm-slim AS guard
 WORKDIR /build
 COPY package*.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund && npm rebuild esbuild
@@ -21,7 +21,7 @@ RUN npx --no-install esbuild src/core/egress-proxy.ts --bundle --platform=node -
     && npx --no-install esbuild src/runner/visual-capture-cli.ts --bundle --platform=node --format=esm --target=node22 \
       --external:playwright --outfile=/out/visual-capture.mjs
 
-FROM node:22.22.3-bookworm-slim AS node
+FROM node:26.13.0-bookworm-slim AS node
 
 # Statische Docker-CLI samt Compose- und Buildx-Plugin.
 FROM docker:29-cli AS dockercli
