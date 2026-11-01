@@ -34,7 +34,7 @@ jobs:
       # Ohne erreichbare Datenbank schlagen die Datenbank-Tests fehl, statt still übersprungen zu werden.
       DEV_LOG_TEST_REQUIRE_DATABASE: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -67,7 +67,7 @@ jobs:
       # Wegwerf-Datenbank des Service-Containers, kein Secret.
       E2E_ADMIN_DATABASE_URL: postgresql://devlog:devlog_ci_only@localhost:5432/postgres
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -93,7 +93,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Zugangsdaten nur für diesen Lauf
