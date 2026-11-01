@@ -28,6 +28,7 @@ import {
   type TestCategory,
 } from '../src/core/test-results.js';
 import { caseBugs, fileBugs, stepBug } from '../src/core/test-bugs.js';
+import { waitForBugCategories } from '../src/agent/bug-classifier.js';
 import { adminDatabaseUrl, localDatabaseUrl, readEnvValues } from '../src/core/local-database.js';
 import { connectExistingDatabase, readDatabaseConfig } from '../src/db/database.js';
 import {
@@ -276,6 +277,8 @@ class Recorder {
   async close(passed: boolean, report: string): Promise<string> {
     await saveTestReport(this.pool, this.runId, report);
     await finishTestRun(this.pool, this.runId, passed);
+    // Kategorien neuer Bugs (lokales Modell im Hintergrund) kurz abwarten; was dann noch fehlt, bleibt leer.
+    await waitForBugCategories(60_000);
     await this.pool.end();
     return this.runId;
   }

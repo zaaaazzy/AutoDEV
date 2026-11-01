@@ -2,6 +2,7 @@ import { logged } from '../core/log.js';
 import { withProjectContext } from '../core/project-context.js';
 import { AGENT_STEP_STATUS } from '../core/status.js';
 import { isSandboxFailure, registerFailure, usageLimitReset } from './autofix.js';
+import { noteProviderOutcome, USAGE_LIMIT_REASON } from '../core/provider-limits.js';
 import { folderAvailable, hadOutage, missingFolderMessage } from '../core/folder-guard.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { redactOutput } from '../core/command.js';
@@ -10,9 +11,13 @@ import { commitAgentStep } from './git-sync.js';
 import { buildPrompt } from './runner-prompts.js';
 import type { WorkflowAgent } from './runner-types.js';
 import { logEvent, orderFilePaths, recordBudgetCheckFailure, type RunContext } from './runner-context.js';
-import { type AgentResult, routeStep, stepModel } from './runner-agent.js';
+import { type AgentResult, configuredCommand, routeStep, stepModel } from './runner-agent.js';
 import { afterStep, MANUAL_TITLE, USER_MANUAL_TITLE } from './runner-settle.js';
 import { type Invocation, invokeWithRetry } from './step-invocation.js';
+import { probeBugfixOrder } from './counter-probe.js';
+import { gateExecutor, projectSandbox } from './test-sandbox.js';
+import { sandboxMode, usesSandbox } from '../core/sandbox.js';
+import { UNPROVEN_FIX_MARK } from '../core/shared-types.js';
 import {
   appendChangedFiles,
   collectHandoffs,
@@ -22,6 +27,7 @@ import {
   judgeConflicts,
   judgeReview,
   recordCoverage,
+  recordEvidence,
   refusedByRule,
 } from './step-evaluation.js';
 
@@ -234,7 +240,7 @@ async function interruptionOutcome(
   // Der Auftrag bleibt geplant und startet erst nach dem Reset wieder (retry_after).
   const limitReset = failed ? usageLimitReset(output) : null;
   if (limitReset) {
-    const reason = `Unterbrochen: Nutzungslimit des Agent-Kontos erreicht – der Auftrag startet ab ${clock(limitReset)} Uhr wieder.`;
+    const reason = `${USAGE_LIMIT_REASON} – der Auftrag startet ab ${clock(limitReset)} Uhr wieder.`;
     return pauseOrder(ctx, stepId, result, output, reason, limitReset);
   }
   // Das ganze Projekt pausiert (retry_after gilt projektweit), statt dass jeder Auftrag einzeln scheitert, Bugs anlegt
@@ -285,12 +291,13 @@ async function judgeStep(
   invocation: Invocation,
   hadConflicts: boolean,
   output: string,
+  coverageSaved: boolean,
 ): Promise<StepVerdict> {
   const { result, cancelled } = invocation;
   let passed = result.exitCode === 0 && !cancelled;
   let text = output;
   if (agent.role === 'tester' && !stepOptions.observer) {
-    const acceptance = await judgeAcceptance(ctx, agent, stepId, result, text);
+    const acceptance = await judgeAcceptance(ctx, agent, stepId, result, text, coverageSaved);
     text = acceptance.output;
     passed = passed && acceptance.passed;
   }
@@ -404,10 +411,67 @@ async function executeStep(
   const folderAtStart = folderAvailable(ctx.options.cwd);
   const invocation = await invokeWithRetry(ctx, agent, prompt, routed, stepId, position, total);
   const raw = redactOutput(invocation.result.output, process.env);
+  const providerCommand =
+    configuredCommand(ctx, agent, routed) ?? (agent.role === 'tester' && !routed.model ? ctx.fallbackCommand : null);
+  if (!invocation.cancelled) {
+    await noteProviderOutcome(pool, providerCommand, { exitCode: invocation.result.exitCode, output: raw }).catch(
+      logged('runner-steps'),
+    );
+  }
   const interrupted = await interruptionOutcome(ctx, agent, stepId, invocation, raw, folderAtStart);
   if (interrupted) return interrupted;
-  const verdict = await judgeStep(ctx, agent, stepId, stepOptions, invocation, hadConflicts, raw);
-  let output = await recordCoverage(ctx, agent, stepId, invocation.cancelled, verdict.output);
+  const coverage = await recordCoverage(ctx, agent, stepId, invocation.cancelled, raw);
+  const evidenceOutput = await recordEvidence(ctx, agent, stepId, invocation.cancelled, coverage.output);
+  let verdict = await judgeStep(
+    ctx,
+    agent,
+    stepId,
+    stepOptions,
+    invocation,
+    hadConflicts,
+    evidenceOutput,
+    coverage.saved,
+  );
+  let output = verdict.output;
+  if (
+    verdict.passed &&
+    agent.role === 'tester' &&
+    ctx.item.kind === 'bug' &&
+    ctx.branch &&
+    !stepOptions.observer &&
+    !invocation.cancelled
+  ) {
+    let probeUnproven = false;
+    try {
+      const outcome = await probeBugfixOrder({
+        pool,
+        item: ctx.item,
+        cwd: ctx.options.cwd,
+        baseBranch: ctx.branch.base,
+        changedFiles: (await orderFilePaths(ctx)) ?? [],
+        execute: ctx.execute,
+        testExecutor: (folder) =>
+          gateExecutor(pool, ctx.item.projectSlug, folder, ctx.execute, `${ctx.runId}-gegenprobe`),
+        linkModules: !usesSandbox(sandboxMode(await projectSandbox(pool, ctx.item.projectSlug))),
+        stepStartedAt: invocation.startedAt,
+      });
+      const cases = outcome.check.cases ?? [];
+      const count = (result: string) => cases.filter((entry) => entry.result === result).length;
+      const summary =
+        outcome.check.verdict === 'none'
+          ? 'keine neuen Testfälle'
+          : `${count('fails')} scheitern wie erwartet, ${count('passes')} bestehen, ${count('inconclusive')} nicht auswertbar`;
+      const event = `Gegenprobe: ${summary}${outcome.unproven ? ` – ${UNPROVEN_FIX_MARK}` : ''}${outcome.report ? ` (${outcome.report})` : ''}`;
+      output += `\n\n${outcome.section}`;
+      probeUnproven = outcome.unproven;
+      await logEvent(pool, stepId, event);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      output += `\n\n## Gegenprobe\n\nNicht gelaufen: ${message}\n`;
+      await logEvent(pool, stepId, `Gegenprobe nicht gelaufen: ${message}`.slice(0, 1000));
+    }
+    if (probeUnproven) verdict = { ...verdict, passed: false };
+  }
   await logEvent(
     pool,
     stepId,

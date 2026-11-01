@@ -139,24 +139,27 @@ export function stripAcceptance(output: string): string {
 }
 
 const COVERAGE = /abdeckung|coverage/i;
-const NOT_MEASURED = /nicht\s+(?:selbst\s+)?(?:ge)?mess|nicht\s+ermittel|blockiert|gesperrt|wächter|freigabe|\bnull\b/i;
+// „null“ gehört nicht mehr dazu: null-Werte sind keine gültige Meldung mehr, ein Hinweis darauf belegt keine Messung.
+const NOT_MEASURED = /nicht\s+(?:selbst\s+)?(?:ge)?mess|nicht\s+ermittel|blockiert|gesperrt|wächter|freigabe/i;
 /** Hinweise auf echte Lücken: rote Tests oder ein Kriterium ohne Test. Solche Punkte bleiben nicht erfüllt. */
 const REAL_GAP = /\brot(?:e[nm]?)?\b|fehlgeschlagen|\bfail|ungetestet|ohne\s+(?:einen\s+)?test|kein(?:en)?\s+test/i;
 
 /**
  * DoD-Punkte, die der Tester nur deshalb als nicht erfüllt meldet, weil er die Abdeckung nicht selbst messen konnte:
- * Die Abdeckung misst AIdeation nach dem Tester selbst. Solche Punkte gelten als erfüllt, sofern jedes
- * Akzeptanzkriterium erfüllt (also belegt) ist. Rote Tests oder unbelegte Kriterien bleiben ein Ablehnungsgrund.
+ * Solche Punkte gelten als erfüllt, sofern jedes Akzeptanzkriterium erfüllt (also belegt) ist und trotzdem ein
+ * gültiger Abdeckungsbericht gespeichert wurde (measured, in der Regel die Messung durch AIdeation). Fehlt jede
+ * gültige Messung, bleibt der Punkt offen. Rote Tests oder unbelegte Kriterien bleiben ein Ablehnungsgrund.
  */
 export function waiveUnmeasuredCoverage(
   result: { criteria: Checked[]; done: Checked[] },
   criteriaCount: number,
+  measured: boolean,
 ): { result: { criteria: Checked[]; done: Checked[] }; waived: number[] } {
   const allMet = Array.from({ length: criteriaCount }, (_, index) => index + 1).every(
     (nr) => result.criteria.find((check) => check.nr === nr)?.met,
   );
   const waived: number[] = [];
-  if (!allMet) return { result, waived };
+  if (!allMet || !measured) return { result, waived };
   const done = result.done.map((check) => {
     if (check.met || check.manual) return check;
     if (!COVERAGE.test(check.note) || !NOT_MEASURED.test(check.note) || REAL_GAP.test(check.note)) return check;
@@ -179,6 +182,85 @@ export function acceptanceProblems(
       return [`${label} ${index + 1} „${item}“: ${entry ? entry.note || 'nicht erfüllt' : 'nicht geprüft'}`];
     });
   return [...missing(criteria, result.criteria, 'Kriterium'), ...missing(definitionOfDone, result.done, 'DoD')];
+}
+
+/** Warum ein Testnachweis offen ist: Befehl für den Agent nicht freigegeben bzw. Gegenprobe noch nicht gelaufen. */
+export const EVIDENCE_REASONS = ['nicht_freigegeben', 'gegenprobe_fehlt'] as const;
+export type EvidenceReason = (typeof EVIDENCE_REASONS)[number];
+
+/** Offener Testnachweis aus einer @@NACHWEIS-Zeile: genau ein Befehl, der den Nachweis erbringt. */
+export interface Evidence {
+  datei: string;
+  befehl: string;
+  grund: EvidenceReason;
+}
+
+const EVIDENCE = /^[ \t]*@@NACHWEIS[ \t]+(\{.*\})[ \t]*$/gm;
+/** Jede Markerzeile, auch unlesbare: Sie gehört nicht in Schrittausgabe und Auftragsdoku. */
+const EVIDENCE_LINE = /^[ \t]*@@NACHWEIS\b.*(?:\r?\n|$)/gm;
+const MAX_EVIDENCE = 20;
+
+export const EVIDENCE_INSTRUCTIONS = `## Offene Testnachweise melden
+Konntest du einen Test, der ein Kriterium belegt, nicht selbst ausführen, melde ihn je Befehl mit genau einer Zeile:
+@@NACHWEIS {"datei":"src/a.test.ts","befehl":"npm test -- a","grund":"nicht_freigegeben"}
+- "datei": die Testdatei, "befehl": genau ein Befehl ohne Verkettung, Umleitung oder Variablen.
+- "grund": "nicht_freigegeben" (der Befehl ist für dich gesperrt, z. B. vom Wächter blockierte Flags) oder
+  "gegenprobe_fehlt" (der Befehl ist erlaubt, die Gegenprobe ist aber noch nicht gelaufen).
+Ein Mensch startet den Befehl über „Aktion notwendig“ als Projekttestlauf. Erteile dir keine Freigaben selbst und
+stelle einen nicht ausgeführten Test nie als erfolgreich oder geprüft dar.`;
+
+/** Liest die @@NACHWEIS-Zeilen; unlesbare Zeilen, fehlende Felder und unbekannte Gründe werden verworfen. */
+export function parseEvidence(output: string): Evidence[] {
+  const found = new Map<string, Evidence>();
+  for (const match of output.matchAll(EVIDENCE)) {
+    try {
+      const entry = JSON.parse(defined(match[1])) as Record<string, unknown>;
+      const befehl = typeof entry.befehl === 'string' ? entry.befehl.trim() : '';
+      const datei = typeof entry.datei === 'string' ? entry.datei.trim() : '';
+      const grund = entry.grund;
+      if (!befehl || befehl.length > 500 || /[\r\n\0]/.test(befehl) || datei.length > 300 || /[\r\n\0]/.test(datei))
+        continue;
+      if (!EVIDENCE_REASONS.includes(grund as EvidenceReason)) continue;
+      // Derselbe Befehl zählt einmal (der erste Eintrag gewinnt).
+      if (!found.has(befehl)) found.set(befehl, { datei, befehl, grund: grund as EvidenceReason });
+    } catch {
+      // unlesbare Zeile überspringen
+    }
+  }
+  return [...found.values()].slice(0, MAX_EVIDENCE);
+}
+
+export function stripEvidence(output: string): string {
+  return output.replace(EVIDENCE_LINE, '').trimEnd();
+}
+
+/**
+ * Speichert offene Testnachweise eines Auftrags. Derselbe Befehl wird je Auftrag nur einmal gespeichert – auch über
+ * mehrere Läufe. Ein späterer Lauf ändert einen vorhandenen Nachweis nur in einem Fall: Ist der Befehl inzwischen
+ * freigegeben (vorher „nicht_freigegeben“, jetzt „gegenprobe_fehlt“), wird der offene Nachweis wieder startbar –
+ * sonst bliebe er nach der Freigabe für immer ohne Startknopf. Gibt die Zahl neuer Nachweise zurück.
+ */
+export async function saveEvidence(
+  pool: Pick<Pool, 'query'>,
+  developmentId: string,
+  evidence: Evidence[],
+  agentName: string | null = null,
+): Promise<number> {
+  let created = 0;
+  for (const entry of evidence) {
+    const result = await pool.query<{ inserted: boolean }>(
+      `INSERT INTO test_evidence (development_id, position, datei, befehl, grund, agent_name)
+       VALUES ($1, (SELECT COALESCE(MAX(position), 0) + 1 FROM test_evidence WHERE development_id = $1), $2, $3, $4, $5)
+       ON CONFLICT (development_id, befehl) DO UPDATE
+         SET grund = EXCLUDED.grund, status = 'open', datei = EXCLUDED.datei, agent_name = EXCLUDED.agent_name
+         WHERE test_evidence.status <> 'passed' AND test_evidence.grund = 'nicht_freigegeben'
+           AND EXCLUDED.grund = 'gegenprobe_fehlt'
+       RETURNING (xmax = 0) AS inserted`,
+      [developmentId, entry.datei, entry.befehl, entry.grund, agentName],
+    );
+    created += result.rows.filter((row) => row.inserted).length;
+  }
+  return created;
 }
 
 export async function loadDefinitions(pool: Pool, project: string): Promise<{ ready: string[]; done: string[] }> {

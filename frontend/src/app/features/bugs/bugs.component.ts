@@ -112,7 +112,8 @@ export class BugsComponent {
       value: (bug) => severityLabel(bug.severity),
       sortValue: (bug) => SEVERITY_RANK.indexOf(bug.severity),
     },
-    categoryColumn<Bug>((bug) => bug.category),
+    // Kategoriefilter mit allen Kategorien und „Ohne Kategorie“; Zurücksetzen und Chips über die DataTable.
+    categoryColumn<Bug>((bug) => bug.category, true),
     { id: 'source', header: 'Quelle', value: (bug) => BUG_SOURCE_LABEL[bug.source] ?? 'Manuell' },
     {
       id: 'sprint',
@@ -164,6 +165,7 @@ export class BugsComponent {
     return [
       group('Gefunden von', 'Wer', stats.finders, 'Noch keine Bugs.'),
       group('Wo', 'Seite / Bereich', stats.places, 'Noch keine Zuordnung.'),
+      group('Nach Kategorie', 'Kategorie', stats.categories, 'Noch keine Bugs.'),
       group('In welchen Tests', 'Test', stats.tests, 'In den Berichten wird kein Test genannt.'),
     ];
   }

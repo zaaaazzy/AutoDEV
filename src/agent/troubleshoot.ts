@@ -7,6 +7,8 @@ import { type CommandExecutor, redactOutput } from '../core/command.js';
 import { runAuthorAgent } from './requirements.js';
 import type { RunnerOptions } from '../runner/runner-types.js';
 import { isShuttingDown } from '../core/shutdown.js';
+import { categoryFromBug } from '../core/bug-category.js';
+import { afterBugCreated } from './bug-classifier.js';
 import { AGENT_STEP_STATUS } from '../core/status.js';
 
 const MIN_ANALYSIS_CHARS = 60;
@@ -146,18 +148,17 @@ export async function analyzeBlocked(
       body.slice(0, 3000),
     ]);
   } else {
-    await pool.query(
-      `INSERT INTO bugs (project_slug, title, description, severity, source, status, fix_notes, development_id)
-       SELECT $1, $2, $3, 'high', 'agent', 'open', $4, $5
-        WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2)`,
-      [
-        options.project,
-        title,
-        `Aufgetreten bei Auftrag „${item.title}“.\n\n${body}`.slice(0, 10_000),
-        body.slice(0, 3000),
-        item.id,
-      ],
+    // Kategorie aus den Pfaden der Analyse, sonst im Hintergrund vom lokalen Modell; ohne beides bleibt sie leer.
+    const description = `Aufgetreten bei Auftrag „${item.title}“.\n\n${body}`.slice(0, 10_000);
+    const category = categoryFromBug({ title, description });
+    const created = await pool.query<{ id: string }>(
+      `INSERT INTO bugs (project_slug, title, description, severity, source, status, fix_notes, development_id, category)
+       SELECT $1, $2, $3, 'high', 'agent', 'open', $4, $5, $6
+        WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2)
+       RETURNING id`,
+      [options.project, title, description, body.slice(0, 3000), item.id, category],
     );
+    afterBugCreated(pool, created?.rows?.[0]?.id, category, { title, description });
   }
   await pool.query(
     `UPDATE development_items SET analysis_status = 'done', analysis = $2, updated_at = NOW() WHERE id = $1`,

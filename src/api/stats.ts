@@ -3,13 +3,33 @@ import type { Pool } from 'pg';
 import { access } from './access.js';
 import { localTimeZone } from '../core/time-zone.js';
 import { parseProjectSlug } from '../core/validation.js';
-import { calibratedSql, loadCalibration } from '../core/estimate-calibration.js';
+import {
+  type Calibration,
+  calibratedHours,
+  calibratedSql,
+  calibratedTokens,
+  calibrationSummary,
+  estimateHit,
+  type EstimateOverrun,
+  type HitRate,
+  hitRate,
+  loadCalibration,
+  loadEstimateOverruns,
+} from '../core/estimate-calibration.js';
 import { realFailureSql } from '../core/interrupted-steps.js';
+import { logged } from '../core/log.js';
 import { AGENT_STEP_STATUS, BUG_STATUS, DEVELOPMENT_STATUS, SPRINT_STATUS, TEST_RUN_STATUS } from '../core/status.js';
 
 type CountRow = { key: string; count: string };
 const counts = (rows: CountRow[]): Record<string, number> =>
   Object.fromEntries(rows.map((row) => [row.key, Number(row.count)]));
+
+/** Schätzfehler (Ist ÷ Schätzung) auf drei Stellen; null bleibt null (Sprint ohne erledigte, gemessene Aufträge). */
+const errorValue = (value: number | string | null | undefined): number | null => {
+  if (value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number * 1000) / 1000 : null;
+};
 
 async function sprintStats(pool: Pool, slug: string): Promise<Record<string, unknown> | null> {
   const timeZone = localTimeZone();
@@ -58,7 +78,7 @@ async function sprintStats(pool: Pool, slug: string): Promise<Record<string, unk
 export async function collectStats(pool: Pool, slug: string): Promise<Record<string, unknown>> {
   // Geschätzte Stunden und Tokens in Agent-Stunden bzw. gemessenen Tokens (kalibriert), vergleichbar mit „actual“.
   const calibration = await loadCalibration(pool, slug);
-  const [orders, kinds, ideas, bugs, severities, effort, tests, agentSteps, sprint, velocity, actual, testTotal] =
+  const [orders, kinds, ideas, bugs, severities, effort, tests, agentSteps, sprint, velocity, actual, testTotal, hits] =
     await Promise.all([
       pool.query<CountRow>(
         'SELECT status AS key, COUNT(*) AS count FROM development_items WHERE project_slug = $1 GROUP BY status',
@@ -103,10 +123,34 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
         [slug],
       ),
       sprintStats(pool, slug),
-      pool.query<{ name: string; status: string; total: string; done: string; hours: string }>(
-        `SELECT s.name, s.status, COUNT(d.id) AS total, COUNT(d.id) FILTER (WHERE d.status = '${DEVELOPMENT_STATUS.done}') AS done,
-              COALESCE(SUM(${calibratedSql('effort_hours', calibration, 'd')}) FILTER (WHERE d.status = '${DEVELOPMENT_STATUS.done}'), 0) AS hours
+      // Schätzfehler je Sprint: Median von Ist ÷ Schätzung (roh, wie geschätzt) der erledigten Aufträge mit Messung;
+      // ohne solche Aufträge null statt 0.
+      pool.query<{
+        id: string;
+        name: string;
+        status: string;
+        total: string;
+        done: string;
+        hours: string;
+        hourError: number | null;
+        tokenError: number | null;
+        errorSamples: string;
+      }>(
+        `SELECT s.id, s.name, s.status, COUNT(d.id) AS total,
+              COUNT(d.id) FILTER (WHERE d.status = '${DEVELOPMENT_STATUS.done}') AS done,
+              COALESCE(SUM(${calibratedSql('effort_hours', calibration, 'd')})
+                FILTER (WHERE d.status = '${DEVELOPMENT_STATUS.done}'), 0) AS hours,
+              percentile_cont(0.5) WITHIN GROUP (ORDER BY m.hours / d.effort_hours)
+                FILTER (WHERE m.hours > 0 AND d.effort_hours > 0) AS "hourError",
+              percentile_cont(0.5) WITHIN GROUP (ORDER BY m.tokens / d.token_estimate)
+                FILTER (WHERE m.tokens > 0 AND d.token_estimate > 0) AS "tokenError",
+              COUNT(d.id) FILTER (WHERE (m.hours > 0 AND d.effort_hours > 0)
+                                     OR (m.tokens > 0 AND d.token_estimate > 0)) AS "errorSamples"
          FROM sprints s LEFT JOIN development_items d ON d.sprint_id = s.id
+         LEFT JOIN LATERAL (
+              SELECT (SUM(st.duration_ms) / 3600000.0)::float8 AS hours, SUM(st.tokens)::float8 AS tokens
+                FROM agent_runs r JOIN agent_run_steps st ON st.run_id = r.id
+               WHERE r.development_id = d.id) m ON d.status = 'done' AND d.kind <> 'express'
         WHERE s.project_slug = $1 GROUP BY s.id ORDER BY s.created_at DESC LIMIT 8`,
         [slug],
       ),
@@ -117,7 +161,21 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
         [slug],
       ),
       pool.query<{ count: string }>('SELECT COUNT(*) AS count FROM test_runs WHERE project_slug = $1', [slug]),
+      // Trefferquote je Sprint: erledigte Aufträge mit Schätzung und gemessenem Verbrauch aller Agent-Schritte.
+      pool.query<HitRow>(
+        `SELECT d.sprint_id AS "sprintId", d.effort_hours AS "estHours", d.token_estimate AS "estTokens",
+                d.estimate_source AS source, SUM(st.duration_ms) / 3600000.0 AS hours, SUM(st.tokens) AS tokens
+           FROM development_items d
+           JOIN agent_runs r ON r.development_id = d.id
+           JOIN agent_run_steps st ON st.run_id = r.id
+          WHERE d.project_slug = $1 AND d.status = 'done' AND d.kind <> 'express' AND d.sprint_id IS NOT NULL
+          GROUP BY d.id`,
+        [slug],
+      ),
     ]);
+  const hitsBySprint = sprintHitRates(hits.rows, calibration);
+  // Laufende Aufträge über dem Dreifachen ihrer kalibrierten Schätzung; ein Fehler hier lässt die Statistik stehen.
+  const overruns = await loadEstimateOverruns(pool, slug).catch(logged('stats', [] as EstimateOverrun[]));
 
   const finishedTests = tests.rows.filter((run) => run.status !== TEST_RUN_STATUS.running);
   return {
@@ -153,13 +211,49 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
     })),
     sprint,
     velocity: [...velocity.rows].reverse().map((row) => ({
+      id: row.id,
       name: row.name,
       status: row.status,
       total: Number(row.total),
       done: Number(row.done),
       hours: Number(row.hours),
+      hitRate: hitsBySprint.get(row.id) ?? hitRate([]),
+      hourError: errorValue(row.hourError),
+      tokenError: errorValue(row.tokenError),
+      errorSamples: Number(row.errorSamples ?? 0),
     })),
+    // Korrekturfaktor je Herkunft (Median Ist ÷ Schätzung) samt Anzahl der Messwerte.
+    calibration: calibrationSummary(calibration),
+    overruns,
   };
+}
+
+/** Erledigter Auftrag eines Sprints: gespeicherte Schätzung samt Herkunft und gemessener Verbrauch. */
+export type HitRow = {
+  sprintId: string;
+  estHours: number | string | null;
+  estTokens: number | string | null;
+  source: string | null;
+  hours: number | string | null;
+  tokens: number | string | null;
+};
+
+const numberOrNull = (value: number | string | null): number | null => (value === null ? null : Number(value));
+
+/** Treffer je Sprint: Stunden und Tokens zwischen 0,5- und 2,0-mal der kalibrierten Schätzung. */
+export function sprintHitRates(rows: HitRow[], calibration: Calibration): Map<string, HitRate> {
+  const results = new Map<string, (boolean | null)[]>();
+  for (const row of rows) {
+    const hit = estimateHit(
+      { hours: numberOrNull(row.hours), tokens: numberOrNull(row.tokens) },
+      {
+        hours: calibratedHours(numberOrNull(row.estHours), row.source, calibration),
+        tokens: calibratedTokens(numberOrNull(row.estTokens), row.source, calibration),
+      },
+    );
+    results.set(row.sprintId, [...(results.get(row.sprintId) ?? []), hit]);
+  }
+  return new Map([...results].map(([sprintId, list]) => [sprintId, hitRate(list)]));
 }
 
 export function registerStatsRoutes(app: Router, pool: Pool): void {

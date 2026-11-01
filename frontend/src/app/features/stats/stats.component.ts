@@ -1,4 +1,4 @@
-import { Component, effect, inject, signal, untracked } from '@angular/core';
+import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import { errorMessage } from '../../core/errors.js';
 import { ProjectStore } from '../../core/project-store.js';
@@ -9,11 +9,15 @@ import {
 } from '../../shared/data-table/data-table.component.js';
 import { categoryColumn } from '../../shared/data-table/columns.js';
 import { formatHours, formatMoney, formatNumber } from '../../shared/format.js';
-import type { BudgetOverview } from '../../core/models.js';
+import type { BudgetOverview, ProjectStats } from '../../core/models.js';
+import { errorText, estimateTrend } from './estimate-trend.js';
 import { BudgetMeterComponent } from '../../shared/budget-meter.component.js';
 import { categoryLabel } from '../../shared/labels.js';
 import { DateTimePipe, HoursPipe, LocaleNumberPipe } from '../../shared/pipes.js';
+import { CHART_HEIGHT, CHART_WIDTH, chartY, COVERAGE_TARGET, coverageSeries } from './coverage-history.js';
 import { QualityPanelComponent } from './quality-panel.component.js';
+import { CoverageTrendComponent } from './coverage-trend.component.js';
+import { calibrationText, hitRateText } from './stats-text.js';
 
 interface Usage {
   tokens: number;
@@ -94,6 +98,8 @@ function shortRatio(actual: number, estimate: number | null | undefined): string
     : `${ratio.toLocaleString('de-DE', { maximumFractionDigits: 1 })}×`;
 }
 
+type SprintVelocity = ProjectStats['velocity'][number];
+
 /** Verbrauch nach Bereich, Art, Auftrag (Schätzung gegen tatsächlich) und Agent. */
 @Component({
   selector: 'app-stats',
@@ -104,6 +110,7 @@ function shortRatio(actual: number, estimate: number | null | undefined): string
     HoursPipe,
     LocaleNumberPipe,
     QualityPanelComponent,
+    CoverageTrendComponent,
     BudgetMeterComponent,
     DateTimePipe,
   ],
@@ -117,8 +124,13 @@ export class StatsComponent {
   protected readonly budget = signal<BudgetOverview | null>(null);
   protected readonly prompts = signal<PromptEntry[]>([]);
   protected readonly error = signal('');
+  protected readonly coverage = computed(() => coverageSeries(this.store.data().coverage?.history ?? []));
+  protected readonly chart = { width: CHART_WIDTH, height: CHART_HEIGHT, target: chartY(COVERAGE_TARGET) };
+  protected readonly coverageTarget = COVERAGE_TARGET;
   protected readonly ratioText = ratioText;
   protected readonly shortRatio = shortRatio;
+  protected readonly errorText = errorText;
+  protected readonly estimateTrend = computed(() => estimateTrend(this.store.data().stats?.velocity ?? []));
   protected readonly kindLabel = (key: string): string => KIND_LABELS[key] ?? key;
   protected readonly categoryLabel = (key: string): string => (key === 'none' ? 'Ohne Bereich' : categoryLabel(key));
 
@@ -207,6 +219,28 @@ export class StatsComponent {
       filter: false,
     },
   ];
+  protected readonly calibrationText = calibrationText;
+  protected readonly sprints = computed(() => this.store.data().stats?.velocity ?? []);
+  protected readonly calibration = computed(() => this.store.data().stats?.calibration ?? []);
+
+  protected readonly sprintColumns: DataColumn<SprintVelocity>[] = [
+    { id: 'name', header: 'Sprint', value: (row) => row.name, className: 'title-cell', filter: 'text' },
+    {
+      id: 'done',
+      header: 'Erledigt',
+      value: (row) => `${row.done} von ${row.total}`,
+      sortValue: (row) => row.done,
+      filter: false,
+    },
+    {
+      id: 'hitRate',
+      header: 'Trefferquote',
+      value: (row) => hitRateText(row.hitRate),
+      sortValue: (row) => row.hitRate?.percent ?? -1,
+      filter: false,
+    },
+  ];
+  protected readonly sprintId = (row: SprintVelocity): string => row.id ?? row.name;
   protected readonly orderId = (row: OrderUsage): string => row.id;
   protected readonly agentId = (row: AgentUsage): string => `${row.source}-${row.agent}`;
 

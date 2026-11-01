@@ -1,13 +1,29 @@
 // Status- und Routing-Typen kommen aus dem Backend (dort die einzige Definition), damit beide Seiten nicht
 // auseinanderlaufen.
-import type { BudgetPeriod, RoutingRule } from '../../../../src/core/shared-types.js';
+import type {
+  BudgetPeriod,
+  CounterProbeCase,
+  CounterProbeVerdict,
+  RoutingRule,
+} from '../../../../src/core/shared-types.js';
 import type { BugStatus, DevelopmentStatus, SprintStatus } from '../../../../src/core/status.js';
 
-export type { BudgetPeriod, RoutingCondition, RoutingRule, RuleEffect } from '../../../../src/core/shared-types.js';
+export type {
+  BudgetPeriod,
+  CounterProbeCase,
+  CounterProbeResult,
+  CounterProbeVerdict,
+  RoutingCondition,
+  RoutingRule,
+  RuleEffect,
+} from '../../../../src/core/shared-types.js';
 export type { BugStatus, DevelopmentStatus, SprintStatus } from '../../../../src/core/status.js';
 // Die Werte selbst (DEVELOPMENT_STATUS.done statt 'done'): Vergleiche und Listen bauen auf ihnen auf.
 export { BUG_STATUS, DEVELOPMENT_STATUS, IDEATION_STATUS, SPRINT_STATUS } from '../../../../src/core/status.js';
 
+import type { CoverageAreaKey } from '../../../../src/core/coverage-areas.js';
+
+export type { CoverageAreaKey };
 export type Priority = 'low' | 'medium' | 'high';
 /** review = Pull Request offen (PR-Modus der GitHub-Brücke), Merge und Tag folgen nach grüner CI. */
 export type GithubMode = 'aus' | 'issues' | 'issues+pr';
@@ -136,6 +152,8 @@ export interface Idea extends Estimate {
   /** Herkunft: von Hand erfasst oder vom Visionär vorgeschlagen (weitere Quellen folgen). */
   source?: IdeaSource;
   rejectionReason?: string | null;
+  /** Art (Vergleichsgruppe der Schätzung); ohne Angabe `feature`. */
+  kind?: 'feature' | 'bug';
   /** Herkunft aus GitHub: owner/repo#123. */
   externalRef?: string | null;
 }
@@ -192,6 +210,27 @@ export interface Attachment {
   size: number;
 }
 
+/**
+ * Ergebnis je Testdatei: fails = scheitert ohne Fix, passes = läuft auch ohne Fix grün, import = bricht beim Import
+ * ab, skipped = nicht bewertet (Playwright), error = Gegenprobe gescheitert.
+ */
+export type CounterCheckResult = 'fails' | 'passes' | 'import' | 'skipped' | 'error';
+
+export interface CounterCheck {
+  checkedAt: string;
+  base: string | null;
+  commit: string | null;
+  files: { path: string; result: CounterCheckResult; detail?: string }[];
+  /** Fehler der Gegenprobe selbst; kein Blocker. */
+  error?: string;
+  runId?: string;
+  /** Gegenprobe je neuem Testfall im Tester-Schritt (nur Bugfixes); fehlt bei der älteren Prüfung je Datei. */
+  cases?: CounterProbeCase[];
+  verdict?: CounterProbeVerdict;
+  /** Warum keine Gegenprobe lief bzw. warum sie nicht auswertbar ist. */
+  reason?: string;
+}
+
 export interface DevelopmentItem extends Estimate {
   id: string;
   title: string;
@@ -221,6 +260,8 @@ export interface DevelopmentItem extends Estimate {
   visualApprovedBy?: string | null;
   /** Vom Auftrag geänderte Dateien (gegenüber der Basis, nach jedem Agent-Schritt aktualisiert). */
   changedFiles?: string[];
+  /** Gegenprobe eines Bugfixes (geänderte Tests auf dem Stand vor dem Fix); null = keine Gegenprobe. */
+  counterCheck?: CounterCheck | null;
   /** Folgeauftrag: bezieht sich auf diesen abgeschlossenen Auftrag. */
   followUpOf?: string | null;
   fixStatus?: string | null;
@@ -522,7 +563,42 @@ export interface ProjectStats {
     percent: number;
     burndown: { day: string; remaining: number }[];
   } | null;
-  velocity: { name: string; status: string; total: number; done: number; hours: number }[];
+  velocity: {
+    id?: string;
+    name: string;
+    status: string;
+    total: number;
+    done: number;
+    hours: number;
+    /** Trefferquote der Schätzung: Treffer von gemessenen erledigten Aufträgen (percent null = keine gemessen). */
+    hitRate?: { hits: number; measured: number; percent: number | null };
+    /** Schätzfehler: Median Ist ÷ Schätzung der erledigten Aufträge; null ohne erledigte, gemessene Aufträge. */
+    hourError?: number | null;
+    tokenError?: number | null;
+    errorSamples?: number;
+  }[];
+  /** Korrekturfaktor je Herkunft der Schätzung (Median Ist ÷ Schätzung) und Anzahl der Messwerte. */
+  calibration?: {
+    source: string;
+    label: string;
+    hours: number;
+    tokens: number;
+    samples: number;
+    scope: 'project' | 'all' | 'default';
+  }[];
+  /** Laufende Aufträge über dem Dreifachen ihrer kalibrierten Schätzung (Stunden oder Tokens). */
+  overruns?: EstimateOverrun[];
+}
+
+export interface EstimateOverrun {
+  id: string;
+  title: string;
+  status: string;
+  actual: { hours: number; tokens: number };
+  calibrated: { hours: number | null; tokens: number | null };
+  ratio: { hours: number | null; tokens: number | null };
+  exceeded: { hours: boolean; tokens: boolean };
+  scope: string;
 }
 
 export interface DraftOrder {
@@ -628,8 +704,9 @@ export interface AgentActivity {
   sprintEnd: string | null;
 }
 
+/** Je Bereichsschlüssel der neueste vollständige Lauf (ohne vollständigen Lauf: Prozentwerte null). */
 export interface CoverageArea {
-  area: string;
+  area: CoverageAreaKey;
   unit: number;
   component: number;
   integration: number;
@@ -640,9 +717,19 @@ export interface CoverageArea {
   statements: number | null;
   branches: number | null;
   functions: number | null;
+  /** Datum des Laufs, aus dem die Zeile stammt. */
+  createdAt: string;
+  complete: boolean;
 }
 
-/** Letzter Abdeckungsbericht des Testers. */
+/** Zeilenabdeckung eines vollständigen Laufs für den Verlauf je Bereich. */
+export interface CoverageHistoryPoint {
+  area: CoverageAreaKey;
+  lines: number;
+  createdAt: string;
+}
+
+/** Letzter Abdeckungsbericht des Testers mit der Übersicht je Bereich und dem Verlauf. */
 export interface CoverageReport {
   id: string;
   summary: string;
@@ -650,6 +737,21 @@ export interface CoverageReport {
   developmentId: string | null;
   orderTitle: string | null;
   areas: CoverageArea[];
+  history: CoverageHistoryPoint[];
+}
+
+/** Ein Bericht in der Zeitreihe eines Bereichs; null = im Altbestand nicht gemeldet (Lücke, nicht 0 %). */
+export interface CoverageTrendPoint {
+  reportId: string;
+  date: string;
+  lines: number | null;
+  branches: number | null;
+  tests: number;
+}
+
+/** Zeitreihe je fester Bereich (COVERAGE_AREA_KEYS), nach Datum aufsteigend. */
+export interface CoverageTrend {
+  areas: { area: CoverageAreaKey; points: CoverageTrendPoint[] }[];
 }
 
 export interface AcceptanceCheck {
@@ -662,6 +764,25 @@ export interface AcceptanceCheck {
   status: 'open' | 'met' | 'unmet' | 'manual' | 'verifying' | 'checking';
   note: string | null;
   checkedAt: string | null;
+}
+
+/** Offener Testnachweis (@@NACHWEIS von Tester bzw. Dokumentierer): ein Befehl, den ein Mensch als Testlauf startet. */
+export interface TestEvidence {
+  id: string;
+  developmentId: string;
+  position: number;
+  datei: string;
+  befehl: string;
+  /** nicht_freigegeben = Befehl für den Agent gesperrt, gegenprobe_fehlt = Lauf steht noch aus. */
+  grund: 'nicht_freigegeben' | 'gegenprobe_fehlt';
+  status: 'open' | 'passed' | 'failed' | 'nicht_freigegeben';
+  agentName: string | null;
+  runId: string | null;
+  checkedAt: string | null;
+  /** Lässt die Befehlsprüfung (isAllowedCommand) den Befehl zu? Sonst nur der Verweis auf die Rechte. */
+  allowed: boolean;
+  /** Ein Testlauf für diesen Nachweis ist angefordert oder läuft. */
+  running: boolean;
 }
 
 export interface AcceptanceDefaults {
@@ -686,6 +807,10 @@ export interface ProjectData {
   acceptance: AcceptanceCheck[];
   acceptanceDefaults: AcceptanceDefaults | null;
   docRevisions: DocRevision[];
+  /** Offene (nicht abgehakte) Testnachweise. */
+  evidence: TestEvidence[];
+  /** Ein kompletter Test (bzw. Nachweis-Lauf) des Projekts ist angefordert oder läuft. */
+  testRunning: boolean;
 }
 
 export const emptyProjectData = (): ProjectData => ({
@@ -705,6 +830,8 @@ export const emptyProjectData = (): ProjectData => ({
   acceptance: [],
   acceptanceDefaults: null,
   docRevisions: [],
+  evidence: [],
+  testRunning: false,
 });
 
 export interface ChatMessage {
@@ -798,4 +925,17 @@ export interface BudgetOverview {
     strongCommand: string[] | null;
   };
   ollamaModels: string[];
+}
+
+/** Nutzungslimit eines Agent-Anbieters (GET /agent-limits); die Aktionen gibt der Server je Benutzer frei. */
+export interface ProviderLimit {
+  provider: string;
+  label: string;
+  status: 'ok' | 'limited';
+  since: string | null;
+  resetAt: string | null;
+  /** „org“: Limit der Organisation, erhöhen kann es nur ein Admin dort. */
+  scope?: 'account' | 'org';
+  paymentUrl: string;
+  actions: { pay: boolean; resume: boolean };
 }

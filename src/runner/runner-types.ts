@@ -23,6 +23,8 @@ export interface WorkItem {
    */
   category?: string | null;
   effortHours?: number | null;
+  /** Token-Schätzung (für die Überschreitungsprüfung nach jedem Schritt). */
+  tokenEstimate?: number | null;
   estimateSource?: string | null;
   retryCount?: number;
 }

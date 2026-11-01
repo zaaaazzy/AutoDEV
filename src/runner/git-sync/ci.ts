@@ -8,7 +8,7 @@ import { gitEnvironment, runProjectCommand } from '../project-command.js';
 import { defined } from '../../core/defined.js';
 
 // Projekttests können den kompletten Oberflächentest mit Playwright enthalten (Desktop und Handy).
-const TEST_TIMEOUT_MS = 45 * 60_000;
+export const TEST_TIMEOUT_MS = 45 * 60_000;
 
 const CI_WORKFLOW = join('.github', 'workflows', 'devlog-ci.yml');
 const CI_WAIT_MS = 30 * 60_000;
@@ -197,6 +197,55 @@ export function gateFailureSummary(output: string): string {
   return parts.join(' ').slice(0, SUMMARY_CHARS);
 }
 
+/**
+ * Ladefehler einer Testdatei: fehlendes Modul oder Paket, Syntaxfehler, nicht übersetzbare Datei (node:test, tsx,
+ * Vitest, Jest). Bewusst ohne ENOENT: Ein fehlender Pfad ist ein Ladefehler nur als „Cannot find module“.
+ */
+const LOAD_ERROR =
+  /Cannot find module|ERR_MODULE_NOT_FOUND|Cannot find package|SyntaxError|Failed to load|Failed to resolve import|Transform failed|Test suite failed to run/;
+/**
+ * Zeilen, die einen einzelnen Testfall melden: Spec-Reporter von node:test, Jest und Vitest (✔ ✖ ✓ × …), TAP
+ * (`ok 1 - …`, `not ok 1 - …`, `# Subtest: …`) und Vitest-Fehler (`FAIL datei > Test`).
+ */
+const TEST_CASE = /^(?:[✔✓√✖✕×✗﹣]\s+\S|(?:not )?ok \d+ - |# Subtest: |FAIL\s+\S.*\s>\s)/;
+
+/** Ergebnis eines Testbefehls für genau eine Testdatei. */
+export type TestFileOutcome = 'passed' | 'failed' | 'load-error';
+
+/**
+ * Wertet den Lauf einer einzelnen Testdatei aus. Ein Ladefehler zählt nur, wenn er vor dem ersten Testfall in der
+ * Ausgabe steht; ein fehlendes Modul oder ENOENT innerhalb eines laufenden Testfalls ist ein normaler roter Test.
+ * Zeilen, die die Datei selbst benennen (node:test meldet einen Ladefehler als „✖ datei“), sind kein Testfall.
+ */
+export function classifyTestFileRun(exitCode: number, output: string, file: string): TestFileOutcome {
+  if (exitCode === 0) return 'passed';
+  const name = file.split('/').pop() ?? file;
+  let offset = 0;
+  let firstCase = -1;
+  for (const raw of output.split('\n')) {
+    const line = raw.trim();
+    const fileLevel = line.includes(name) && !/\s>\s/.test(line);
+    if (TEST_CASE.test(line) && !fileLevel && !/^✖ failing tests:/.test(line)) {
+      firstCase = offset;
+      break;
+    }
+    offset += raw.length + 1;
+  }
+  const loadError = output.search(LOAD_ERROR);
+  if (loadError >= 0 && (firstCase < 0 || loadError < firstCase)) return 'load-error';
+  return 'failed';
+}
+
+/** Erste Zeile mit einem Ladefehler (für die Meldung „bricht beim Import ab“), sonst null. */
+export function loadErrorLine(output: string): string | null {
+  return (
+    output
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => LOAD_ERROR.test(line)) ?? null
+  );
+}
+
 /** Führt die Testbefehle des Projekts aus; wirft mit einer Kurzfassung (rote Schritte, Befunde), sobald einer fehlschlägt. */
 export async function runTestGate(
   execute: CommandExecutor,
@@ -242,5 +291,6 @@ export function ciLogExcerpt(log: string, environment: NodeJS.ProcessEnv = proce
     .split('\n')
     .filter((line) => line.trim());
   const tail = lines.slice(-CI_LOG_LINES).join('\n');
-  return tail.length > CI_LOG_CHARS ? `…${tail.slice(-CI_LOG_CHARS)}` : tail;
+  // Mit dem Auslassungszeichen höchstens CI_LOG_CHARS Zeichen.
+  return tail.length > CI_LOG_CHARS ? `…${tail.slice(-(CI_LOG_CHARS - 1))}` : tail;
 }

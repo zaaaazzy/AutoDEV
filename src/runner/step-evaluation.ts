@@ -7,6 +7,7 @@ import { logged } from '../core/log.js';
 import { handoffTarget, parseHandoffs } from '../core/workflow-phases.js';
 import { manualTodo, setActionTodo } from './action-todo.js';
 import { sendPush } from '../core/push.js';
+import { EVIDENCE_ROLES } from './runner-prompts.js';
 import { ruleRefusal } from './autofix.js';
 import type { CommandExecutor } from '../core/command.js';
 import { changedFilesSection, conflictPrompt, type OrderBranch, unresolvedConflicts } from './git-sync.js';
@@ -17,8 +18,11 @@ import {
   acceptanceProblems,
   manualChecks,
   parseAcceptance,
+  parseEvidence,
   saveAcceptance,
+  saveEvidence,
   stripAcceptance,
+  stripEvidence,
   waiveUnmeasuredCoverage,
 } from './acceptance.js';
 import type { WorkflowAgent } from './runner-types.js';
@@ -59,13 +63,16 @@ export async function judgeAcceptance(
   stepId: string,
   result: AgentResult,
   output: string,
+  coverageSaved: boolean,
 ): Promise<Verdict> {
   const { pool, item } = ctx;
   if (!ctx.definitionOfDone) return { output, passed: true };
   const criteria = ctx.criteria ?? [];
   const reportedAcceptance = parseAcceptance(output, criteria.length, ctx.definitionOfDone.length);
   // Fehlt nur die eigene Abdeckungsmessung des Testers, ist das kein Abnahmegrund: AIdeation misst danach selbst.
-  const waiver = reportedAcceptance ? waiveUnmeasuredCoverage(reportedAcceptance, criteria.length) : null;
+  const waiver = reportedAcceptance
+    ? waiveUnmeasuredCoverage(reportedAcceptance, criteria.length, coverageSaved)
+    : null;
   const acceptance = waiver?.result ?? null;
   if (waiver?.waived.length) {
     await logEvent(
@@ -171,10 +178,13 @@ export async function recordCoverage(
   stepId: string,
   cancelled: boolean,
   output: string,
-): Promise<string> {
-  if (agent.role !== 'tester') return output;
+): Promise<{ output: string; saved: boolean }> {
+  if (agent.role !== 'tester') return { output, saved: false };
   const { pool, item, options, execute } = ctx;
   const reported = parseCoverage(output);
+  for (const message of reported.errors) {
+    await logEvent(pool, stepId, `Testabdeckung des Testers verworfen: ${message}`);
+  }
   const refusedSetup: string[] = [];
   const measured = cancelled
     ? []
@@ -190,13 +200,48 @@ export async function recordCoverage(
     await logEvent(pool, stepId, message);
     extended += `\n\n${message}`;
   }
-  const coverage = mergeCoverage(reported, measured);
-  if (!coverage) return extended;
-  await saveCoverage(pool, item.projectSlug, item.id, coverage).catch((error) =>
-    console.error('Coverage could not be saved:', error),
-  );
-  await logEvent(pool, stepId, `Testabdeckung gespeichert (${coverage.areas.map((area) => area.area).join(', ')})`);
-  return stripCoverage(extended);
+  const merged = mergeCoverage(reported.report, measured);
+  for (const message of merged.errors) await logEvent(pool, stepId, message);
+  let saved = false;
+  if (merged.report) {
+    const failure = await saveCoverage(pool, item.projectSlug, item.id, merged.report).then(
+      () => null,
+      (error: unknown) => {
+        console.error('Coverage could not be saved:', error);
+        return error instanceof Error ? error.message : String(error);
+      },
+    );
+    saved = failure === null;
+    await logEvent(
+      pool,
+      stepId,
+      saved
+        ? `Testabdeckung gespeichert (${merged.report.areas.map((area) => area.area).join(', ')})`
+        : `Testabdeckung nicht gespeichert: ${failure}`.slice(0, 1000),
+    );
+  } else {
+    await logEvent(pool, stepId, 'Testabdeckung nicht gespeichert: kein gültiger Bericht und keine Messung');
+  }
+  const errors = [...reported.errors, ...merged.errors];
+  if (errors.length) extended += `\n\nTestabdeckung des Testers verworfen: ${errors.join(' ')}`;
+  return { output: stripCoverage(extended), saved };
+}
+
+/** Speichert gemeldete offene Testnachweise und entfernt deren Marker aus der sichtbaren Ausgabe. */
+export async function recordEvidence(
+  ctx: RunContext,
+  agent: WorkflowAgent,
+  stepId: string,
+  cancelled: boolean,
+  output: string,
+): Promise<string> {
+  if (cancelled || !EVIDENCE_ROLES.has(agent.role)) return output;
+  const evidence = parseEvidence(output);
+  const stripped = stripEvidence(output);
+  if (!evidence.length) return stripped;
+  const created = await saveEvidence(ctx.pool, ctx.item.id, evidence, agent.name).catch(logged('step-evaluation', 0));
+  await logEvent(ctx.pool, stepId, `Testnachweise: ${evidence.length} gemeldet, ${created} neu`);
+  return stripped;
 }
 
 export interface Handoff {

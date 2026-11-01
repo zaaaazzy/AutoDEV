@@ -298,7 +298,8 @@ test('stores effort, token, benefit and cost estimates on ideas and rejects out-
       }),
     });
     assert.equal(created.status, 201);
-    assert.deepEqual(queries[0]?.values.slice(5), [12.5, 40000, 8, 3, 'frontend']);
+    // Ohne Art: null, die Abfrage setzt dann `feature`.
+    assert.deepEqual(queries[0]?.values.slice(5), [12.5, 40000, 8, 3, 'frontend', null]);
 
     for (const invalid of [
       { benefit: 11 },
@@ -1165,6 +1166,209 @@ test('Ablehnen mit Grund: Status rejected, Grund an der Idee und als Kommentar',
   assert.deepEqual(update.values.slice(0, 2), [IDEA_ID, 'Kein Bedarf im Team']);
   const comment = calls.find((call) => call.sql.includes('INSERT INTO ideation_comments'))!;
   assert.deepEqual(comment.values, [IDEA_ID, 'Pia', '**Abgelehnt:** Kein Bedarf im Team']);
+});
+
+/** memberPool mit Transaktions-Client (connect), der dieselben Antworten liefert. */
+function transactionPool(roles: string[], answer: (sql: string, values: unknown[]) => unknown): Pool {
+  const pool = memberPool(roles, answer);
+  return Object.assign(pool, { connect: async () => ({ query: pool.query.bind(pool), release: () => undefined }) });
+}
+
+const BULK_IDS = [
+  '11111111-1111-4111-8111-11111111111a',
+  '11111111-1111-4111-8111-11111111111b',
+  '11111111-1111-4111-8111-11111111111c',
+];
+const REQUESTED_ID = '11111111-1111-4111-8111-11111111111d';
+
+test('Massenablehnung: alle zulässigen Ideen mit Grund und Kommentar in einer Transaktion, der Rest übersprungen', async () => {
+  const calls: { sql: string; values: unknown[] }[] = [];
+  let failComments = false;
+  const pool = transactionPool(['plan'], (sql, values) => {
+    // Nur Ideen und Transaktion mitschreiben, nicht die Abfragen der Anmeldung.
+    if (/ideation|^(BEGIN|COMMIT|ROLLBACK)/.test(sql)) calls.push({ sql, values });
+    if (sql.startsWith('UPDATE ideation_items')) {
+      return { rows: BULK_IDS.map((id, index) => ({ id, title: `Idee ${index + 1}` })) };
+    }
+    if (sql.includes('INSERT INTO ideation_comments') && failComments) throw new Error('Kommentar fehlgeschlagen');
+    if (sql.startsWith('SELECT id, title, status FROM ideation_items')) {
+      return { rows: [{ id: REQUESTED_ID, title: 'Läuft schon', status: 'requested' }] };
+    }
+    return undefined;
+  });
+  await withServer(pool, async (baseUrl) => {
+    const reject = (body: unknown) =>
+      fetch(`${baseUrl}/api/ideation/bulk/reject`, {
+        method: 'POST',
+        headers: sessionHeaders,
+        body: JSON.stringify(body),
+      });
+    assert.equal((await reject({ ids: BULK_IDS, reason: '   ' })).status, 400);
+    assert.equal((await reject({ ids: BULK_IDS })).status, 400);
+    assert.equal((await reject({ ids: Array.from({ length: 201 }, () => IDEA_ID), reason: 'x' })).status, 400);
+    assert.equal((await reject({ ids: ['bulk'], reason: 'x' })).status, 400);
+    assert.equal(calls.length, 0, 'ungültige Anfragen schreiben nichts');
+
+    const response = await reject({ ids: [...BULK_IDS, REQUESTED_ID], reason: ' Passt nicht zur Vision ' });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.deepEqual(
+      result.rejected.map((idea: { id: string }) => idea.id),
+      BULK_IDS,
+    );
+    assert.deepEqual(result.skipped, [
+      { id: REQUESTED_ID, title: 'Läuft schon', status: 'requested', reason: 'nicht möglich' },
+    ]);
+  });
+  const statements = calls.map((call) => call.sql.split(/\s/)[0]);
+  assert.deepEqual(statements, ['BEGIN', 'UPDATE', 'INSERT', 'COMMIT', 'SELECT']);
+  const update = calls.find((call) => call.sql.startsWith('UPDATE ideation_items'))!;
+  assert.match(update.sql, /status = 'rejected', rejection_reason = \$2/);
+  assert.match(update.sql, /WHERE id = ANY\(\$1::uuid\[\]\) AND status = ANY\(\$3\)/);
+  assert.deepEqual(update.values, [
+    [...BULK_IDS, REQUESTED_ID],
+    'Passt nicht zur Vision',
+    ['idea', 'considering', 'review'],
+    ['p'],
+  ]);
+  const comment = calls.find((call) => call.sql.includes('INSERT INTO ideation_comments'))!;
+  assert.match(comment.sql, /SELECT unnest\(\$1::uuid\[\]\)/);
+  assert.deepEqual(comment.values, [BULK_IDS, 'Pia', '**Abgelehnt:** Passt nicht zur Vision']);
+
+  // Scheitern die Kommentare, wird auch die Statusänderung zurückgenommen.
+  calls.length = 0;
+  failComments = true;
+  await withServer(pool, async (baseUrl) => {
+    const failed = await fetch(`${baseUrl}/api/ideation/bulk/reject`, {
+      method: 'POST',
+      headers: sessionHeaders,
+      body: JSON.stringify({ ids: BULK_IDS, reason: 'Kein Bedarf' }),
+    });
+    assert.ok(failed.status >= 500, `Status ${failed.status}`);
+  });
+  assert.deepEqual(
+    calls.map((call) => call.sql.split(/\s/)[0]),
+    ['BEGIN', 'UPDATE', 'INSERT', 'ROLLBACK'],
+  );
+});
+
+test('Massenpriorität: setzt die Priorität nur auf bearbeitbaren Ideen des eigenen Projekts', async () => {
+  const calls: { sql: string; values: unknown[] }[] = [];
+  const pool = memberPool(['plan'], (sql, values) => {
+    if (sql.includes('ideation')) calls.push({ sql, values });
+    if (sql.startsWith('UPDATE ideation_items')) return { rows: [{ id: BULK_IDS[0], title: 'Idee 1' }] };
+    if (sql.startsWith('SELECT id, title, status FROM ideation_items')) {
+      return { rows: [{ id: BULK_IDS[1], title: 'Abgelehnt', status: 'rejected' }] };
+    }
+    return undefined;
+  });
+  await withServer(pool, async (baseUrl) => {
+    const prioritize = (body: unknown) =>
+      fetch(`${baseUrl}/api/ideation/bulk/priority`, {
+        method: 'POST',
+        headers: sessionHeaders,
+        body: JSON.stringify(body),
+      });
+    assert.equal((await prioritize({ ids: BULK_IDS, priority: 'urgent' })).status, 400);
+    assert.equal((await prioritize({ ids: [], priority: 'high' })).status, 400);
+    const response = await prioritize({ ids: BULK_IDS, priority: 'high' });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.deepEqual(result.changed, [{ id: BULK_IDS[0], title: 'Idee 1' }]);
+    assert.deepEqual(
+      result.skipped.map((idea: { id: string; reason: string }) => [idea.id, idea.reason]),
+      [
+        [BULK_IDS[1], 'nicht möglich'],
+        [BULK_IDS[2], 'nicht gefunden'],
+      ],
+    );
+  });
+  const update = calls.find((call) => call.sql.startsWith('UPDATE ideation_items'))!;
+  assert.match(update.sql, /SET priority = \$2/);
+  assert.match(update.sql, /WHERE id = ANY\(\$1::uuid\[\]\) AND status = ANY\(\$3\)/);
+  assert.deepEqual(update.values, [BULK_IDS, 'high', ['idea', 'considering', 'review'], ['p']]);
+  assert.equal(calls.filter((call) => call.sql.startsWith('UPDATE')).length, 1);
+});
+
+test('Massenaktionen ohne Admin: Ideen fremder Projekte bleiben unverändert und gelten als nicht gefunden', async () => {
+  // Kleine Ideen-Tabelle: eine Idee im eigenen Projekt p, zwei im fremden Projekt q.
+  const ideas = [
+    { id: BULK_IDS[0], title: 'Eigene Idee', status: 'idea', project: 'p' },
+    { id: BULK_IDS[1], title: 'Fremde Idee', status: 'idea', project: 'q' },
+    { id: BULK_IDS[2], title: 'Fremd in Prüfung', status: 'review', project: 'q' },
+  ];
+  // Wertet die Bedingung „id = ANY($1) [AND status = ANY($3)] AND project_slug = ANY(allowed)“ wie die Datenbank aus.
+  const matching = (ids: unknown, allowed: unknown, statuses?: unknown) =>
+    ideas.filter(
+      (idea) =>
+        (ids as string[]).includes(idea.id) &&
+        (allowed === null || (allowed as string[]).includes(idea.project)) &&
+        (!statuses || (statuses as string[]).includes(idea.status)),
+    );
+  const comments: unknown[][] = [];
+  const updates: unknown[][] = [];
+  const pool = transactionPool(['plan'], (sql, values) => {
+    if (sql.startsWith('UPDATE ideation_items')) {
+      updates.push(values);
+      return { rows: matching(values[0], values[3], values[2]).map(({ id, title }) => ({ id, title })) };
+    }
+    if (sql.includes('INSERT INTO ideation_comments')) comments.push(values[0] as unknown[]);
+    if (sql.startsWith('SELECT id, title, status FROM ideation_items')) {
+      return { rows: matching(values[0], values[1]).map(({ id, title, status }) => ({ id, title, status })) };
+    }
+    return undefined;
+  });
+  await withServer(pool, async (baseUrl) => {
+    const post = (path: string, body: unknown) =>
+      fetch(`${baseUrl}/api/ideation/bulk/${path}`, {
+        method: 'POST',
+        headers: sessionHeaders,
+        body: JSON.stringify(body),
+      }).then(async (response) => ({ status: response.status, body: await response.json() }));
+    const reasons = (skipped: { id: string; reason: string }[]) => skipped.map((idea) => [idea.id, idea.reason]);
+    const foreign = [
+      [BULK_IDS[1], 'nicht gefunden'],
+      [BULK_IDS[2], 'nicht gefunden'],
+    ];
+    const rejected = await post('reject', { ids: BULK_IDS, reason: 'Kein Bedarf' });
+    assert.equal(rejected.status, 200);
+    assert.deepEqual(rejected.body.rejected, [{ id: BULK_IDS[0], title: 'Eigene Idee' }]);
+    assert.deepEqual(reasons(rejected.body.skipped), foreign);
+    // Fremde Titel werden nicht verraten.
+    assert.ok(rejected.body.skipped.every((idea: { title: unknown }) => idea.title === null));
+
+    const prioritized = await post('priority', { ids: BULK_IDS.slice(1), priority: 'high' });
+    assert.equal(prioritized.status, 200);
+    assert.deepEqual(prioritized.body.changed, []);
+    assert.deepEqual(reasons(prioritized.body.skipped), foreign);
+  });
+  assert.deepEqual(comments, [[BULK_IDS[0]]], 'nur die eigene Idee bekommt den Ablehnungskommentar');
+  assert.ok(
+    updates.every((values) => JSON.stringify(values[3]) === '["p"]'),
+    'jedes UPDATE filtert nach Projekt',
+  );
+});
+
+test('Massenaktionen brauchen die Rolle „Planen“', async () => {
+  const writes: string[] = [];
+  const pool = memberPool(['run'], (sql) => {
+    if (sql.startsWith('UPDATE')) writes.push(sql);
+    return undefined;
+  });
+  await withServer(pool, async (baseUrl) => {
+    for (const [path, body] of [
+      ['reject', { ids: BULK_IDS, reason: 'x' }],
+      ['priority', { ids: BULK_IDS, priority: 'high' }],
+    ] as const) {
+      const denied = await fetch(`${baseUrl}/api/ideation/bulk/${path}`, {
+        method: 'POST',
+        headers: sessionHeaders,
+        body: JSON.stringify(body),
+      });
+      assert.equal(denied.status, 403);
+    }
+  });
+  assert.deepEqual(writes, []);
 });
 
 test('Filter „Herkunft“: das Board liefert auf Wunsch nur Ideen des Visionärs', async () => {

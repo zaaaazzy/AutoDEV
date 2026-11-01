@@ -38,6 +38,7 @@ flowchart TB
 | `watchdog_logs`     | Wächter-Probleme (`collectProblems`); gleiche Probleme erst nach `REMIND_MS` (6 h) erneut.               | `backupDir`, `localUrl`, `publicUrl`       |
 | `close_old_sprints` | Schliesst über `completeSprint` Sprints, die `sprintSettled` sind und `inactiveDays` inaktiv waren. Standardmässig **aus**. | `inactiveDays` (1–365)                     |
 | `push_alert`        | Push an den Projektkreis über `sendPush`, wenn ein beobachteter Job fehlgeschlagen ist.                  | `project`, `jobs`                          |
+| `bug_categories`    | Einmalig: Kategorie für Bugs mit `category IS NULL` nachtragen (Pfade, sonst lokales Modell). Vorhandene Kategorien bleiben. Fertig = `state.done`. | `timeoutSeconds` (Standard 300)            |
 
 ## Admin-Endpunkt
 

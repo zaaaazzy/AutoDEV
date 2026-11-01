@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { logged } from '../core/log.js';
+import { noteProviderOutcome } from '../core/provider-limits.js';
 import {
   readOnlyWorkspace,
   SANDBOX_GUARD,
@@ -17,7 +18,9 @@ import { type CommandExecutor, redactOutput, runCommand } from '../core/command.
 import { loadKnownBugs } from '../db/bugs-repository.js';
 import { isUniqueViolation } from '../db/transaction.js';
 import { knownBugLine } from '../core/known-bugs.js';
-import { type ActualReference, loadActualReference, referenceSection, splitEstimate } from './estimation.js';
+import { type ActualReference, loadAuthorReference, referenceSection, splitEstimate } from './estimation.js';
+import { kindOf, stepClassOf } from '../core/estimate-overrun.js';
+import { areaBucket } from '../core/sprint-planner.js';
 import { budgetTodo, checkBudget } from '../runner/budget.js';
 import { runOllamaAgent } from './ollama-agent.js';
 import {
@@ -33,7 +36,7 @@ import { DEFAULT_DEFINITION_OF_READY, loadDefinitions } from '../runner/acceptan
 import { shortTitle, TITLE_MAX } from '../core/validation.js';
 import { containsUntrusted, UNTRUSTED_HINT } from '../core/bug-trust.js';
 import { agentEnvironment, buildInvocation } from '../runner/runner-prompts.js';
-import { defaultAgentCommand } from '../runner/runner-selection.js';
+import { defaultAgentCommand, loadWorkflow } from '../runner/runner-selection.js';
 import type { RunnerOptions } from '../runner/runner-types.js';
 import { defined } from '../core/defined.js';
 import { DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
@@ -56,6 +59,8 @@ interface Idea {
   description: string;
   priority: string;
   category?: string | null;
+  /** Art der Idee (`feature` oder `bug`); ohne Angabe `feature`. */
+  kind?: string | null;
   comments: string[];
   /** Herkunft; `github` heißt: Titel und Text stammen aus einem fremden Issue. */
   source?: string;
@@ -298,6 +303,13 @@ export async function runAuthorAgent(
         ],
       )
       .catch(logged('requirements'));
+    // Anbieterstatus fürs Dashboard: Limit-Meldung festhalten, nach einem erfolgreichen Lauf zurücksetzen.
+    if (command && !signal?.aborted) {
+      await noteProviderOutcome(pool, configured, {
+        exitCode: result.exitCode,
+        output: redactOutput(result.output, process.env),
+      }).catch(logged('requirements'));
+    }
     // Nach dem Buchen: 80-%-Warnung, falls dieser Lauf die Schwelle überschritten hat.
     if (budget?.states.length) await checkBudget(pool, options.project, { role }).catch(logged('requirements', null));
     return {
@@ -405,7 +417,7 @@ export async function draftRequirements(
              progress = 'Liest die Idee und den Projektkontext …', progress_agent = 'author'
       WHERE id = (SELECT id FROM ideation_items WHERE project_slug = $1 AND status = '${IDEATION_STATUS.requested}'
                    ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-      RETURNING id, project_slug AS "projectSlug", title, description, priority, source, category`,
+      RETURNING id, project_slug AS "projectSlug", title, description, priority, source, category, kind`,
     [options.project],
   );
   const claimedIdea = claimed.rows[0];
@@ -428,9 +440,21 @@ export async function draftRequirements(
     )
   ).rows[0];
   const definitions = await loadDefinitions(pool, options.project);
-  const reference = await loadActualReference(pool, options.project, idea.category ?? null).catch(
-    logged('requirements', null),
-  );
+  // Vergleichsgruppe: Kategorie, Art der Idee (ohne Angabe `feature`), Anzahl betroffener Bereiche (bei Überarbeitung
+  // aus dem Auftrag) und Schrittklasse; diese schätzt die Länge des Workflows (ein Lauf ohne Wiederholung).
+  const workflowSteps = await loadWorkflow(pool, options.project)
+    .then((steps) => steps.length)
+    .catch(logged('requirements', 0));
+  const reference = await loadAuthorReference(
+    pool,
+    options.project,
+    {
+      kind: kindOf(idea.kind),
+      category: idea.category ?? null,
+      stepClass: workflowSteps > 0 ? stepClassOf(workflowSteps) : null,
+    },
+    areaBucket(existing?.description ?? idea.description),
+  ).catch(logged('requirements', null));
   console.info(`[idea ${idea.id}] Anforderung erstellen`);
   const { exitCode, output: rawOutput } = await runAuthorAgent(
     pool,

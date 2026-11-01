@@ -7,6 +7,7 @@ import {
   SPRINT_POOL_DEVELOPMENT_STATUSES,
   SPRINT_REMOVABLE_DEVELOPMENT_STATUSES,
 } from '../core/development-transitions.js';
+import { OVERRUN_TODO_PREFIX } from '../core/estimate-overrun.js';
 import { DEVELOPMENT_STATUS, IDEATION_STATUS, SPRINT_STATUS } from '../core/status.js';
 import { buildUpdate } from '../core/validation.js';
 import { isUniqueViolation, withTransaction } from './transaction.js';
@@ -28,7 +29,7 @@ export const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "tes
   removed_from_sprint AS "removedFromSprint", removed_from_sprint_at AS "removedFromSprintAt",
   sprint_rank AS "sprintRank", review_branch AS "reviewBranch", review_since AS "reviewSince",
   review_approved_at AS "reviewApprovedAt", visual_approved_at AS "visualApprovedAt",
-  visual_approved_by AS "visualApprovedBy", changed_files AS "changedFiles"`;
+  visual_approved_by AS "visualApprovedBy", changed_files AS "changedFiles", counter_check AS "counterCheck"`;
 
 /** Zeile mit DEV_COLUMNS; die Routen geben sie unverändert als JSON weiter. */
 export type DevelopmentRow = Record<string, unknown>;
@@ -163,6 +164,11 @@ export async function orderExists(pool: Pool, id: string): Promise<boolean> {
   return Boolean((await pool.query(`SELECT 1 FROM development_items WHERE id = $1`, [id])).rows[0]);
 }
 
+/** Ergebnis der Gegenprobe am Auftrag; jeder neue Lauf überschreibt das vorige (auch die Markierung). */
+export async function saveCounterCheck(pool: Pick<Pool, 'query'>, id: string, check: object): Promise<void> {
+  await pool.query('UPDATE development_items SET counter_check = $2::jsonb WHERE id = $1', [id, JSON.stringify(check)]);
+}
+
 /** Status des Sprints, wenn er zum Projekt gehört. */
 export async function findProjectSprintStatus(
   pool: Pool,
@@ -239,12 +245,17 @@ export async function retryOrder(
   comment: string | null,
   sprintId: string | null,
 ): Promise<DevelopmentRow | undefined> {
+  // Freigabe nach „Schätzung überschritten“ ist kein Fehlversuch: kein Wiederholungszähler (Modell-Routing, Planung).
+  // budget_since = NOW(): Ab hier zählt der Verbrauch neu gegen die (ggf. angepasste) Schätzung.
+  const countsAsRetry =
+    `d.status = '${DEVELOPMENT_STATUS.blocked}'` +
+    ` AND NOT starts_with(COALESCE(d.action_todo, ''), '${OVERRUN_TODO_PREFIX}')`;
   const result = await pool.query<DevelopmentRow>(
     `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = ${retryAutoRunSql('$3::uuid')},
             failure = NULL, action_todo = NULL, conflict_retries = 0,
             description = CASE WHEN $2::text IS NULL THEN d.description
                                ELSE COALESCE(d.description, '') || E'\n\n## Hinweis zum erneuten Versuch (' || to_char(NOW(), 'DD.MM.YYYY HH24:MI') || E')\n' || $2::text END,
-            retry_count = retry_count + CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN 1 ELSE 0 END,
+            retry_count = retry_count + CASE WHEN ${countsAsRetry} THEN 1 ELSE 0 END,
             analysis_status = CASE WHEN analysis_status IN ('requested', 'running') THEN analysis_status ELSE NULL END,
             sprint_id = ${retrySprintSql('$3::uuid')},
             removed_from_sprint = NULL, removed_from_sprint_at = NULL, budget_since = NOW(), updated_at = NOW()

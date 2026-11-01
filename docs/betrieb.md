@@ -308,7 +308,9 @@ und das `node_modules`-Volume bleiben dabei erhalten.
 
 **Abhängigkeiten:** Vor dem ersten Lauf und nach jeder Änderung an `package-lock.json` installiert der Worker sie im
 Arbeitscontainer (`npm install --ignore-scripts`, Linux-Binärdateien, darum nicht die des Rechners). Zurücksetzen:
-`docker volume rm aideation-node-modules-<projekt>` (bei gestopptem Arbeitscontainer).
+`docker volume rm aideation-node-modules-<projekt>` (bei gestopptem Arbeitscontainer). In den kurzlebigen
+Containern (Modus `docker`) liegt der npm-Cache unter `/tmp/npm-cache` (`npm_config_cache`), nicht unter `~/.npm`,
+das nach dem Image-Build root gehört.
 
 **Ist Docker nicht erreichbar, fehlt das Image oder startet der Stapel nicht**, beginnt der Schritt nicht. Er scheitert
 mit einer Meldung im Auftrag und im Worker-Badge und läuft nie stattdessen auf deinem Rechner. Fehlt nur die

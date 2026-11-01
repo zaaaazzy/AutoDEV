@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { AcceptanceCheck, DevelopmentItem } from '../core/models.js';
+import type { AcceptanceCheck, DevelopmentItem, TestEvidence } from '../core/models.js';
 import { orderAttention } from './order-attention.js';
 
 const order = (values: Partial<DevelopmentItem>): DevelopmentItem => ({
@@ -74,6 +74,58 @@ test('Geplante und laufende Aufträge warten mit Prüfpunkten noch nicht auf dic
     checks,
   );
   assert.deepEqual(entries, []);
+});
+
+const proof = (values: Partial<TestEvidence>): TestEvidence => ({
+  id: 'e1',
+  developmentId: 'a',
+  position: 1,
+  datei: 'src/a.test.ts',
+  befehl: 'npm test -- a',
+  grund: 'gegenprobe_fehlt',
+  status: 'open',
+  agentName: 'Tester',
+  runId: null,
+  checkedAt: null,
+  allowed: true,
+  running: false,
+  ...values,
+});
+
+test('Offener Testnachweis: erledigter Auftrag ohne action_todo steht unter „Aktion notwendig“', () => {
+  const done = order({ id: 'a', status: 'done', actionTodo: null });
+  const [entry] = orderAttention([done], [], [proof({}), proof({ id: 'e2', developmentId: 'other' })]);
+  assert.equal(entry!.item.id, 'a');
+  assert.deepEqual(
+    entry!.reasons.map((reason) => reason.label),
+    ['Aktion notwendig', '1 Testnachweis offen'],
+  );
+  assert.deepEqual(
+    entry!.evidence.map((item) => [item.datei, item.befehl, item.grund]),
+    [['src/a.test.ts', 'npm test -- a', 'gegenprobe_fehlt']],
+  );
+  assert.equal(entry!.card.step, 'evidence');
+  // Ohne Nachweis bleibt derselbe Auftrag ausserhalb von „Aktionen“.
+  assert.deepEqual(orderAttention([done], []), []);
+});
+
+test('Testnachweis: grün abgehakt verschwindet, rot und nicht freigegeben bleiben sichtbar', () => {
+  const done = order({ id: 'a', status: 'done' });
+  assert.deepEqual(orderAttention([done], [], [proof({ status: 'passed', runId: 'r1' })]), []);
+  const red = proof({ status: 'failed', runId: 'r1' });
+  const refused = proof({ id: 'e2', befehl: 'npm test -- b', status: 'nicht_freigegeben' });
+  const [entry] = orderAttention([done], [], [red, refused]);
+  assert.equal(entry!.evidence.length, 2);
+  assert.equal(entry!.reasons[1]!.label, '2 Testnachweise offen');
+});
+
+test('Testnachweis bei blockiertem Auftrag: Karte und Texte des Auftrags bleiben, Nachweis kommt dazu', () => {
+  const blocked = order({ id: 'a', status: 'blocked', failure: 'Agent „Tester“ scheiterte: rot' });
+  const [withProof] = orderAttention([blocked], [], [proof({})]);
+  const [without] = orderAttention([blocked], []);
+  assert.deepEqual(withProof!.card, without!.card);
+  assert.deepEqual(withProof!.reasons.slice(0, without!.reasons.length), without!.reasons);
+  assert.equal(withProof!.evidence.length, 1);
 });
 
 test('Schon freigegeben: kein Eintrag mehr unter „Rückmeldungen“ (wartet nur noch auf den Merge)', () => {

@@ -6,6 +6,8 @@ import { isAssignableSprintStatus, SPRINT_POOL_DEVELOPMENT_STATUSES } from '../c
 import { fencedBugDescriptionSql, isUntrustedBugSource, unapprovedBugSql } from '../core/bug-trust.js';
 import { startProductionFix } from '../runner/production-events.js';
 import { UNTRUSTED_START } from '../core/bug-trust.js';
+import { afterBugCreated } from '../agent/bug-classifier.js';
+import { categoryFromBug } from '../core/bug-category.js';
 import type { Principal } from './roles.js';
 import {
   buildUpdate,
@@ -224,6 +226,9 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
         return;
       }
     }
+    // Ohne mitgeschickte Kategorie: aus den genannten Pfaden, sonst nach dem Anlegen vom lokalen Modell.
+    const text = { title: String(values.get('title')), description: String(values.get('description') ?? '') };
+    const category = (values.get('category') as string | null | undefined) || categoryFromBug(text);
     // Bug und Auftrag zusammen: Scheitert der Auftrag, entsteht auch kein Bug im Sprint ohne Auftrag.
     const outcome = await withBugTransaction(pool, async (client) => {
       const result = await client.query(
@@ -238,7 +243,7 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
           values.get('description') ?? '',
           values.get('severity') ?? null,
           sprintId,
-          values.get('category') ?? null,
+          category,
         ],
       );
       if (!result.rows[0]) return { status: 400, message: 'Sprint gehört zu einem anderen Projekt.' };
@@ -249,6 +254,7 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
       response.status(outcome.status).json({ message: outcome.message });
       return;
     }
+    afterBugCreated(pool, (outcome.bug as { id: string }).id, category, text);
     response.status(201).json({ bug: outcome.bug });
   });
 
