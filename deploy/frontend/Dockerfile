@@ -21,7 +21,7 @@ RUN npm run build:ui
 
 # Ohne root schon im Master-Prozess: PID-Datei und Zwischenablagen unter /tmp, damit läuft der Container auch mit
 # read_only (docker-compose.yml, /tmp als tmpfs). Port 8080/8081 braucht kein root.
-FROM nginxinc/nginx-unprivileged:1.27.3-alpine
+FROM nginxinc/nginx-unprivileged:1.31.7-alpine
 COPY deploy/frontend/nginx.conf /etc/nginx/conf.d/default.conf
 # Ausserhalb von conf.d: wird nur in den server-Blöcken von nginx.conf eingebunden.
 COPY deploy/frontend/app-locations.conf /etc/nginx/app-locations.conf
