@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { categoryFromBug } from './bug-category.js';
 import type { TestCaseResult } from './test-results.js';
+import { BUG_STATUS } from './status.js';
 
 /**
  * Bugs aus Testbefunden: je fehlgeschlagenem Test (bzw. Prüfschritt ohne Einzeltests) ein Bug mit Quelle „test“.
@@ -84,7 +85,7 @@ export async function fileBugs(
       `INSERT INTO bugs (project_slug, title, description, severity, source, category)
        SELECT $1, $2, $3, $4, 'test', $5
         WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2
-                            AND status IN ('open', 'in_progress'))
+                            AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}'))
        RETURNING id`,
       [project, draft.title, draft.description, draft.severity, category],
     );

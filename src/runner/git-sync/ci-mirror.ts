@@ -7,6 +7,7 @@ import type { CommandExecutor } from '../../core/command.js';
 import { runProjectCommand } from '../project-command.js';
 import { ciLogExcerpt, gateFailureSummary, maskSecrets, TEST_TIMEOUT_MS } from './ci.js';
 import { defined } from '../../core/defined.js';
+import { BUG_STATUS } from '../../core/status.js';
 
 export const CI_MIRROR_WORKFLOW = join('.github', 'workflows', 'ci.yml');
 
@@ -119,7 +120,7 @@ export async function reportCiMirrorFailure(
     `INSERT INTO bugs (project_slug, title, description, severity, source)
        SELECT $1, $2, $3, 'high', 'github'
         WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND source = 'github' AND title = $2
-                            AND status IN ('open', 'in_progress') AND position($4 IN description) > 0)
+                            AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}') AND position($4 IN description) > 0)
      RETURNING id`,
     [project, title, description, marker],
   );

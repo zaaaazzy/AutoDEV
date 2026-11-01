@@ -80,16 +80,6 @@
     "why": "generateSprintReport steckt im Routenmodul; gehört als Datenzugriff nach src/db."
   },
   {
-    "from": "src/runner/runner-cli.ts",
-    "to": "src/api/worker.ts",
-    "why": "Heartbeat und maxConcurrentAgents stecken im Routenmodul; Datenzugriff nach src/db."
-  },
-  {
-    "from": "src/runner/runner-cli.ts",
-    "to": "src/setup/setup-jobs.ts",
-    "why": "Der Worker führt die Einrichtungsaufgaben aus; bleibt, bis die Job-Arten wie scheduled_jobs über eine Registry laufen."
-  },
-  {
     "from": "src/runner/runner-settle.ts",
     "to": "src/api/docs.ts",
     "why": "Doku-Abgleich und Doku speichern stecken im Routenmodul; Datenzugriff nach src/db/docs-repository.ts."
@@ -128,5 +118,10 @@
     "from": "src/runner/sprint-autopilot.ts",
     "to": "src/api/sprint-planning.ts",
     "why": "Sprintvorschlag, Autopilot-Regeln und completeSprint stecken im Routenmodul; Datenzugriff nach src/db, Regeln nach src/core/sprint-rules."
+  },
+  {
+    "from": "src/runner/worker-loop.ts",
+    "to": "src/setup/setup-jobs.ts",
+    "why": "Der Worker führt die Einrichtungsaufgaben aus; bleibt, bis die Job-Arten wie scheduled_jobs über eine Registry laufen."
   }
 ]

@@ -17,6 +17,7 @@ import {
 } from './git-helpers.js';
 import { ciLogExcerpt } from './ci.js';
 import { goLiveLogged } from './sprint-sync.js';
+import { BUG_STATUS, SPRINT_STATUS } from '../../core/status.js';
 
 interface ReviewSprint {
   id: string;
@@ -174,7 +175,7 @@ export async function pollSprintReviews(
   const sprints = (
     await pool.query<ReviewSprint>(
       `SELECT id, name, branch, pr_url AS "prUrl", ci_status AS "ciStatus", ci_bug_run AS "ciBugRun" FROM sprints
-        WHERE project_slug = $1 AND status = 'review' AND pr_url IS NOT NULL ORDER BY updated_at`,
+        WHERE project_slug = $1 AND status = '${SPRINT_STATUS.review}' AND pr_url IS NOT NULL ORDER BY updated_at`,
       [project],
     )
   ).rows;
@@ -183,8 +184,8 @@ export async function pollSprintReviews(
     const pr = await adapter.pullRequestState(sprint.prUrl);
     if (pr.state === 'closed') {
       await pool.query(
-        `UPDATE sprints SET status = 'completed', git_sync = 'failed', git_message = $2, git_synced_at = NOW()
-          WHERE id = $1 AND status = 'review'`,
+        `UPDATE sprints SET status = '${SPRINT_STATUS.completed}', git_sync = 'failed', git_message = $2, git_synced_at = NOW()
+          WHERE id = $1 AND status = '${SPRINT_STATUS.review}'`,
         [
           sprint.id,
           `Pull Request ${sprint.prUrl} wurde ohne Merge geschlossen – ${MAIN_BRANCH} bleibt unverändert. ` +
@@ -225,13 +226,13 @@ export async function pollSprintReviews(
     // Die CI-Meldung zu diesem Pull Request ist mit dem Merge erledigt (auch wenn ein Wiederholungslauf grün war).
     await pool
       .query(
-        `UPDATE bugs SET status = 'fixed', fixed_at = NOW(), updated_at = NOW()
-          WHERE project_slug = $1 AND source = 'github' AND title = $2 AND status IN ('open', 'in_progress')`,
+        `UPDATE bugs SET status = '${BUG_STATUS.fixed}', fixed_at = NOW(), updated_at = NOW()
+          WHERE project_slug = $1 AND source = 'github' AND title = $2 AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')`,
         [project, ciBugTitle(sprint.name)],
       )
       .catch(logged('sprint-reviews'));
     await pool.query(
-      `UPDATE sprints SET status = 'completed', ci_status = $5, git_sync = 'done', git_message = $2, git_commit = $3,
+      `UPDATE sprints SET status = '${SPRINT_STATUS.completed}', ci_status = $5, git_sync = 'done', git_message = $2, git_commit = $3,
               git_branch = $4, git_synced_at = NOW() WHERE id = $1`,
       [sprint.id, tagged.log.join(' '), tagged.commit, MAIN_BRANCH, ciStatus],
     );

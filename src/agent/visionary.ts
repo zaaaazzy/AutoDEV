@@ -11,6 +11,7 @@ import type { RunnerOptions } from '../runner/runner-types.js';
 import { runAuthorAgent } from './requirements.js';
 import { readProjectFile } from './tool-paths.js';
 import { defined } from '../core/defined.js';
+import { IDEATION_STATUS } from '../core/status.js';
 
 /**
  * Visionär: liest das Projekt (nur lesend), schlägt begründete Erweiterungsideen vor und legt sie in Ideation an.
@@ -510,7 +511,7 @@ export async function loadVisionaryContext(pool: Pool, slug: string, cwd: string
     rows(
       pool.query<KnownIdea>(
         `SELECT id, title, status, rejection_reason AS "rejectionReason" FROM ideation_items
-          WHERE project_slug = $1 AND status <> 'accepted' ORDER BY created_at DESC LIMIT 300`,
+          WHERE project_slug = $1 AND status <> '${IDEATION_STATUS.accepted}' ORDER BY created_at DESC LIMIT 300`,
         [slug],
       ),
     ),
@@ -544,8 +545,8 @@ export async function loadVisionaryContext(pool: Pool, slug: string, cwd: string
       estimate: Number(row.estimate),
       actual: Number(row.actual),
     })),
-    openIdeas: ideas.filter((idea) => idea.status !== 'rejected'),
-    rejectedIdeas: ideas.filter((idea) => idea.status === 'rejected'),
+    openIdeas: ideas.filter((idea) => idea.status !== IDEATION_STATUS.rejected),
+    rejectedIdeas: ideas.filter((idea) => idea.status === IDEATION_STATUS.rejected),
   };
 }
 
@@ -577,7 +578,7 @@ export async function storeVisionaryIdeas(
     const duplicate = findDuplicate(idea.title, seen);
     if (duplicate) {
       result.discarded += 1;
-      if (duplicate.status !== 'rejected' && known.includes(duplicate)) {
+      if (duplicate.status !== IDEATION_STATUS.rejected && known.includes(duplicate)) {
         await pool.query(
           `INSERT INTO ideation_comments (ideation_id, author, author_kind, body) VALUES ($1, $2, 'agent', $3)`,
           [

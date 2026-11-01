@@ -22,6 +22,7 @@ import {
   segmentScopeLabel,
 } from '../core/estimate-calibration.js';
 import { kindOf, type OrderKind, STEP_CLASS_LABELS, type StepClass, stepClassOf } from '../core/estimate-overrun.js';
+import { DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
 
 export interface Estimate {
   effortHours: number | null;
@@ -159,7 +160,8 @@ export async function loadActualReference(
          FROM development_items d
          JOIN agent_runs r ON r.development_id = d.id
          JOIN agent_run_steps st ON st.run_id = r.id
-        WHERE d.project_slug = $1 AND d.status = 'done' AND d.category IS NOT DISTINCT FROM $2 AND d.kind = $3
+        WHERE d.project_slug = $1 AND d.status = '${DEVELOPMENT_STATUS.done}' AND d.category IS NOT DISTINCT FROM $2
+          AND d.kind = $3
         GROUP BY d.id
        HAVING SUM(st.tokens) > 0 OR SUM(st.duration_ms) > 0
         ORDER BY d.completed_at DESC NULLS LAST
@@ -332,7 +334,7 @@ export async function estimateNewIdeas(
   const ideas = (
     await pool.query<{ id: string; title: string; description: string; category: string | null; kind?: string }>(
       `SELECT id, title, description, category, kind FROM ideation_items
-        WHERE project_slug = $1 AND status IN ('idea', 'considering', 'review', 'requested') AND agent_note IS NULL
+        WHERE project_slug = $1 AND status IN ('${IDEATION_STATUS.idea}', '${IDEATION_STATUS.considering}', '${IDEATION_STATUS.review}', '${IDEATION_STATUS.requested}') AND agent_note IS NULL
           AND effort_hours IS NULL AND token_estimate IS NULL AND benefit IS NULL AND cost IS NULL
         ORDER BY created_at LIMIT 5`,
       [project],

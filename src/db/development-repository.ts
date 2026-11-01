@@ -8,7 +8,7 @@ import {
   SPRINT_REMOVABLE_DEVELOPMENT_STATUSES,
 } from '../core/development-transitions.js';
 import { OVERRUN_TODO_PREFIX } from '../core/estimate-overrun.js';
-import { DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
+import { DEVELOPMENT_STATUS, IDEATION_STATUS, SPRINT_STATUS } from '../core/status.js';
 import { buildUpdate } from '../core/validation.js';
 import { isUniqueViolation, withTransaction } from './transaction.js';
 
@@ -50,13 +50,13 @@ const ABORTED_SQL = `(d.removed_from_sprint_at IS NOT NULL OR d.status = '${DEVE
 export function retrySprintSql(chosen = 'NULL::uuid'): string {
   return `COALESCE(${chosen},
                 (SELECT s.id FROM sprints s WHERE s.id = d.sprint_id AND s.status IN (${ASSIGNABLE_SPRINTS_SQL})),
-                (SELECT s.id FROM sprints s WHERE s.project_slug = d.project_slug AND s.status = 'active'
+                (SELECT s.id FROM sprints s WHERE s.project_slug = d.project_slug AND s.status = '${SPRINT_STATUS.active}'
                   ORDER BY s.created_at LIMIT 1))`;
 }
 
 /** auto_run folgt dem Ziel-Sprint: ohne Sprint oder im aktiven sofort, ein geplanter wartet auf seinen Start. */
 export function retryAutoRunSql(chosen = 'NULL::uuid'): string {
-  return `COALESCE((SELECT t.status = 'active' FROM sprints t WHERE t.id = ${retrySprintSql(chosen)}), TRUE)`;
+  return `COALESCE((SELECT t.status = '${SPRINT_STATUS.active}' FROM sprints t WHERE t.id = ${retrySprintSql(chosen)}), TRUE)`;
 }
 
 /**
@@ -293,7 +293,7 @@ export async function takeIntoSprint(
   const aborted = ABORTED_SQL;
   const result = await pool.query<DevelopmentRow>(
     `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', sprint_id = $2,
-            auto_run = COALESCE((SELECT s.status = 'active' FROM sprints s WHERE s.id = $2), FALSE),
+            auto_run = COALESCE((SELECT s.status = '${SPRINT_STATUS.active}' FROM sprints s WHERE s.id = $2), FALSE),
             agent_id = CASE WHEN ${aborted} THEN NULL ELSE d.agent_id END,
             failure = CASE WHEN ${aborted} THEN NULL ELSE d.failure END,
             action_todo = CASE WHEN ${aborted} THEN NULL ELSE d.action_todo END,
@@ -307,7 +307,7 @@ export async function takeIntoSprint(
         AND d.status IN (${sqlList(SPRINT_POOL_DEVELOPMENT_STATUSES)})
         AND ($3::boolean OR NOT ${aborted})
         AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = $2 AND s.project_slug = d.project_slug
-                       AND s.status IN ('planned', 'active'))
+                       AND s.status IN ('${SPRINT_STATUS.planned}', '${SPRINT_STATUS.active}'))
       RETURNING ${DEV_COLUMNS}`,
     [id, sprintId, mayRetry],
   );
@@ -327,8 +327,8 @@ export async function isAbortedOrder(pool: Pool, id: string): Promise<boolean> {
 export async function removeFromSprint(pool: Pool, id: string): Promise<DevelopmentRow | undefined> {
   const result = await pool.query<DevelopmentRow>(
     `UPDATE development_items SET
-            removed_from_sprint = (SELECT name FROM sprints WHERE id = development_items.sprint_id AND status <> 'planned'),
-            removed_from_sprint_at = CASE WHEN (SELECT status FROM sprints WHERE id = development_items.sprint_id) = 'planned'
+            removed_from_sprint = (SELECT name FROM sprints WHERE id = development_items.sprint_id AND status <> '${SPRINT_STATUS.planned}'),
+            removed_from_sprint_at = CASE WHEN (SELECT status FROM sprints WHERE id = development_items.sprint_id) = '${SPRINT_STATUS.planned}'
                                           THEN NULL ELSE NOW() END,
             sprint_id = NULL, agent_id = NULL, auto_run = FALSE,
             status = CASE WHEN status = '${DEVELOPMENT_STATUS.planned}' THEN '${DEVELOPMENT_STATUS.backlog}' ELSE status END,

@@ -1,3 +1,4 @@
+import { DEVELOPMENT_STATUS, SPRINT_STATUS } from './status.js';
 // Gemeinsam für Server (PATCH/DELETE /sprints/:id) und Oberfläche (Knöpfe im Sprint-Detail).
 // Bewusst ohne Importe: die Datei wird ins Frontend-Image kopiert (deploy/frontend/Dockerfile).
 
@@ -22,7 +23,10 @@ export const DELETABLE_SPRINT_STATUSES: readonly string[] = ['planned', 'complet
 /** Git-Sicherung ruht: null oder einer dieser Werte. */
 export const IDLE_SPRINT_GIT_SYNC: readonly string[] = ['done', 'failed', 'awaiting_merge'];
 /** Aufträge, die einen Sprint festhalten: laufend oder in Freigabe (die Freigabe mergt in den Sprint-Branch). */
-export const SPRINT_HOLDING_DEVELOPMENT_STATUSES: readonly string[] = ['in_progress', 'approval'];
+export const SPRINT_HOLDING_DEVELOPMENT_STATUSES: readonly string[] = [
+  DEVELOPMENT_STATUS.inProgress,
+  DEVELOPMENT_STATUS.approval,
+];
 
 type SprintRef = { id: string; status: string; gitSync?: string | null };
 type ItemRef = { sprintId?: string | null; status: string };
@@ -58,7 +62,10 @@ export function completeSprintConflict(running: number, waiting: number): string
 export function canCompleteSprint(sprint: SprintRef, items: readonly ItemRef[]): boolean {
   return (
     canChangeSprintStatus(sprint.status, 'completed') &&
-    completeSprintConflict(count(sprint.id, items, 'in_progress'), count(sprint.id, items, 'approval')) === null
+    completeSprintConflict(
+      count(sprint.id, items, DEVELOPMENT_STATUS.inProgress),
+      count(sprint.id, items, DEVELOPMENT_STATUS.approval),
+    ) === null
   );
 }
 
@@ -67,13 +74,13 @@ export const ONE_ACTIVE_SPRINT_MESSAGE = 'Es kann nur ein Sprint pro Projekt akt
 
 /** Pro Projekt ist höchstens ein Sprint aktiv (Unique-Index); `sprints` sind die Sprints desselben Projekts. */
 export function hasOtherActiveSprint(sprint: SprintRef, sprints: readonly SprintRef[]): boolean {
-  return sprints.some((other) => other.id !== sprint.id && other.status === 'active');
+  return sprints.some((other) => other.id !== sprint.id && other.status === SPRINT_STATUS.active);
 }
 
 /** „Sprint starten“ bzw. „Wieder öffnen“: erlaubter Wechsel und kein anderer aktiver Sprint. */
 export function canActivateSprint(sprint: SprintRef, sprints: readonly SprintRef[]): boolean {
   return (
-    sprint.status !== 'active' &&
+    sprint.status !== SPRINT_STATUS.active &&
     canChangeSprintStatus(sprint.status, 'active') &&
     !hasOtherActiveSprint(sprint, sprints)
   );

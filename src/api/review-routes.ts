@@ -1,7 +1,7 @@
 import { logged } from '../core/log.js';
 import type { Router } from 'express';
 import type { Pool } from 'pg';
-import { DEVELOPMENT_STATUS } from '../core/status.js';
+import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 import { access } from './access.js';
 import { DEV_COLUMNS, retryAutoRunSql, retryComment, retrySprintSql } from './development.js';
@@ -293,8 +293,8 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
     const sprints = (
       await pool.query<{ id: string; name: string; status: string; commits: StoredCommit[] }>(
         `SELECT s.id, s.name, s.status, c.commits FROM sprints s JOIN sprint_commits c ON c.sprint_id = s.id
-          WHERE s.project_slug = $1 AND s.status <> 'planned' AND jsonb_array_length(c.commits) > 0
-          ORDER BY (s.status IN ('active', 'review')) DESC, s.created_at DESC
+          WHERE s.project_slug = $1 AND s.status <> '${SPRINT_STATUS.planned}' AND jsonb_array_length(c.commits) > 0
+          ORDER BY (s.status IN ('${SPRINT_STATUS.active}', '${SPRINT_STATUS.review}')) DESC, s.created_at DESC
           LIMIT ${REVIEW_COMMIT_SPRINTS}`,
         [slug],
       )

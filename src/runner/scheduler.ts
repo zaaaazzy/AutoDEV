@@ -9,6 +9,7 @@ import { backfillBugCategories } from './bug-category-job.js';
 import { sprintSettled } from './sprint-autopilot.js';
 import { type AlertLabels, BACKUP_FILE, collectProblems, evaluate, type WatchdogState } from './watchdog.js';
 import { defined } from '../core/defined.js';
+import { AGENT_RUN_STATUS, DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
 
 /**
  * Zeitgesteuerte Wartungs-Jobs: Der Worker prüft in seinem Arbeitszyklus die Tabelle scheduled_jobs, beansprucht
@@ -375,13 +376,13 @@ async function closeOldSprints({ pool, job, deps, signal }: JobContext): Promise
   const candidates = (
     await pool.query<{ id: string; project: string; name: string }>(
       `SELECT s.id, s.project_slug AS project, s.name FROM sprints s
-        WHERE s.status = 'active' AND s.paused_at IS NULL AND ($2::text IS NULL OR s.project_slug = $2)
+        WHERE s.status = '${SPRINT_STATUS.active}' AND s.paused_at IS NULL AND ($2::text IS NULL OR s.project_slug = $2)
           AND GREATEST(s.updated_at,
                 (SELECT MAX(d.updated_at) FROM development_items d WHERE d.sprint_id = s.id),
                 (SELECT MAX(r.started_at) FROM agent_runs r JOIN development_items d ON d.id = r.development_id
                   WHERE d.sprint_id = s.id)) < NOW() - make_interval(days => $1)
           AND NOT EXISTS (SELECT 1 FROM agent_runs r JOIN development_items d ON d.id = r.development_id
-                           WHERE d.sprint_id = s.id AND r.status = 'running')`,
+                           WHERE d.sprint_id = s.id AND r.status = '${AGENT_RUN_STATUS.running}')`,
       [days, project],
     )
   ).rows;
@@ -391,7 +392,7 @@ async function closeOldSprints({ pool, job, deps, signal }: JobContext): Promise
     const items = (
       await pool.query<{ status: string; actionTodo: string | null; budgetBlocked: string | null }>(
         `SELECT status, action_todo AS "actionTodo", budget_blocked AS "budgetBlocked" FROM development_items
-          WHERE sprint_id = $1 AND status <> 'rejected' AND kind <> 'express'`,
+          WHERE sprint_id = $1 AND status <> '${DEVELOPMENT_STATUS.rejected}' AND kind <> 'express'`,
         [sprint.id],
       )
     ).rows;

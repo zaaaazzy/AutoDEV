@@ -1,3 +1,4 @@
+import { DEVELOPMENT_STATUS } from '../core/models.js';
 /** Kurzfassung für Aufträge mit Handlungsbedarf: Problem und vorgeschlagene Lösung in wenigen Worten. */
 export interface OrderProblem {
   problem: string;
@@ -114,8 +115,8 @@ function splitTodo(todo: string): [string, string] {
 const NOTHING = /^keine\b\s*(?:\(([^)]*)\))?[.:,–-]*\s*/i;
 
 function needsAction(item: ProblemSource): boolean {
-  if (item.status === 'done' || item.status === 'rejected') return false;
-  return item.status === 'blocked' || !!item.actionTodo;
+  if (item.status === DEVELOPMENT_STATUS.done || item.status === DEVELOPMENT_STATUS.rejected) return false;
+  return item.status === DEVELOPMENT_STATUS.blocked || !!item.actionTodo;
 }
 
 export function orderProblem(item: ProblemSource): OrderProblem | null {

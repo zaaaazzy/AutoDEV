@@ -1,5 +1,6 @@
 import type { Agent, DevelopmentItem, DevelopmentStatus, Sprint } from '../../core/models.js';
 import { isFinished } from '../../shared/labels.js';
+import { DEVELOPMENT_STATUS } from '../../core/models.js';
 
 /** Wert der Spalte „Agent“ in der Auftragsliste für Aufträge ohne (bekannten) Agent. */
 export const NO_AGENT = 'Ohne Agent';
@@ -39,13 +40,13 @@ export function agentWorkload(
 
 /** Reihenfolge der Auftrags-Status im Dashboard; enthält jeden Status aus `DevelopmentStatus`. */
 export const ORDER_STATUSES = [
-  'done',
-  'in_progress',
-  'approval',
-  'planned',
-  'backlog',
-  'rejected',
-  'blocked',
+  DEVELOPMENT_STATUS.done,
+  DEVELOPMENT_STATUS.inProgress,
+  DEVELOPMENT_STATUS.approval,
+  DEVELOPMENT_STATUS.planned,
+  DEVELOPMENT_STATUS.backlog,
+  DEVELOPMENT_STATUS.rejected,
+  DEVELOPMENT_STATUS.blocked,
 ] as const satisfies readonly DevelopmentStatus[];
 
 /** Farbton je Status, überall gleich: grün erledigt, blau in Arbeit, orange wartet/Warnung, rot Fehler. */

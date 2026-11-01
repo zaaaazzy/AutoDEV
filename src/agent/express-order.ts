@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
 
 /**
  * Express-Anfragen: Jede Anfrage im Dashboard-Chat (auch Aktionen wie „Tests ausführen“) erscheint als eigener,
@@ -101,7 +102,7 @@ export async function openExpressOrder(
   let id = previous;
   if (id) {
     await pool.query(
-      `UPDATE development_items SET status = 'in_progress', action_todo = NULL, failure = NULL, updated_at = NOW()
+      `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.inProgress}', action_todo = NULL, failure = NULL, updated_at = NOW()
         WHERE id = $1`,
       [id],
     );
@@ -109,8 +110,8 @@ export async function openExpressOrder(
     id = (
       await pool.query<{ id: string }>(
         `INSERT INTO development_items (project_slug, title, description, status, priority, kind, auto_run, sprint_id)
-         VALUES ($1, $2, $3, 'in_progress', 'high', '${EXPRESS_KIND}', FALSE,
-                 (SELECT id FROM sprints WHERE project_slug = $1 AND status = 'active' ORDER BY created_at LIMIT 1))
+         VALUES ($1, $2, $3, '${DEVELOPMENT_STATUS.inProgress}', 'high', '${EXPRESS_KIND}', FALSE,
+                 (SELECT id FROM sprints WHERE project_slug = $1 AND status = '${SPRINT_STATUS.active}' ORDER BY created_at LIMIT 1))
          RETURNING id`,
         [
           project,
@@ -139,7 +140,7 @@ export async function closeExpressOrder(pool: Pool, orderId: string): Promise<vo
   const description = expressSummary(messages);
   if (failed) {
     await pool.query(
-      `UPDATE development_items SET status = 'blocked', description = $2, failure = $3, updated_at = NOW() WHERE id = $1`,
+      `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.blocked}', description = $2, failure = $3, updated_at = NOW() WHERE id = $1`,
       [
         orderId,
         description,
@@ -148,13 +149,13 @@ export async function closeExpressOrder(pool: Pool, orderId: string): Promise<vo
     );
   } else if (last.question) {
     await pool.query(
-      `UPDATE development_items SET status = 'blocked', description = $2, action_todo = $3, updated_at = NOW()
+      `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.blocked}', description = $2, action_todo = $3, updated_at = NOW()
         WHERE id = $1`,
       [orderId, description, `Rückfrage: ${clip(last.question, 300)} – im Dashboard-Chat antworten`],
     );
   } else {
     await pool.query(
-      `UPDATE development_items SET status = 'done', description = $2, completed_at = NOW(), updated_at = NOW()
+      `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.done}', description = $2, completed_at = NOW(), updated_at = NOW()
         WHERE id = $1`,
       [orderId, description],
     );

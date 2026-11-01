@@ -1,5 +1,6 @@
 import type { DevelopmentStatus, ReviewSlot } from '../../core/models.js';
 import { reviewStatusText } from '../sprints/review-launch.js';
+import { DEVELOPMENT_STATUS } from '../../core/models.js';
 
 /**
  * Hover-Text zur optischen Abnahme: wozu sie dient und wie sie sich von den anderen Knöpfen der Karte unterscheidet.
@@ -124,7 +125,7 @@ export function visualStatus(state: {
       canApprove: false,
     };
   }
-  if (orderStatus === 'in_progress') {
+  if (orderStatus === DEVELOPMENT_STATUS.inProgress) {
     return {
       tone: 'wait',
       title: 'Der Auftrag wird gerade bearbeitet – noch nichts zu tun.',
