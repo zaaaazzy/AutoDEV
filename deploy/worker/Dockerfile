@@ -2,7 +2,7 @@
 # Node in derselben Version wie API und Agent-Image, Git, SSH, gh, Docker-CLI mit Compose und Buildx (über den
 # eingebundenen Socket) sowie der Postgres-Client 17 (pg_restore für den Wartungs-Job backup_check). Den Code lädt der Worker aus dem eingebundenen AIdeation-Ordner – so bringt „AIdeation neu
 # starten“ neuen Code ohne neues Image (Exit-Code 75, Docker startet den Container neu).
-FROM node:22.22.3-bookworm-slim
+FROM node:26.13.0-bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl git openssh-client tini \
     && install -m 0755 -d /etc/apt/keyrings \
