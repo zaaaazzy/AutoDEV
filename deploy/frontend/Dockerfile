@@ -17,6 +17,9 @@ COPY src/core/sprint-rules.ts ./src/core/sprint-rules.ts
 COPY src/core/status.ts ./src/core/status.ts
 COPY src/core/shared-types.ts ./src/core/shared-types.ts
 COPY src/core/defined.ts ./src/core/defined.ts
+# Schätzungs-Überschreitung und feste Coverage-Bereiche (Sprint 30) – dieselben Schlüssel wie Worker und Migrationen.
+COPY src/core/estimate-overrun.ts ./src/core/estimate-overrun.ts
+COPY src/core/coverage-areas.ts ./src/core/coverage-areas.ts
 RUN npm run build:ui
 
 # Ohne root schon im Master-Prozess: PID-Datei und Zwischenablagen unter /tmp, damit läuft der Container auch mit
