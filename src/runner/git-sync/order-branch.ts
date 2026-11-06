@@ -82,10 +82,16 @@ export class OrderBranchError extends Error {
   override name = 'OrderBranchError';
 }
 
-/** Offene Änderungen im Arbeitsordner, die zu keinem Auftrag gehören (Testberichte und Agent-Ablage ausgenommen). */
+/**
+ * Offene Änderungen im Arbeitsordner, die zu keinem Auftrag gehören (Testberichte und Agent-Ablage ausgenommen).
+ * Scheitert git, wirft sie wie unresolvedConflicts: „keine fremden Änderungen“ darf nie aus einem Fehler folgen, sonst
+ * nähme „git add -A“ fremde Dateien in den Commit des Auftrags.
+ */
 async function foreignChanges(git: GitHelpers['git']): Promise<string[]> {
   const status = await git('-c', 'core.quotePath=false', 'status', '--porcelain', '--untracked-files=all');
-  if (status.exitCode !== 0) return [];
+  if (status.exitCode !== 0) {
+    throw new OrderBranchError(`Arbeitsordner nicht prüfbar (git status): ${status.output.trim().slice(-200)}`);
+  }
   return status.output
     .split('\n')
     .map(porcelainPath)

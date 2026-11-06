@@ -170,21 +170,20 @@ async function resumePosition(
  * dem aktuellen Namen – nach einer Umbenennung zweigte sonst ein neuer Sprint-Branch von main ab. Hat ein noch
  * geplanter Sprint keinen (einzelner Agent von Hand), wird er hier einmal vergeben. Ein abgeschlossener oder
  * abgebrochener Sprint zählt nicht: Sein Branch ist schon gesichert, ein Merge dorthin käme nie mehr in main. Der
- * Auftrag arbeitet dann wie einer ohne Sprint auf main.
+ * Auftrag arbeitet dann wie einer ohne Sprint auf main. Ein Datenbankfehler wird durchgereicht, nie als „kein Sprint“
+ * gewertet: Sonst zweigte der Auftrag von main ab und mergte am Ende dorthin statt in den Sprint-Branch.
  */
 async function sprintOf(pool: Pool, item: WorkItem): Promise<SprintRef | null> {
   if (!item.sprintId) return null;
-  const sprint = await pool
-    .query<{ name: string; status: string; branch: string | null }>(
-      `WITH fixed AS (
+  const sprint = await pool.query<{ name: string; status: string; branch: string | null }>(
+    `WITH fixed AS (
          UPDATE sprints SET branch = sprint_branch_for(project_slug, id, name)
           WHERE id = $1 AND branch IS NULL AND status NOT IN ('${SPRINT_STATUS.completed}', '${SPRINT_STATUS.cancelled}') RETURNING id, branch)
        SELECT s.name, s.status, COALESCE(f.branch, s.branch) AS branch
          FROM sprints s LEFT JOIN fixed f ON f.id = s.id WHERE s.id = $1`,
-      [item.sprintId],
-    )
-    .catch(logged('runner', null));
-  const row = sprint?.rows[0];
+    [item.sprintId],
+  );
+  const row = sprint.rows[0];
   return typeof row?.name === 'string' &&
     row.status !== SPRINT_STATUS.completed &&
     row.status !== SPRINT_STATUS.cancelled
@@ -449,7 +448,11 @@ export async function runWorkItem(
     if (folderAtStart && hadOutage(options.cwd, startedAt)) interrupted = true;
     // Worker wird beendet (z. B. während der Auftrag auf den Arbeitsordner wartete): unterbrochen, nicht blockiert.
     else if (isShuttingDown()) interrupted = true;
-    else if (error instanceof OrderBranchError) {
+    // Datenbank kurz weg (z. B. beim Lesen des Sprints): kein Fehler des Auftrags, er läuft im nächsten Zyklus erneut.
+    else if (isDatabaseUnavailable(error)) {
+      interrupted = true;
+      ctx.stopReason = `Unterbrochen: Datenbank nicht erreichbar (${error instanceof Error ? error.message : String(error)}).`;
+    } else if (error instanceof OrderBranchError) {
       // Der Arbeitsordner ist nicht sauber (fremde Änderungen, falscher Branch): Das betrifft jeden Auftrag, nicht
       // diesen. Also nicht blockieren, sondern eingeplant lassen und den Sprint pausieren – sonst scheiterte ein
       // Auftrag nach dem anderen (Sprint 20: 18 Aufträge in vier Minuten) und der Autopilot hielte sie für erledigt.

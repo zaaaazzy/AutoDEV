@@ -332,3 +332,24 @@ test('Optische Abnahme: Auftrag startet in der gewählten Umgebung', async () =>
   assert.equal(invalid.status, 400);
   assert.equal(invalid.update, undefined, 'nichts angefordert');
 });
+
+test('Freigabe und Abnahme eines unbekannten Auftrags: 404 statt 409 „läuft gerade“', async () => {
+  const pool = { query: async () => ({ rows: [], rowCount: 0 }) } as unknown as Pool;
+  const server = createDevLogApp(pool, null).listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const { port } = server.address() as AddressInfo;
+    const id = 'a1b2c3d4-0000-4000-8000-000000000001';
+    for (const path of ['approve', 'show-review']) {
+      const response = await fetch(`http://127.0.0.1:${port}/api/development/${id}/${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      assert.equal(response.status, 404, path);
+      assert.deepEqual(await response.json(), { message: 'Auftrag nicht gefunden.' });
+    }
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

@@ -383,6 +383,19 @@ export const MIGRATIONS: readonly Migration[] = [
         last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS worker_id TEXT;
+      -- agent_processes kam am 21.10. ins Basisschema, nach Einführung der Migrationen: Eine Datenbank, deren
+      -- Basisschritt davor lief, hat die Tabelle nicht, und das ALTER TABLE darunter scheiterte. Deshalb hier nachholen
+      -- (für alle anderen ein No-op). Bewusste Ausnahme von „bestehende Schritte nie ändern“: ohne sie käme eine
+      -- betroffene Datenbank nie bis zu einem späteren Nachhol-Schritt.
+      CREATE TABLE IF NOT EXISTS agent_processes (
+        id BIGSERIAL PRIMARY KEY,
+        pid INTEGER NOT NULL CHECK (pid > 0),
+        pid_started_at TIMESTAMPTZ NOT NULL,
+        command TEXT NOT NULL DEFAULT '',
+        cwd TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS agent_processes_pid_idx ON agent_processes (pid, pid_started_at);
       ALTER TABLE agent_processes ADD COLUMN IF NOT EXISTS worker_id TEXT;
     `,
   },
