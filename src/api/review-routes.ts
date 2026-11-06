@@ -4,7 +4,7 @@ import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 import { access } from './access.js';
-import { DEV_COLUMNS, retryAutoRunSql, retryComment, retrySprintSql } from './development.js';
+import { DEV_COLUMNS, ORDER_NOT_FOUND, retryAutoRunSql, retryComment, retrySprintSql } from './development.js';
 import { guardGit } from './git-state.js';
 
 const PORT_BASE = 4200;
@@ -326,7 +326,11 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
         request.params.id,
       ])
     ).rows[0];
-    if (owner && !(await guardGit(pool, owner.slug, 'approve', request.body, response))) return;
+    if (!owner) {
+      response.status(404).json(ORDER_NOT_FOUND);
+      return;
+    }
+    if (!(await guardGit(pool, owner.slug, 'approve', request.body, response))) return;
     const result = await pool.query(
       `UPDATE development_items SET review_approved_at = COALESCE(review_approved_at, NOW()), updated_at = NOW()
         WHERE id = $1 AND status = '${DEVELOPMENT_STATUS.approval}' RETURNING ${DEV_COLUMNS}, project_slug AS "projectSlug"`,
@@ -399,8 +403,12 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
       ).rows[0];
       // Freigabe: Stand des Auftrags-Branches. Abnahme (Seite „Aktionen“): Stand, in dem der Auftrag steckt – den
       // Commit bestimmt der Worker beim Start (Sprint-Branch bzw. main), weil nur er das Repository sieht.
-      const approval = item?.status === DEVELOPMENT_STATUS.approval;
-      if (!item || (!approval && item.status === DEVELOPMENT_STATUS.inProgress)) {
+      if (!item) {
+        response.status(404).json(ORDER_NOT_FOUND);
+        return;
+      }
+      const approval = item.status === DEVELOPMENT_STATUS.approval;
+      if (!approval && item.status === DEVELOPMENT_STATUS.inProgress) {
         response.status(409).json({ message: 'Der Auftrag läuft gerade – erst danach im Review-Container prüfbar.' });
         return;
       }

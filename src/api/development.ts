@@ -60,7 +60,7 @@ export { retryComment } from './development-input.js';
 type PathRequest = Request<Record<string, string>>;
 type Handler = (request: PathRequest, response: Response) => Promise<void>;
 
-const ORDER_NOT_FOUND = { message: 'Auftrag nicht gefunden.' };
+export const ORDER_NOT_FOUND = { message: 'Auftrag nicht gefunden.' };
 
 /**
  * Zusätzliche SET-Zuweisungen für PATCH /development/:id (als `extra` an `buildUpdate`). Jede Spalte erscheint

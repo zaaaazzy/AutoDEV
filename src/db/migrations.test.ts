@@ -93,6 +93,16 @@ test('Migration 26: legt nur den Wartungsjob bug_categories an und ändert keine
   assert.doesNotMatch(migration?.sql ?? '', /\bbugs\b/);
 });
 
+test('Migration 16: holt agent_processes nach, bevor sie die Spalte worker_id ergänzt', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 16);
+  const sql = migration?.sql ?? '';
+  const created = sql.indexOf('CREATE TABLE IF NOT EXISTS agent_processes');
+  const altered = sql.indexOf('ALTER TABLE agent_processes ADD COLUMN IF NOT EXISTS worker_id');
+  assert.ok(created >= 0, 'Tabelle wird nachgeholt');
+  assert.ok(altered > created, 'erst die Tabelle, dann die Spalte');
+  assert.match(sql, /CREATE INDEX IF NOT EXISTS agent_processes_pid_idx/);
+});
+
 test('Migrationen: Budget je Rolle kommt per Migration auch in bestehende Datenbanken', () => {
   const migration = MIGRATIONS.find((step) => step.version === 17);
   assert.match(migration?.sql ?? '', /CREATE TABLE IF NOT EXISTS budget_role_limits/);
