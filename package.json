@@ -64,6 +64,6 @@
     "tsx": "^4.20.6",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.72.1",
-    "zone.js": "^0.15.1"
+    "zone.js": "^0.16.3"
   }
 }
