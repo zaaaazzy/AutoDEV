@@ -133,7 +133,7 @@ test('Gegenprobe: drei Ergebnisse mit node --test, Fehler im Testfall bleibt „
     execute: runCommand,
     testExecutor: host,
   });
-  assert.equal(check.error, undefined, check.error);
+  assert.equal(check.error, undefined, check.error ?? 'kein Fehler erwartet');
   assert.equal(check.base, git('rev-parse', `${commit}^1`), 'Basis ist der Stand vor dem Merge des Fixes');
   const results = Object.fromEntries(check.files.map((file) => [file.path, file.result]));
   assert.deepEqual(results, {
@@ -165,7 +165,7 @@ test('Gegenprobe: drei Ergebnisse mit tsx --test (fehlendes Modul und Syntaxfehl
     execute: runCommand,
     testExecutor: host,
   });
-  assert.equal(check.error, undefined, check.error);
+  assert.equal(check.error, undefined, check.error ?? 'kein Fehler erwartet');
   const results = Object.fromEntries(check.files.map((file) => [file.path, file.result]));
   assert.deepEqual(results, {
     'src/calc-ts.test.ts': 'fails',
