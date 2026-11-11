@@ -180,14 +180,15 @@
   background: linear-gradient(180deg, #fffaf3, var(--surface) 120px);
 }
 
+.attention-panel .approve-all {
+  flex-shrink: 0;
+  align-self: center;
+}
+
 .attention-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-.attention-detail {
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
 }
 
 /* Ausführliche Meldung und Analyse: gegliedert, lang, aber innerhalb der Karte scrollbar. */
@@ -328,8 +329,8 @@
   white-space: pre-wrap;
 }
 
-/* „Aktionen“ als Auftragstabelle wie unter „Aufträge“; aufgeklappt Warum, Lösungsvorschlag, Ergänzung, Aktionen
- und – erst über „Details“ – die Auftragsdetails. */
+/* „Aktionen“ als Auftragstabelle wie unter „Aufträge“; aufgeklappt in drei Zonen: Kopfband mit Grund und
+ Hauptknopf, Arbeitsbereich (Abnahme zuerst), Nebenaktionen und eingeklappte Auftragsdetails. */
 .attention-body {
   display: grid;
   gap: 12px;
@@ -337,33 +338,37 @@
   /* Die Detailzeile steht in einer Tabellenzelle mit nowrap: Texte (Pfade, Vorschläge) hier wieder umbrechen. */
   white-space: normal;
 }
-.attention-section h3,
-.attention-detail > h3 {
-  margin: 0 0 4px;
+.attention-work h3 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  margin: 0 0 6px;
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
-.attention-section p {
+.attention-work h3 b {
+  color: var(--warn);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.attention-work p {
   margin: 0;
   overflow-wrap: anywhere;
 }
-.attention-solution .attention-suggestion {
+.attention-work .attention-suggestion {
   padding: 8px 12px;
   border-left: 3px solid var(--accent-amber);
   border-radius: 8px;
   background: var(--notice-surface);
 }
-.attention-solution .small {
-  margin-top: 4px;
-}
-.attention-details-toggle[aria-expanded='true'] {
-  border-color: var(--green-light);
-}
 .attention-tech {
-  margin-top: 10px;
+  margin-top: 0;
 }
 
 /* Git-Verlauf im Dashboard */
@@ -702,43 +707,117 @@ app-wait-status {
   text-align: center;
 }
 
-/* Aufgeklappte Rückmeldung: „Warum“ und „Lösung“ als zwei Karten nebeneinander, darunter Ansicht, Ergänzung und
- Knöpfe. Lange Pfade brechen um, statt die Tabellenzeile zu sprengen. */
+/* Aufgeklappte Rückmeldung: Kopfband (Grund links, Hauptknopf rechts), darunter die Arbeitsbereiche über die ganze
+ Breite. Lange Pfade brechen um, statt die Tabellenzeile zu sprengen. */
 .attention-table .attention-body {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
   gap: 12px;
   padding: 14px 16px 16px;
   overflow-wrap: anywhere;
   white-space: normal;
 }
 .attention-table .attention-body > * {
-  grid-column: 1 / -1;
   min-width: 0;
 }
-.attention-table .attention-body > .attention-section:not(.attention-visual) {
-  grid-column: auto;
+.attention-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+  justify-content: space-between;
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent-amber);
   border-radius: 10px;
   background: var(--notice-surface-faint);
 }
-.attention-table .attention-solution :is(app-order-approval, app-order-question) {
-  display: block;
+.attention-head.tone-ok {
+  border-left-color: var(--green);
+  background: var(--success-surface-faint);
+}
+.attention-head.tone-info {
+  border-left-color: var(--info-bright);
+  background: var(--info-soft);
+}
+.attention-head.tone-error {
+  border-left-color: var(--danger);
+  background: var(--error-soft);
+}
+.attention-head-text {
+  display: grid;
+  flex: 1 1 320px;
+  gap: 2px;
   min-width: 0;
 }
-
-/* Die Freigabe steht schon in der grünen Karte: kein zweiter Rahmen darin. */
-.attention-table .attention-solution .approval-box {
+.attention-head-text p {
+  margin: 0;
+  line-height: 1.5;
+}
+.attention-why {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+.attention-head-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.attention-table .attention-work {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.attention-table .attention-acceptance {
+  border-color: var(--notice-border);
+}
+.attention-table .attention-approval {
+  border-left: 3px solid var(--green);
+  background: var(--success-surface-faint);
+}
+.attention-table .attention-approval .approval-box {
   margin: 0;
   padding: 0;
   border: 0;
   background: none;
 }
-.attention-table .attention-body > .attention-section.attention-solution {
-  border-left-color: var(--green);
-  background: #f4f9f5;
+.attention-table .attention-work :is(app-order-approval, app-order-question) {
+  display: block;
+  min-width: 0;
+}
+.attention-table .attention-visual {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.acceptance-todo-list {
+  margin: 0;
+}
+.acceptance-todo-list li.manual {
+  border-left-color: var(--info-bright);
+}
+.acceptance-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+.acceptance-foot .acceptance-hint {
+  flex: 1 1 100%;
+  margin: 0;
+}
+.acceptance-met {
+  margin-top: 8px;
+}
+.acceptance-met > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.acceptance-met .acceptance-list {
+  margin-top: 6px;
 }
 
 /* Überschriften aus Markdown (Analyse) nicht grösser als die Abschnittstitel. */
@@ -746,14 +825,8 @@ app-wait-status {
   margin: 10px 0 4px;
   font-size: 13.5px;
 }
-.attention-table .attention-section h3 {
-  margin-bottom: 6px;
-}
 
-/* Offene Testnachweise: über die ganze Breite, Befehl als Code, Knopf bzw. Rechte-Link rechts (am Handy darunter). */
-.attention-table .attention-body > .attention-section.attention-evidence {
-  grid-column: 1 / -1;
-}
+/* Offene Testnachweise: Befehl als Code, Knopf bzw. Rechte-Link rechts (am Handy darunter). */
 .attention-evidence .evidence-item {
   flex-wrap: wrap;
   align-items: center;
@@ -767,11 +840,8 @@ app-wait-status {
   align-items: center;
   gap: 8px;
 }
-.attention-table .attention-section p {
+.attention-table .attention-work p {
   line-height: 1.55;
-}
-.attention-table .attention-visual {
-  padding: 0;
 }
 .attention-table .attention-answer {
   color: var(--text-strong);
@@ -785,6 +855,61 @@ app-wait-status {
   align-items: center;
   padding-top: 12px;
   border-top: 1px solid var(--line);
+}
+
+/* Eingeklappte Auftragsdetails und Meldung/Analyse/Protokoll: schmale Falten statt ausgebreiteter Details. */
+.attention-fold {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.attention-fold > summary {
+  padding: 9px 14px;
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.attention-fold[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+.attention-fold-body,
+.attention-fold > .attention-failure-body {
+  padding: 10px 14px 14px;
+}
+.attention-fold > .attention-failure-body {
+  margin-top: 0;
+  border: 0;
+  border-radius: 0 0 10px 10px;
+}
+
+/* Spalte „Zu tun“: eine Farbe je Art, Abnahme und Freigabe stechen hervor. */
+.tag.task-acceptance {
+  background: var(--info-soft);
+  color: var(--info-bright);
+}
+.tag.task-approve {
+  background: var(--green-soft);
+  color: var(--green);
+}
+.tag.task-question {
+  background: var(--accent-purple-soft);
+  color: var(--accent-purple);
+}
+.tag.task-rule {
+  background: var(--error-soft);
+  color: var(--danger);
+}
+.tag.task-retry,
+.tag.task-human,
+.tag.task-evidence {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.tag.task-replan,
+.tag.task-wait {
+  background: var(--surface-hover);
+  color: var(--text-strong);
 }
 
 /* Löschen abgesetzt rechts, damit es nicht neben „Erneut versuchen“ angeklickt wird. */
@@ -805,8 +930,14 @@ app-wait-status {
     min-width: 0;
   }
   .attention-table .attention-body {
-    grid-template-columns: 1fr;
     padding: 12px 10px;
+  }
+  .attention-head-actions {
+    flex: 1 1 100%;
+  }
+  .attention-head-actions .button {
+    flex: 1 1 auto;
+    justify-content: center;
   }
   .attention-table .attention-actions .button.danger {
     margin-left: 0;

@@ -53,3 +53,9 @@ export const COUNTER_PROBE_LABELS: Record<CounterProbeResult, string> = {
 
 /** Markierung am Auftrag, wenn ein neuer Testfall auch ohne den Fix besteht. */
 export const UNPROVEN_FIX_MARK = 'Test belegt den Fix nicht';
+
+/**
+ * Beginn der Aktion aus den manuellen Abnahmepunkten des Testers („Selbst prüfen: …“): ein Hinweis zu einem
+ * bestandenen Test, kein Grund zu warten. Worker, Autopilot und die Seite „Aktionen“ erkennen den Fall daran.
+ */
+export const MANUAL_TODO_PREFIX = 'Selbst prüfen: ';

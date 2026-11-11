@@ -243,7 +243,7 @@ export async function processTestRequest(
         pool,
         options.project,
         failed.map((step) => stepBug(step.command, step.output, runId)),
-        (bugId, category, draft) => afterBugCreated(pool, bugId, category, draft),
+        (bugId, category, draft, bugCategory) => afterBugCreated(pool, bugId, category, draft, bugCategory),
       );
       await pool.query('UPDATE test_requests SET bug_count = $2 WHERE id = $1', [request.id, bugs]);
       return { passed: failed.length === 0, output: '' };

@@ -82,6 +82,7 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 
 - `projects`: `health_url` (nur http(s) auf localhost, LAN oder eigener Domain), `log_services` (TEXT[], Compose-Dienste für den Log-Scan), `ingest_token_hash` (SHA-256 des Ingest-Tokens; der Klartext wird nie gespeichert), `production_ignore` (TEXT[], Ausschlussmuster), `production_retention_days` (1–365, Standard 30).
 - Zeitgesteuerte Routinen: `agent_tasks` zusätzlich `schedule` (Cron, 5 Felder, optional), `enabled`, `next_run_at` (TIMESTAMPTZ, in Europe/Zurich berechnet), `output_target` (`chat` | `push` | `bug` | `idea` | `order`), `run_window`, `last_status`, `last_error`, `failure_streak`, `template`; der Trigger `agent_tasks_clear_next_run` (PostgreSQL 14+) löscht `next_run_at` ohne Zeitplan oder bei Pause. `agent_task_runs` (`task_id` → `agent_tasks`, `trigger` schedule/manual, `status` queued/running/ok/failed/cancelled, `environment_error`, `message_id`/`answer_id` → `chat_messages`, Start, Ende, `duration_ms`, `tokens`) – n:1 zu `agent_tasks`. `bugs`, `ideation_items` und `development_items` haben `routine_run_id` → `agent_task_runs` (`ON DELETE SET NULL`).
+- `bugs.bug_category` (feste Bug-Kategorie `security`, `git-sync`, `ci`, `ui`, `api`, `agent-guard`, `budget`, `docs`, CHECK), `bug_category_suggested` (Vorschlag des lokalen Modells, gleicher CHECK) und `bug_category_state` (`suggested` | `confirmed` | leer; `confirmed` genau dann, wenn `bug_category` gesetzt ist). Getrennt vom Bereich `bugs.category`, den der Trigger `development_items_inherit_category` an Aufträge vererbt (Migration 29). Index `bugs_bug_category_idx (project_slug, bug_category)`.
 - `bugs.source` zusätzlich `production` (Quelle „Betrieb“); `bugs.regressed_at`: Zeitpunkt, zu dem ein behobener Betriebs-Bug wieder auftrat und als Regression geöffnet wurde.
 - `production_events` (`project_slug`, `fingerprint` – eindeutig je Projekt, `source` health/logs/ingest, `origin` Dienst bzw. Pfad, `first_seen`, `last_seen`, `count`, `sample` maskiert und auf 2000 Zeichen gekürzt, `bug_id` → `bugs`, `deploy_suspect` JSONB mit Deploy-Zeitpunkt, Aufträgen und Sprints) – n:1 zu `bugs`.
 - `production_event_buckets` (`event_id`, `hour`, `count`): Verlauf je Stunde für „seit gestern“, die Schwere (≥ 50/h = kritisch) und das Diagramm im Bug-Detail.
@@ -94,6 +95,10 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 
 - `test_evidence` (`id` UUID, `development_id` → `development_items`, `position`, `datei`, `befehl`, `grund` `nicht_freigegeben`/`gegenprobe_fehlt`, `status` `open`/`passed`/`failed`/`nicht_freigegeben`, `run_id` → `test_runs`, `checked_at`). Eindeutig je `(development_id, befehl)`.
 - `test_requests.evidence_id` → `test_evidence`; `test_requests.scope` zusätzlich `befehl` (alle bisherigen Werte bleiben erlaubt).
+
+## Erweiterung: Vorschläge aus der Doku (Migration 30)
+
+- `follow_up_proposals` (`id` UUID, `project_slug` → `projects` (Mandant), `development_id` → `development_items`, `doc_id` → `docs`, `kind` `bug`/`idea`, `section`, `title`, `description`, `status` `proposed`/`accepted`/`dismissed`, `result_id` (angelegter Bug bzw. angelegte Idee, ohne Fremdschlüssel, da je nach `kind` auf `bugs` oder `ideation_items`), `decided_by`, `decided_at`, `created_at`). Eindeutig je `(development_id, title)`. Angenommene Bugs tragen kein `development_id` und keinen Sprint; die Verbindung läuft nur über `result_id`.
 
 ## Erweiterung: Visuelle Abnahme (Screenshots vor und nach dem Auftrag)
 

@@ -5,6 +5,7 @@ import type { Pool } from 'pg';
 import express from 'express';
 import { createDevLogApp } from './app.js';
 import { commitTitle, registerReviewRoutes, reviewCommits } from './review-routes.js';
+import { requiredRole } from './route-table.test.js';
 
 /** Nummern der Platzhalter ($1, $2, …), die eine Abfrage verwendet. */
 function placeholders(sql: string): number[] {
@@ -324,6 +325,116 @@ test('Optische Abnahme: gewählte Umgebung wird genau so angefordert, ungültige
   }
 });
 
+const SPRINT = '22222222-2222-4222-8222-222222222222';
+const ORDER_A = '33333333-3333-4333-8333-333333333333';
+const ORDER_B = '44444444-4444-4444-8444-444444444444';
+
+/**
+ * Sammelabnahme gegen einen Pool-Stub: `approved` sind die Zeilen, die das UPDATE noch trifft; `dirty` setzt einen
+ * frischen, sperrenden Git-Befund im Projektordner.
+ */
+async function approveAllRequest(path: string, options: { body?: unknown; approved?: string[]; dirty?: boolean }) {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('FROM project_git_graphs')) {
+        if (!options.dirty) return { rows: [] };
+        const state = {
+          folders: [],
+          problems: [{ severity: 'block', code: 'dirty', role: 'live', title: 'Fremde Änderungen', detail: '' }],
+        };
+        return { rows: [{ state, stateAt: new Date() }] };
+      }
+      if (sql.includes('FROM sprints WHERE id = $1')) return { rows: [{ slug: 'dev-log' }] };
+      // Mandantenprüfung der ID-Liste (assertInProject): alle genannten Umsetzungen gehören zum Projekt.
+      if (sql.includes('FROM development_items WHERE id = ANY($1)')) {
+        return { rows: (values[0] as string[]).map((id) => ({ id })) };
+      }
+      if (sql.startsWith('UPDATE development_items')) {
+        const rows = (options.approved ?? []).map((id) => ({ id, title: id, projectSlug: 'dev-log' }));
+        return { rows, rowCount: rows.length };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as Pool;
+  const server = createDevLogApp(pool, null).listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const { port } = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${port}/api${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options.body ?? {}),
+    });
+    return {
+      status: response.status,
+      body: (await response.json()) as { approved?: number; gitAction?: string },
+      update: queries.find((query) => query.sql.startsWith('UPDATE development_items')),
+      notifies: queries.filter((query) => query.sql.includes('pg_notify')).length,
+      gitChecks: queries.filter((query) => query.sql.includes('FROM project_git_graphs')).length,
+    };
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+test('Alle abnehmen: braucht „Ausführen“ – im Sprint wie auf der Seite „Aktionen“', () => {
+  assert.equal(requiredRole('POST', `/api/sprints/${SPRINT}/approve`, {}), 'run');
+  assert.equal(requiredRole('POST', '/api/projects/dev-log/approve', {}), 'run');
+});
+
+test('Alle abnehmen (Sprint): ein UPDATE nur für Freigabe ohne Abnahme, Git einmal geprüft, Worker einmal geweckt', async () => {
+  const result = await approveAllRequest(`/sprints/${SPRINT}/approve`, { approved: [ORDER_A, ORDER_B] });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.approved, 2);
+  assert.ok(result.update);
+  assert.match(result.update.sql, /sprint_id = \$1 AND status = 'approval' AND review_approved_at IS NULL/);
+  assert.deepEqual(result.update.values, [SPRINT]);
+  assert.equal(result.gitChecks, 1);
+  assert.equal(result.notifies, 1);
+});
+
+test('Alle abnehmen: inzwischen geänderte Umsetzungen zählen nicht, ohne Treffer wird der Worker nicht geweckt', async () => {
+  const one = await approveAllRequest(`/sprints/${SPRINT}/approve`, { approved: [ORDER_A] });
+  assert.equal(one.body.approved, 1);
+  const none = await approveAllRequest(`/sprints/${SPRINT}/approve`, { approved: [] });
+  assert.equal(none.status, 200);
+  assert.equal(none.body.approved, 0);
+  assert.equal(none.notifies, 0);
+});
+
+test('Alle abnehmen: fremde Änderungen sperren ohne Begründung, mit Begründung geht es', async () => {
+  const blocked = await approveAllRequest(`/sprints/${SPRINT}/approve`, { approved: [ORDER_A], dirty: true });
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.body.gitAction, 'approve');
+  assert.equal(blocked.update, undefined, 'nichts abgenommen');
+  assert.equal(blocked.notifies, 0);
+  const confirmed = await approveAllRequest(`/sprints/${SPRINT}/approve`, {
+    approved: [ORDER_A],
+    dirty: true,
+    body: { ignoreGit: true, gitReason: 'Nur Notizen' },
+  });
+  assert.equal(confirmed.status, 200);
+  assert.equal(confirmed.body.approved, 1);
+});
+
+test('Alle abnehmen (Aktionen): nur die genannten Umsetzungen des Projekts, ungültige Liste abgelehnt', async () => {
+  const result = await approveAllRequest('/projects/dev-log/approve', {
+    body: { ids: [ORDER_A, ORDER_B, ORDER_A] },
+    approved: [ORDER_A],
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.approved, 1);
+  assert.match(result.update?.sql ?? '', /project_slug = \$1 AND id = ANY\(\$2::uuid\[\]\) AND status = 'approval'/);
+  assert.deepEqual(result.update?.values, ['dev-log', [ORDER_A, ORDER_B]]);
+  for (const body of [{}, { ids: [] }, { ids: ['kein-uuid'] }]) {
+    const invalid = await approveAllRequest('/projects/dev-log/approve', { body });
+    assert.equal(invalid.status, 400, JSON.stringify(body));
+    assert.equal(invalid.update, undefined);
+  }
+});
+
 test('Optische Abnahme: Auftrag startet in der gewählten Umgebung', async () => {
   const chosen = await showReview('blocked', { slot: 2 });
   assert.equal(chosen.status, 200);
@@ -331,4 +442,25 @@ test('Optische Abnahme: Auftrag startet in der gewählten Umgebung', async () =>
   const invalid = await showReview('blocked', { slot: 'drei' });
   assert.equal(invalid.status, 400);
   assert.equal(invalid.update, undefined, 'nichts angefordert');
+});
+
+test('Freigabe und Abnahme eines unbekannten Auftrags: 404 statt 409 „läuft gerade“', async () => {
+  const pool = { query: async () => ({ rows: [], rowCount: 0 }) } as unknown as Pool;
+  const server = createDevLogApp(pool, null).listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const { port } = server.address() as AddressInfo;
+    const id = 'a1b2c3d4-0000-4000-8000-000000000001';
+    for (const path of ['approve', 'show-review']) {
+      const response = await fetch(`http://127.0.0.1:${port}/api/development/${id}/${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      assert.equal(response.status, 404, path);
+      assert.deepEqual(await response.json(), { message: 'Auftrag nicht gefunden.' });
+    }
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });

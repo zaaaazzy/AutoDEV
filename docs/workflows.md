@@ -35,6 +35,13 @@ flowchart TB
 - **Erfolg** heisst: alle Schritte bestanden, Merge in den Sprint-Branch (ohne Sprint: in `main`). Ist eine
   Review-Freigabe eingestellt (`review_mode` `ui` oder `always`), wartet der Auftrag vorher auf einen Menschen
   (Status „Wartet auf Freigabe“).
+- **Alle abnehmen:** Statt jede Umsetzung einzeln mit „✓ Freigeben“ abzunehmen, nimmt „Alle abnehmen“ alle wartenden
+  in einer Anfrage ab: auf der Seite „Aktionen“ die angezeigten (`POST /api/projects/:slug/approve` mit `ids`), im
+  Sprintmenü die des Sprints (`POST /api/sprints/:id/approve`). Beide brauchen das Recht „Ausführen“. Der Server prüft
+  den Git-Zustand einmal (`guardGit`, Aktion `approve`), setzt `review_approved_at` in einem UPDATE nur für Aufträge im
+  Status Freigabe ohne bisherige Abnahme und weckt den Worker einmal. Der Worker mergt sie danach nacheinander;
+  Konflikte gehen wie bei der Einzelfreigabe an die Agents zurück. Inzwischen geänderte Aufträge zählen nicht mit.
+  Das Register „Anfragen“ unter jedem Sprint listet dessen Aufträge in Freigabe, abgenommene mit „wird gemergt“.
 - **Fehler** heisst: Auftrag blockiert, Bug-Bericht, Problemanalyse. Ein Behebungsauftrag entsteht nur, wenn die
   Analyse einen Code-Fehler bestätigt und `auto_bugfix` am Projekt an ist (Abschnitt 5).
 - Phasen je Auftrag: `pre_task` → `while_task` → `after_task`, dazu `pre_sprint` einmal je Sprint und
@@ -211,6 +218,7 @@ flowchart TD
 - **Agents:** Aktivierte Agents laufen nach Phase (`pre_task`, `while_task`, `after_task`) und Position. Hat ein Projekt Workflow-Schritte (`workflow_steps`), bestimmen diese Phase und Position; die Agent-Felder gelten nur für Projekte ohne Schritte (`loadWorkflow` in `src/runner/runner-selection.ts`). Der erste fehlgeschlagene Schritt beendet den Lauf.
 - **Informationsfluss:** Entwickler erhalten Anforderung und Risiken; jeder Agent bekommt die Ergebnisse der vorherigen Agents (Entwickler: Dateiliste → Tester → Dokumentierer → Handbücher).
 - **Nach jedem Schritt:** Dokumentierer → Auftragsdoku, Handbuch-Autoren → Handbücher, Entwickler bei Bug-Aufträgen → Fix-Notiz am Bug.
+- **Vorschläge aus der Doku:** Direkt nach dem Speichern der Auftragsdoku (nur bei erfolgreichem Dokumentierer-Schritt) liest der Worker die Abschnitte „Offen“, „TODO“, „Bekannter Befund“ und „Folgeauftrag“ aus (`proposeFollowUps` in `src/runner/follow-up-proposals.ts`, ohne Agent-Modell). Erkannt werden nur Überschriften (`#` bis `######`) und Zeilen, die mit `**Stichwort…:**` beginnen (auch mit Listenpunkt); Erwähnungen im Fliesstext zählen nicht. Jeder Listenpunkt bzw. Absatz darunter wird ein Vorschlag (Bug bei „Bekannter Befund“ oder wenn der Titel einen Fehler nennt, sonst Idee) in `follow_up_proposals` mit Status `proposed`. Vorschläge mit Titel-Ähnlichkeit ≥ 0,55 zu einem offenen Bug oder einer offenen Idee werden verworfen (`findDuplicate` aus `src/agent/visionary.ts`), gleiche Titel je Auftrag nur einmal gespeichert. Der Schritt legt selbst nichts an; Fehler stehen im Worker-Log und blockieren den Auftrag nicht. In der Auftragsansicht unter „Vorschläge aus der Doku“ legt „Annehmen“ (Recht „Planung“) genau einen Bug (Quelle `agent`, ohne Sprint) bzw. eine Idee an, „Verwerfen“ setzt `dismissed`. Ein zweiter Klick endet mit 409.
 - **Abbruch:** Der Nutzer kann einen Lauf abbrechen (Status Blockiert, ohne Bug-Bericht – auch nicht nachträglich über `backfillFailures`). Beim Herunterfahren des Workers wird der Auftrag zurück auf „Geplant“ gesetzt und läuft beim nächsten Start weiter.
 - **Sofortstart:** Wird ein Auftrag eingeplant (neu, „Erneut versuchen“, Bugfix, Sprint gestartet), meldet die Datenbank das per `NOTIFY devlog_work`; der Worker startet den nächsten Durchgang sofort statt nach bis zu 30 s. Ein frei werdender Platz weckt ihn ebenfalls. Das Intervall bleibt als Absicherung.
 - **Kurze Ausfälle:** Scheitert ein Schritt vorübergehend (Modell nicht erreichbar, überlastet, Rate-Limit, Verbindung abgebrochen, Zeitlimit), wird er nach 30 s einmal wiederholt. Erst wenn auch das scheitert, gilt der Schritt als fehlgeschlagen. Im Verlauf steht „Vorübergehender Fehler – neuer Versuch“. Wiederholt wird nur ein Fehler des Agents selbst: Rote Projekttests (eingebauter Tester, Testlauf nach dem CLI-Tester) und die visuelle Prüfung werden nie wiederholt, auch wenn ihre Ausgabe z. B. `ECONNREFUSED` enthält. Vor dem zweiten Versuch wird das Budget neu geprüft. Ist es erreicht, hält der Lauf ohne Bug-Bericht an, wie vor einem Schritt („Vorübergehender Fehler – kein neuer Versuch, das Budget ist erreicht“).
@@ -290,6 +298,17 @@ abgebrochen, starten die übrigen ebenfalls nicht.
 ohne Namen dorthin. Als Empfänger ist nur ein Agent desselben Projekts erlaubt; `PATCH /agents/:id` lehnt fremde
 IDs mit 400 ab, `null` hebt die feste Zuordnung auf. Der Empfänger sieht sie unter „Nachrichten an dich“; gespeichert sind sie in
 `agent_run_steps.handoffs`. Implementierung: `src/core/workflow-phases.ts`, `src/runner/pre-sprint.ts`.
+
+**Mandanten-Prüfung für ID-Felder (Pflicht für neue Routen):** Jede API-Route, die eine ID aus Pfad oder Body
+übernimmt (z. B. `agentId`, `handoffTo`, `sprintId`, `developmentId`, `ids`), prüft vor jedem Schreiben und jeder
+Folgeaktion mit `assertInProject(pool, tabelle, id, projektSlug)` (`src/api/tenancy.ts`), dass die ID zum Projekt der
+Route gehört. Der Fremdschlüssel prüft das Projekt nicht, und `routeGuard` prüft nur den Mandanten der Route selbst
+(`:slug` bzw. `:id`), für Administratoren gar nicht. Fremde IDs ergeben 400 (falsche Eingabe) oder 404 (nicht gefunden);
+ein schon vorhandener Statuscode einer Route bleibt. Jede neue ID-Eingabe gehört zusätzlich in die Allowlist
+`src/api/tenant-id-fields.ts`, mit Szenario in `src/api/tenant-ids.test.ts`. Der Test liest die registrierten
+Express-Routen und ihren Quelltext, scheitert bei einem ID-Feld ohne Eintrag und schickt für jeden Eintrag eine ID aus
+einem zweiten Projekt („fremd“): erwartet 400/404 und eine unveränderte Datenbank (Zeilenzahl und Inhalt aller
+Tabellen). Die gültige ID aus dem eigenen Projekt muss weiter den bisherigen Erfolgsstatus liefern.
 
 ## 5. Fehlerbehandlung und Auto-Bugfix
 

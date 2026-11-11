@@ -168,11 +168,10 @@ test('Worker-Routen auf PostgreSQL', async (t) => {
           authorView.upcoming.map((order: { title: string }) => order.title),
           ['Im Sprint'],
         );
-        // Aus einem anderen Projekt abgefragt, ist der Agent unbekannt.
-        assert.deepEqual((await asAdmin.call('GET', `/projects/fremd/agents/${tester}/activity`)).body, {
-          activity: [],
-          upcoming: [],
-        });
+        // Aus einem anderen Projekt abgefragt, ist der Agent unbekannt (assertInProject, tenant-id-fields.ts).
+        const foreign = await asAdmin.call('GET', `/projects/fremd/agents/${tester}/activity`);
+        assert.equal(foreign.status, 404);
+        assert.equal(foreign.body.activity, undefined, 'keine Schritte aus dem anderen Projekt');
       });
 
       await t.test('Abbrechen: 404, wenn der Agent nicht läuft; 202 mit Abbruch, wenn er läuft', async () => {

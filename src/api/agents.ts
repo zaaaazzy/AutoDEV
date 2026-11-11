@@ -1,6 +1,5 @@
 import { logged } from '../core/log.js';
 import { validAgentCommands } from './permission-groups.js';
-import { agentInProject } from './agent-tasks.js';
 import { appendAgentStep, DEFAULT_AGENTS } from '../agent/default-agents.js';
 import { seedDefaultActions } from '../agent/default-actions.js';
 import { SCOPE_PATTERN } from '../agent/agent-guard.js';
@@ -33,6 +32,7 @@ import {
 } from '../core/validation.js';
 import { PHASE_SET, PHASE_SQL_ORDER } from '../core/workflow-phases.js';
 import { hasRole, type Principal } from './roles.js';
+import { assertInProject } from './tenancy.js';
 import { STEP_COLUMNS } from './workflow.js';
 import { defined } from '../core/defined.js';
 
@@ -233,6 +233,10 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     if (!adminFieldsCheck(principalOf(response), fields, { command: null, role: 'custom' })) {
       return void response.status(403).json({ message: ADMIN_ONLY });
     }
+    // Wird beim Anlegen nicht gespeichert, aber angenommen: auch dann nur ein Agent desselben Projekts.
+    if (!(await assertInProject(pool, 'agents', values.get('handoff_to') as string | null | undefined, slug))) {
+      return void response.status(400).json({ message: 'Der Empfänger gehört nicht zu diesem Projekt.' });
+    }
     // Rechte: jeder Befehl wird einzeln gesetzt, nur aus Kategorien dieses Projekts (Mandantentrennung).
     const requested = isRecord(request.body) ? request.body.allowedCommands : undefined;
     // null = Projektstandard der Rolle (z. B. beim Einsetzen eines bestehenden Agents an weiterer Stelle).
@@ -319,6 +323,11 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
       response.status(400).json({ message: 'Ungültige Reihenfolge der Agents.' });
       return;
     }
+    // Das UPDATE fasst fremde Agents nicht an; abgelehnt wird trotzdem, statt still einen Teil umzuordnen.
+    if (!(await assertInProject(pool, 'agents', body.ids as string[], slug))) {
+      response.status(400).json({ message: 'Agents gehören nicht zu diesem Projekt.' });
+      return;
+    }
     await pool.query(
       // Reihenfolge einer Spalte im Workflow-Board; Agents aus anderen Spalten wechseln dabei in diese Phase.
       `UPDATE agents a SET position = o.ord, phase = $2, updated_at = NOW()
@@ -361,7 +370,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
       if (!checked) return void response.status(403).json({ message: ADMIN_ONLY });
       allowed = checked;
       // Nachrichten gehen nur an Agents desselben Projekts (Mandantentrennung); null = kein fester Empfänger.
-      if (handoffTo && !(await agentInProject(pool, handoffTo, current.slug))) {
+      if (!(await assertInProject(pool, 'agents', handoffTo, current.slug))) {
         return void response.status(400).json({ message: 'Der Empfänger gehört nicht zu diesem Projekt.' });
       }
       if (requested !== undefined) {

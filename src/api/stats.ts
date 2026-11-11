@@ -18,6 +18,7 @@ import {
 } from '../core/estimate-calibration.js';
 import { realFailureSql } from '../core/interrupted-steps.js';
 import { logged } from '../core/log.js';
+import { BUG_CATEGORY_VALUES, type BugCategoryValue } from '../core/bug-category-values.js';
 import { AGENT_STEP_STATUS, BUG_STATUS, DEVELOPMENT_STATUS, SPRINT_STATUS, TEST_RUN_STATUS } from '../core/status.js';
 
 type CountRow = { key: string; count: string };
@@ -73,6 +74,77 @@ async function sprintStats(pool: Pool, slug: string): Promise<Record<string, unk
     percent: total ? Math.round((done / total) * 100) : 0,
     burndown: burn.rows.map((row) => ({ day: row.day, remaining: Number(row.remaining) })),
   };
+}
+
+export interface BugCategoryCount {
+  /** Bestätigte feste Bug-Kategorie; null = ohne (auch nur vorgeschlagen). */
+  category: BugCategoryValue | null;
+  open: number;
+  buried: number;
+  total: number;
+}
+export interface BugCategorySprintCount extends BugCategoryCount {
+  /** null = Bug ohne Sprint („Kein Sprint“). */
+  sprintId: string | null;
+  sprintName: string | null;
+}
+export interface BugCategoryStats {
+  /** Alle acht Kategorien (auch mit 0) und „ohne“ (category null); Summe = alle Bugs des Projekts. */
+  bugsByCategory: BugCategoryCount[];
+  /** Nur vorhandene Paare Kategorie × Sprint, Sprints in Anlagereihenfolge, „Kein Sprint“ zuletzt. */
+  bugsByCategorySprint: BugCategorySprintCount[];
+}
+
+/**
+ * Bugs je bestätigter Bug-Kategorie und je Kategorie × Sprint, offen (offen, in Arbeit) und begraben (behoben, kein
+ * Fix, abgelehnt) getrennt. Eine Zählung für Statistik und Retrospektive: Beide lesen nur diese Funktion.
+ */
+export async function bugCategoryStats(pool: Pick<Pool, 'query'>, slug: string): Promise<BugCategoryStats> {
+  const rows = (
+    await pool.query<{
+      category: BugCategoryValue | null;
+      sprintId: string | null;
+      sprintName: string | null;
+      open: string;
+      buried: string;
+    }>(
+      `SELECT b.bug_category AS category, b.sprint_id AS "sprintId", s.name AS "sprintName",
+              COUNT(*) FILTER (WHERE b.status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')) AS open,
+              COUNT(*) FILTER (WHERE b.status NOT IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')) AS buried
+         FROM bugs b LEFT JOIN sprints s ON s.id = b.sprint_id
+        WHERE b.project_slug = $1
+        GROUP BY b.bug_category, b.sprint_id, s.name, s.created_at
+        ORDER BY s.created_at NULLS LAST, b.sprint_id NULLS LAST, array_position($2::text[], b.bug_category) NULLS LAST`,
+      [slug, [...BUG_CATEGORY_VALUES]],
+    )
+  ).rows;
+  const bugsByCategorySprint = rows.map((row) => {
+    const open = Number(row.open);
+    const buried = Number(row.buried);
+    return {
+      category: row.category ?? null,
+      sprintId: row.sprintId ?? null,
+      sprintName: row.sprintId ? (row.sprintName ?? null) : null,
+      open,
+      buried,
+      total: open + buried,
+    };
+  });
+  const bugsByCategory = [...BUG_CATEGORY_VALUES, null].map((category) => {
+    const matching = bugsByCategorySprint.filter((row) => row.category === category);
+    const open = matching.reduce((sum, row) => sum + row.open, 0);
+    const buried = matching.reduce((sum, row) => sum + row.buried, 0);
+    return { category, open, buried, total: open + buried };
+  });
+  return { bugsByCategory, bugsByCategorySprint };
+}
+
+/**
+ * Eingabe der Retrospektive (Konzept: docs/ideen/08-retrospektive-lernende-leitlinien.md): dieselben Zahlen wie
+ * `GET /projects/:slug/stats`, ohne eigene Zählung.
+ */
+export function retrospectiveInput(pool: Pick<Pool, 'query'>, slug: string): Promise<BugCategoryStats> {
+  return bugCategoryStats(pool, slug);
 }
 
 export async function collectStats(pool: Pool, slug: string): Promise<Record<string, unknown>> {
@@ -176,6 +248,7 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
   const hitsBySprint = sprintHitRates(hits.rows, calibration);
   // Laufende Aufträge über dem Dreifachen ihrer kalibrierten Schätzung; ein Fehler hier lässt die Statistik stehen.
   const overruns = await loadEstimateOverruns(pool, slug).catch(logged('stats', [] as EstimateOverrun[]));
+  const { bugsByCategory, bugsByCategorySprint } = await bugCategoryStats(pool, slug);
 
   const finishedTests = tests.rows.filter((run) => run.status !== TEST_RUN_STATUS.running);
   return {
@@ -184,6 +257,8 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
     ideas: counts(ideas.rows),
     bugs: counts(bugs.rows),
     openBugsBySeverity: counts(severities.rows),
+    bugsByCategory,
+    bugsByCategorySprint,
     effort: {
       plannedHours: Number(effort.rows[0]?.planned ?? 0),
       doneHours: Number(effort.rows[0]?.done ?? 0),

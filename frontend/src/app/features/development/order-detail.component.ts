@@ -9,7 +9,6 @@ import { AuthService } from '../../core/auth.service.js';
 import type { AcceptanceCheck, CounterCheckResult, DevelopmentItem } from '../../core/models.js';
 import { SPRINT_STATUS } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
-import { AcceptanceTicks } from '../../shared/acceptance-ticks.js';
 import { visibleInterval } from '../../core/visible-interval.js';
 import type { FormValues } from '../../shared/forms.js';
 import { CATEGORIES, DEVELOPMENT_STATUSES } from '../../shared/labels.js';
@@ -24,9 +23,11 @@ import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { CategoryLabelPipe, HoursPipe, PriorityLabelPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { parseRisks } from '../../shared/risk-list.js';
 import { OrderService } from './order.service.js';
+import { AcceptanceListComponent } from './acceptance-list.component.js';
 import { OrderApprovalComponent } from './order-approval.component.js';
+import { OrderProposalsComponent } from './order-proposals.component.js';
 import { OrderVisualComponent } from './order-visual.component.js';
-import { needsVisual } from './needs-visual.js';
+import { needsVisual } from '../../shared/needs-visual.js';
 import { agentEnds, buildWorkflow } from '../../shared/workflow.js';
 
 /** Texte der Gegenprobe je Testdatei (wie im Testbericht). */
@@ -43,8 +44,10 @@ const COUNTER_CHECK_LABELS: Record<CounterCheckResult, string> = {
   selector: 'app-order-detail',
   standalone: true,
   imports: [
+    AcceptanceListComponent,
     OrderBriefComponent,
     OrderApprovalComponent,
+    OrderProposalsComponent,
     OrderVisualComponent,
     OrderQuestionComponent,
     OrderTimelineComponent,
@@ -66,8 +69,6 @@ export class OrderDetailComponent {
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
   protected readonly auth = inject(AuthService);
-  /** Häkchen der offenen Abnahmepunkte: gesetzt nur während des Speicherns, nach Fehler wieder leer. */
-  protected readonly ticks = new AcceptanceTicks();
   protected readonly categories = CATEGORIES;
   protected readonly isAssignableSprintStatus = isAssignableSprintStatus;
   protected readonly manualAgent: Record<string, string> = {};
@@ -192,16 +193,6 @@ export class OrderDetailComponent {
   protected mark(check: AcceptanceCheck): string {
     if (this.isVerifying(check)) return '…';
     return check.status === 'met' ? '✓' : check.status === 'unmet' ? '✕' : check.status === 'manual' ? '👤' : '○';
-  }
-
-  protected tickPoint(event: Event, item: DevelopmentItem, check: AcceptanceCheck): Promise<void> {
-    return this.ticks.tick(event.target as HTMLInputElement, item.id, check, () =>
-      this.orders.checkPoint(item, check, true),
-    );
-  }
-
-  protected verifyPoints(item: DevelopmentItem, check?: AcceptanceCheck): Promise<void> {
-    return this.orders.verifyPoints(item, check);
   }
 
   protected update(id: string, values: Partial<DevelopmentItem>): Promise<void> {

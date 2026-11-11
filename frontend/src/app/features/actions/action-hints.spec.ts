@@ -9,9 +9,9 @@ test('Aktionen: jeder Knopf erklärt sich per Hover-Text', () => {
     'So umsetzen lassen',
     'Wieder einplanen',
     'Geprüft – alles in Ordnung',
+    '🤖 Prüfen',
+    '🤖 Alle automatisch prüfen',
     'Neu analysieren',
-    'Details',
-    'Details ausblenden',
     '✓ Freigeben',
     '↩ Zurückweisen',
   ]) {

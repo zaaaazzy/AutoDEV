@@ -6,6 +6,7 @@ import { AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
 import { saveOrderDoc, upsertDoc } from '../api/docs.js';
 import { clearManualTodo, MERGE_TODO, SECRETS_TODO, setActionTodo } from './action-todo.js';
 import { resumeBlockedByBug } from './autofix.js';
+import { proposeFollowUps } from './follow-up-proposals.js';
 import { commitTaskToGit, finishOrderBranch, orderWorkInProgress } from './git-sync.js';
 import {
   holdForReview,
@@ -22,6 +23,23 @@ export const MANUAL_TITLE = 'Anwendungshandbuch';
 export const USER_MANUAL_TITLE = 'Benutzerhandbuch';
 const MIN_MANUAL_CHARS = 200;
 
+/**
+ * Vorschläge aus den Abschnitten „Offen“, „TODO“, „Bekannter Befund“, „Folgeauftrag“ der neuen Doku. Ein Fehler
+ * darf den Auftrag nicht blockieren und Status, Tokens und Kosten des Schritts nicht ändern, steht aber im Log.
+ */
+async function proposeFromDoc(pool: Pool, item: WorkItem): Promise<void> {
+  try {
+    const outcome = await proposeFollowUps(pool, item.id);
+    if (outcome.found) {
+      console.info(
+        `[${item.id}] Folgevorschläge aus der Doku: ${outcome.saved} gespeichert, ${outcome.duplicates} Dubletten verworfen.`,
+      );
+    }
+  } catch (error) {
+    console.error(`[${item.id}] Folgevorschläge aus der Doku fehlgeschlagen:`, error);
+  }
+}
+
 export async function afterStep(pool: Pool, item: WorkItem, agent: WorkflowAgent, output: string): Promise<void> {
   if (agent.role === 'documenter' && output.trim()) {
     await saveOrderDoc(pool, {
@@ -30,6 +48,7 @@ export async function afterStep(pool: Pool, item: WorkItem, agent: WorkflowAgent
       title: item.title,
       content: output,
     });
+    await proposeFromDoc(pool, item);
   } else if (agent.role === 'manual_writer' && output.trim().length >= MIN_MANUAL_CHARS) {
     await upsertDoc(pool, { projectSlug: item.projectSlug, kind: 'manual', title: MANUAL_TITLE, content: output });
   } else if (agent.role === 'user_manual_writer' && output.trim().length >= MIN_MANUAL_CHARS) {

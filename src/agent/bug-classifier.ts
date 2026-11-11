@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { type BugCategory, BUG_CATEGORIES, categoryFromBug, parseModelCategory } from '../core/bug-category.js';
 import { DEFAULT_OLLAMA_URL, patientFetch, requestOllamaChat, resolveModel } from './ollama-client.js';
+import { suggestBugCategoryLater } from './bug-category.js';
 
 /**
  * Kategorie neuer Bugs: zuerst aus den Pfaden (src/core/bug-category.ts), sonst fragt das lokale Modell mit Titel und
@@ -134,14 +135,17 @@ export async function waitForBugCategories(maxMs: number): Promise<void> {
 
 /**
  * Für Erzeuger: Kategorie aus den Pfaden in den INSERT schreiben (categoryFromBug), danach afterBugCreated aufrufen –
- * hat der neue Bug keine Kategorie, fragt es das Modell im Hintergrund.
+ * hat der neue Bug keine Kategorie, fragt es das Modell im Hintergrund. Ebenso für die feste Bug-Kategorie
+ * (`bug_category`): Ohne mitgegebene gibt es nur einen Vorschlag (src/agent/bug-category.ts), den ein Mensch bestätigt.
  */
 export function afterBugCreated(
   pool: Pick<Pool, 'query'>,
   bugId: string | undefined,
   category: string | null | undefined,
   bug: BugText,
+  bugCategory?: string | null,
 ): void {
-  if (!bugId || category) return;
-  void categorizeLater(pool, bugId, bug);
+  if (!bugId) return;
+  if (!category) void categorizeLater(pool, bugId, bug);
+  if (!bugCategory && modelCategoriesEnabled()) void suggestBugCategoryLater(pool, bugId, bug);
 }

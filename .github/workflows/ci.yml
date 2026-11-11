@@ -34,10 +34,10 @@ jobs:
       # Ohne erreichbare Datenbank schlagen die Datenbank-Tests fehl, statt still übersprungen zu werden.
       DEV_LOG_TEST_REQUIRE_DATABASE: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -67,10 +67,10 @@ jobs:
       # Wegwerf-Datenbank des Service-Containers, kein Secret.
       E2E_ADMIN_DATABASE_URL: postgresql://devlog:devlog_ci_only@localhost:5432/postgres
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -93,7 +93,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Zugangsdaten nur für diesen Lauf
@@ -109,7 +109,7 @@ jobs:
       - run: docker build deploy/review
       # Image der Agent-Sandbox (DEV_LOG_AGENT_SANDBOX=docker); danach läuft der Sandbox-Integrationstest gegen echtes Docker.
       - run: docker build -t aideation-agent -f deploy/agent/Dockerfile .
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm

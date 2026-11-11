@@ -133,12 +133,43 @@
       @if (sprint.gitMessage) {
         <p class="notice">{{ sprint.gitMessage }}</p>
       }
-      <details class="sprint-orders-section" [open]="sprint.status !== 'completed'">
-        <summary>
-          Aufträge <span class="muted">({{ sprintProgress() }})</span>
-        </summary>
-        <app-sprint-orders [sprint]="sprint" />
-      </details>
+      <section class="sprint-orders-section">
+        <!-- Reiter im Komponentenzustand: Nachladen der Daten wechselt ihn nicht zurück. -->
+        <div class="sprint-tabs" role="tablist" aria-label="Register des Sprints">
+          <button
+            type="button"
+            role="tab"
+            [id]="'sprint-tab-orders-' + sprint.id"
+            [attr.aria-controls]="'sprint-panel-' + sprint.id"
+            [attr.aria-selected]="tab() === 'orders'"
+            [class.active]="tab() === 'orders'"
+            (click)="tab.set('orders')"
+          >
+            Aufträge <span class="muted">({{ sprintProgress() }})</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            [id]="'sprint-tab-requests-' + sprint.id"
+            [attr.aria-controls]="'sprint-panel-' + sprint.id"
+            [attr.aria-selected]="tab() === 'requests'"
+            [class.active]="tab() === 'requests'"
+            [title]="waitingCount() + ' Umsetzungen warten auf die Freigabe'"
+            (click)="tab.set('requests')"
+          >
+            Anfragen <span class="tab-count">{{ waitingCount() }}</span>
+          </button>
+        </div>
+        <div
+          role="tabpanel"
+          [id]="'sprint-panel-' + sprint.id"
+          [attr.aria-labelledby]="'sprint-tab-' + tab() + '-' + sprint.id"
+        >
+          <!-- [hidden] statt @if: Aufgeklappte Zeilen und „Aufträge hinzufügen“ bleiben beim Reiterwechsel erhalten. -->
+          <app-sprint-orders [sprint]="sprint" [hidden]="tab() !== 'orders'" />
+          <app-sprint-requests [sprint]="sprint" [hidden]="tab() !== 'requests'" />
+        </div>
+      </section>
       @if (sprint.status === 'completed' || sprint.status === 'review') {
         <div class="actions">
           <button class="button secondary" (click)="refreshReport(sprint.id)">Sprintbericht aktualisieren</button>
@@ -291,6 +322,17 @@
           @if (can.pause) {
             <button class="button secondary" type="button" [disabled]="busy()" (click)="pauseSprint(sprint.id)">
               <app-nav-icon name="pause" />Pausieren
+            </button>
+          }
+          @if (can.approveAll) {
+            <button
+              class="button primary"
+              type="button"
+              [disabled]="busy() || approving()"
+              [title]="'Alle ' + waitingCount() + ' Umsetzungen dieses Sprints in Freigabe abnehmen'"
+              (click)="approveAll()"
+            >
+              ✓ Alle abnehmen ({{ waitingCount() }})
             </button>
           }
           @if (can.live) {

@@ -6,6 +6,8 @@ import { MIGRATIONS, MIGRATION_LOCK, runMigrations, type Migration } from './mig
 import { SCHEMA } from './schema.js';
 import { coverageHistory, coverageOverview } from '../api/coverage.js';
 import { COVERAGE_AREA_ALIASES, COVERAGE_AREA_KEYS, coverageAreaKey } from '../core/coverage-areas.js';
+import { BUG_CATEGORY_VALUES } from '../core/bug-category-values.js';
+import { FOLLOW_UP_KIND, FOLLOW_UP_STATUS } from '../core/status.js';
 import { adminPool, databaseUrl, dropDatabase } from './test-database.test.js';
 
 /** Verbindung, die jede Abfrage mitschreibt; done = bereits vermerkte Versionen, fail = SQL, das scheitert. */
@@ -93,6 +95,121 @@ test('Migration 26: legt nur den Wartungsjob bug_categories an und ändert keine
   assert.doesNotMatch(migration?.sql ?? '', /\bbugs\b/);
 });
 
+test('Migration 16: holt agent_processes nach, bevor sie die Spalte worker_id ergänzt', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 16);
+  const sql = migration?.sql ?? '';
+  const created = sql.indexOf('CREATE TABLE IF NOT EXISTS agent_processes');
+  const altered = sql.indexOf('ALTER TABLE agent_processes ADD COLUMN IF NOT EXISTS worker_id');
+  assert.ok(created >= 0, 'Tabelle wird nachgeholt');
+  assert.ok(altered > created, 'erst die Tabelle, dann die Spalte');
+  assert.match(sql, /CREATE INDEX IF NOT EXISTS agent_processes_pid_idx/);
+});
+
+test('Migration 29: CHECK nennt genau die Werte aus BUG_CATEGORY_VALUES; Bereich und Vererbung bleiben unberührt', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 29);
+  assert.equal(migration?.name, 'bug-kategorie-fest');
+  const sql = migration?.sql ?? '';
+  const lists = [...sql.matchAll(/CHECK \(bug_category(?:_suggested)? IN \(([^)]*)\)\)/g)].map((match) =>
+    [...match[1]!.matchAll(/'([^']+)'/g)].map((value) => value[1]),
+  );
+  assert.equal(lists.length, 2, 'CHECK für Kategorie und Vorschlag');
+  for (const list of lists) assert.deepEqual(list, [...BUG_CATEGORY_VALUES]);
+  // Keine frühere Migration kennt die neuen Spalten (sonst stünden dort womöglich andere Werte).
+  for (const step of MIGRATIONS.filter((other) => other.version < 29)) {
+    assert.doesNotMatch(step.sql, /bug_category/, `Version ${step.version}`);
+  }
+  // Das Feld `category` (Bereich) und der Vererbungstrigger kommen nicht vor; `bug_category` zählt nicht als Treffer.
+  assert.doesNotMatch(sql, /\bcategory\b/);
+  assert.doesNotMatch(sql, /development_items_inherit_category|development_items/);
+});
+
+test('Migration 29: Bug-Kategorie auf PostgreSQL – nur die acht Werte, Zustand passend, Bereich unverändert', async (t) => {
+  const admin = await adminPool(t);
+  if (!admin) return;
+  const name = `devlog_migr_bugcat_${process.pid}`;
+  await dropDatabase(admin, name);
+  await admin.query(`CREATE DATABASE ${name}`);
+  const pool = new pg.Pool({ connectionString: databaseUrl(name), max: 1 });
+  const client = await pool.connect();
+  try {
+    await runMigrations(
+      client,
+      MIGRATIONS.filter((step) => step.version < 29),
+    );
+    await client.query(`INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop')`);
+    const old = (
+      await client.query<{ id: string }>(
+        `INSERT INTO bugs (project_slug, title, category) VALUES ('shop', 'Altbug', 'backend') RETURNING id`,
+      )
+    ).rows[0]!.id;
+    // Bereichsspalte und Vererbungstrigger vorher und nachher gleich.
+    const area = async () =>
+      (
+        await client.query(
+          `SELECT (SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'bugs_category_check') AS "check",
+                  (SELECT pg_get_triggerdef(oid) FROM pg_trigger WHERE tgname = 'development_items_inherit_category') AS "trigger",
+                  (SELECT md5(prosrc) FROM pg_proc p JOIN pg_trigger g ON g.tgfoid = p.oid
+                    WHERE g.tgname = 'development_items_inherit_category') AS body`,
+        )
+      ).rows[0];
+    const before = await area();
+
+    assert.deepEqual(
+      await runMigrations(
+        client,
+        MIGRATIONS.filter((step) => step.version === 29),
+      ),
+      [29],
+    );
+    assert.deepEqual(await area(), before);
+    const stored = (
+      await client.query(
+        'SELECT category, bug_category, bug_category_suggested, bug_category_state FROM bugs WHERE id = $1',
+        [old],
+      )
+    ).rows[0];
+    assert.deepEqual(stored, {
+      category: 'backend',
+      bug_category: null,
+      bug_category_suggested: null,
+      bug_category_state: null,
+    });
+
+    const insert = (values: [string | null, string | null, string | null]) =>
+      client.query(
+        `INSERT INTO bugs (project_slug, title, bug_category, bug_category_suggested, bug_category_state)
+         VALUES ('shop', 'Probe', $1, $2, $3)`,
+        values,
+      );
+    // Jeder Wert aus dem Code besteht den CHECK – bestätigt und als Vorschlag.
+    for (const value of BUG_CATEGORY_VALUES) {
+      await insert([value, null, 'confirmed']);
+      await insert([null, value, 'suggested']);
+    }
+    await assert.rejects(insert(['frontend', null, 'confirmed']), /bugs_bug_category_check/);
+    await assert.rejects(insert(['git', null, 'confirmed']), /bugs_bug_category_check/);
+    await assert.rejects(insert([null, 'quatsch', 'suggested']), /bugs_bug_category_suggested_check/);
+    // Zustand passt zu den Werten: bestätigt nur mit Kategorie, vorgeschlagen nur mit Vorschlag, ohne Zustand leer.
+    await assert.rejects(insert(['ui', null, null]), /bugs_bug_category_state_check/);
+    await assert.rejects(insert([null, null, 'confirmed']), /bugs_bug_category_state_check/);
+    await assert.rejects(insert([null, null, 'suggested']), /bugs_bug_category_state_check/);
+    await assert.rejects(insert(['ui', 'ui', 'suggested']), /bugs_bug_category_state_check/);
+    await assert.rejects(insert(['ui', null, 'egal']), /bugs_bug_category_state_check/);
+    // Der Bereich nimmt die neuen Werte weiterhin nicht an (Aufträge erben ihn per Trigger).
+    await assert.rejects(
+      client.query(`INSERT INTO bugs (project_slug, title, category) VALUES ('shop', 'Bereich', 'git-sync')`),
+      /bugs_category_check/,
+    );
+    // Danach bleibt nur noch die Folgevorschlag-Migration (30) offen.
+    assert.deepEqual(await runMigrations(client), [30]);
+  } finally {
+    client.release();
+    await pool.end();
+    await dropDatabase(admin, name);
+    await admin.end();
+  }
+});
+
 test('Migrationen: Budget je Rolle kommt per Migration auch in bestehende Datenbanken', () => {
   const migration = MIGRATIONS.find((step) => step.version === 17);
   assert.match(migration?.sql ?? '', /CREATE TABLE IF NOT EXISTS budget_role_limits/);
@@ -105,6 +222,17 @@ test('Migrationen: Gegenprobe je Auftrag kommt per Migration, nicht über das ei
   assert.match(migration?.sql ?? '', /ALTER TABLE development_items ADD COLUMN IF NOT EXISTS counter_check JSONB/);
   assert.match(migration?.sql ?? '', /counter_check IS NULL OR/);
   assert.doesNotMatch(SCHEMA, /counter_check/);
+});
+
+test('Migration 30: Folgevorschläge idempotent, CHECKs erlauben alle Werte, die der Code schreibt', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 30);
+  assert.equal(migration?.name, 'folgevorschlaege-aus-doku');
+  const sql = migration?.sql ?? '';
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS follow_up_proposals/);
+  assert.match(sql, /CREATE INDEX IF NOT EXISTS follow_up_proposals_open_idx/);
+  for (const kind of Object.values(FOLLOW_UP_KIND)) assert.match(sql, new RegExp(`kind IN \\([^)]*'${kind}'`));
+  for (const status of Object.values(FOLLOW_UP_STATUS)) assert.match(sql, new RegExp(`status IN \\([^)]*'${status}'`));
+  assert.doesNotMatch(SCHEMA, /follow_up_proposals/);
 });
 
 test('Migration 25: Zuordnungstabelle enthält genau die Schreibweisen aus COVERAGE_AREA_ALIASES', () => {
@@ -150,7 +278,10 @@ test('Migration 25: Bereiche umschreiben, Kollisionen zusammenführen, Altbestan
       [report],
     );
 
-    assert.deepEqual(await runMigrations(client), [25, 26, 27, 28]);
+    assert.deepEqual(
+      await runMigrations(client),
+      MIGRATIONS.filter((step) => step.version >= 25).map((step) => step.version),
+    );
     const rows = (
       await client.query(
         `SELECT area, unit_tests AS unit, passed, lines, branches FROM test_coverage_areas
@@ -253,7 +384,10 @@ test('Migrationen 24 und 25: Altbestand wird zugeordnet, bereinigt, abgesichert;
       for (const label of LEGACY_LABELS) await area(await report(label, '2026-09-01T10:00:00Z'), label, 50, 50, 50);
 
       // 24 schreibt über die Zuordnungstabelle um; nach 23 ist alles schon zugeordnet, es ändert sich nichts.
-      assert.deepEqual(await runMigrations(client), [24, 25, 26, 27, 28]);
+      assert.deepEqual(
+        await runMigrations(client),
+        MIGRATIONS.filter((step) => step.version >= 24).map((step) => step.version),
+      );
 
       const rows = async (id: string) =>
         (await client.query('SELECT area, lines FROM test_coverage_areas WHERE report_id = $1 ORDER BY area', [id]))

@@ -297,6 +297,18 @@ flowchart LR
   E --> F[Prompt: Fremdtext nur im markierten Block]
 ```
 
+### Bug-Kategorien (Migration 29)
+
+Neben dem Bereich `category` (Frontend, Backend, …, per Trigger an den Auftrag vererbt und unverändert) hat jeder Bug eine feste **Bug-Kategorie** `bug_category`: `security`, `git-sync`, `ci`, `ui`, `api`, `agent-guard`, `budget`, `docs`. Die Werte stehen in `src/core/bug-category-values.ts`. Der CHECK in der Datenbank nennt genau dieselben Werte.
+
+- **Zustand** `bug_category_state`: leer (weder Kategorie noch Vorschlag), `suggested` (nur `bug_category_suggested`) oder `confirmed` (`bug_category` gesetzt). Gezählt wird nur die bestätigte Kategorie.
+- **Anlegen** (`POST /projects/:slug/bugs` mit `bugCategory`, `reportAgentBug`): Eine gültige Kategorie gilt sofort als bestätigt. Der Autofix gibt bei einer Sperre des Agent-Wächters `agent-guard` mit. Ohne Kategorie schlägt das lokale Modell danach im Hintergrund eine vor (`src/agent/bug-category.ts`, Rolle `bug_category`, Modell über `DEV_LOG_OLLAMA_MODEL_BUG_CATEGORY`). Das blockiert nichts und wird nicht wiederholt. Ist Ollama nicht erreichbar oder antwortet das Modell mit etwas ausserhalb der Liste, bleibt der Bug ohne Vorschlag. Reine Limit-, Kosten- oder Verbindungsmeldungen bekommen keinen Vorschlag.
+- **Fremder Text:** Der Bugtext steht nur als JSON im Block `<bug_daten>` der Nutzer-Nachricht. Spitze Klammern sind maskiert. Die Regeln stehen in der System-Nachricht. Die Anfrage hat keine Werkzeuge. Die Antwort zählt nur, wenn sie genau einer der acht Werte ist.
+- **Bestätigen** (Recht „Planen“): einzeln `POST /bugs/:id/category/confirm` (ohne Angabe gilt der Vorschlag, mit `category` eine Korrektur), gesammelt `POST /projects/:slug/bugs/category/confirm` mit `ids`, oder per `PATCH /bugs/:id` mit `bugCategory`.
+- **Altbestand kategorisieren** (Recht „Planen“): `POST /projects/:slug/bugs/categorize-backlog`. Der Lauf erzeugt nacheinander für jeden Bug ohne Kategorie und ohne Vorschlag genau einen Vorschlag und ändert `bug_category` nie. Ein Fehler bei einem Bug stoppt den Lauf nicht. Je Prozess läuft höchstens ein Lauf, ein zweiter Aufruf bekommt 409. `GET` zeigt den Stand, `DELETE` bricht ab.
+- **Oberfläche:** Auf der Bugs-Seite gibt es die Spalte „Kategorie“ mit Filter (acht Werte, „Vorschlag offen“, „Ohne Kategorie“). Die bisherige Spalte heisst jetzt „Bereich“. Vorschläge lassen sich in der Zeile, im aufgeklappten Bug oder gesammelt über die Auswahl bestätigen. Die Bug-Statistik „Nach Kategorie“ zählt jetzt die Bug-Kategorie statt des Bereichs. Neu ist die Tabelle „Kategorie × Sprint“.
+- **Statistik und Retrospektive:** `GET /projects/:slug/stats` enthält `bugsByCategory` (alle acht und „ohne“) und `bugsByCategorySprint` (offen und begraben getrennt, `sprintId` null = „Kein Sprint“). `retrospectiveInput` in `src/api/stats.ts` liefert dieselbe Zählung (`bugCategoryStats`). Die Statistik-Seite zeigt sie als Tabelle Kategorie × Sprint.
+
 ## 7 · Sprint, Autopilot und Git
 
 Pro Projekt höchstens ein aktiver Sprint (Datenbank-Regel). Modus in den Einstellungen: `manual`, `suggest` oder `autopilot`.
@@ -396,10 +408,23 @@ Jeder dieser Knöpfe (und „Erneut versuchen“, „Sprintvorschlag übernehmen
 | Sprint → Live schalten                             | Sprint `completed` (bzw. `review` im PR-Modus), `git_sync` pending | Arbeitszyklus, Schritt 1: Test-Gate, Merge, Tag, Push, Deploy (`goLive`)      |
 | Sprint / Auftrag → ▶ Review-Container              | `review_slots` requested                 | Review-Takt 5 s (`reviewSlots.sync()`)                                                 |
 | Auftrag → Freigeben / Zurückweisen                 | `review_approved_at` bzw. Status `planned` | Arbeitszyklus, Schritt 4 (`processApprovals`)                                         |
+| Aktionen / Sprint → Alle abnehmen                  | `review_approved_at` für alle wartenden (`POST /api/projects/:slug/approve` bzw. `/api/sprints/:id/approve`) | ein `pg_notify`, dann Arbeitszyklus, Schritt 4 (Merge nacheinander) |
 | Bug → Für Agents freigeben                         | `bugs.approved_at` (`POST /api/bugs/:id/approve`) | Arbeitszyklus: der Behebungsauftrag darf starten                              |
 | Bug → Rollback bestätigen                          | `production_rollbacks` requested         | Heartbeat 15 s (`processRollback`), sobald kein Agent und kein Deploy läuft             |
 | Dashboard → Git-Hinweis → Lösung ausführen         | `git_fix_requests`                       | Heartbeat 15 s (`processGitFix`)                                                        |
 | Aktionen → Routine mit Zeitplan                    | `agent_tasks.next_run_at`                | Routinen-Planer 1 min → Chat-Spur mit Rolle `routine`                                   |
+
+### Rückmeldungen der Agents (Seite „Aktionen“)
+
+Die Tabelle „Rückmeldungen der Agents“ listet Aufträge, die auf einen Menschen warten (`orderAttention` in `frontend/src/app/shared/order-attention.ts`): Rückfragen, Freigaben, blockierte und abgelehnte Aufträge, aus dem Sprint genommene, offene Abnahmepunkte und offene Testnachweise. Die Spalte **„Zu tun“** nennt vor dem Aufklappen die Art der Aufgabe (eine je Auftrag, in dieser Rangfolge): Rückfrage, Freigabe, Abnahme, Testnachweis, Abgelehnt, Einplanen, Aufgabe für dich, Erneut versuchen, Läuft. Sie ist filterbar.
+
+Jede aufgeklappte Zeile hat denselben Aufbau in drei Zonen:
+
+1. **Kopfband:** der Grund in einem Satz (`attentionCard`), darunter der nächste Schritt und der meldende Agent; rechts der eine Hauptknopf („Erneut versuchen“, „So umsetzen lassen“, „Geprüft – alles in Ordnung“, „Wieder einplanen“, „✓ Freigeben“ mit „↩ Zurückweisen“).
+2. **Arbeitsbereich:** je Fall ein Block. Sind Abnahmepunkte offen (nur von Hand prüfbar, vom Tester als nicht erfüllt gemeldet oder noch offen), steht die **Abnahmeliste zuerst**: Häkchen je Punkt, „🤖 Prüfen“ je Punkt, „🤖 Alle automatisch prüfen“, bei manuellen Punkten „Geprüft – alles in Ordnung“ und der Review-Container; erfüllte Punkte stehen eingeklappt dahinter. Danach folgen Freigabe, Rückfrage, Lösungsvorschlag bzw. Aufgabe, offene Testnachweise, optische Abnahme und das Ergänzungsfeld für die Agents. Die Liste (`app-acceptance-list`) ist dieselbe wie unter „Aufträge“ → „Noch zu erledigen“.
+3. **Nebenaktionen und Falten:** „Neu analysieren“ bei blockierten Aufträgen, darunter die eingeklappten Falten „Auftragsdetails“ (Kennzahlen, Beschreibung, Agents, Dateien, Risiken – erst beim Öffnen gerendert) und „Meldung, Analyse und Protokoll“.
+
+Der Abnahmehinweis `action_todo = „Selbst prüfen: …“` (`MANUAL_TODO_PREFIX` in `src/core/shared-types.ts`) zählt dort nicht als eigene Aktion: Die Punkte selbst stehen in der Abnahmeliste, und ein erledigter Auftrag mit manuellen Punkten bleibt so lange gelistet, bis sie abgehakt sind. Einen eigenen Datenbank-Status „Abnahme“ gibt es bewusst nicht: Manuelle Punkte entstehen nach dem Merge, ein Status davor hiesse, den Merge aufzuhalten; die Art „Abnahme“ in der Spalte „Zu tun“ macht den Fall sichtbar, ohne Übergänge zu ändern.
 
 Der Komplettlauf prüft im Agent-Worktree immer `main` (losgelöst ausgecheckt). Hat der Worktree offene Änderungen, etwa weil ein Auftrag nach dem Nutzungslimit mit halbfertigem Stand wartet, startet kein Test und es werden keine Bugs angelegt. Die Anforderung steht dann auf „fehlgeschlagen“ mit dem Grund „Offene Änderungen im Agent-Worktree … – Test auf main nicht möglich“.
 

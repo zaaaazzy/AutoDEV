@@ -10,12 +10,13 @@ export const ACTION_HINTS: Record<string, string> = {
     'Du hast die Regel bzw. Einstellung angepasst: Die Agents starten den Auftrag noch einmal.',
   'So umsetzen lassen': 'Die Agents setzen den Lösungsvorschlag der Analyse um; deine Ergänzung geht zusätzlich mit.',
   'Wieder einplanen': 'Der Auftrag kommt zurück in die Planung und wird mit dem nächsten Sprint wieder bearbeitet.',
-  'Geprüft – alles in Ordnung': 'Vermerkt die offenen Abnahmepunkte als von dir geprüft.',
+  'Geprüft – alles in Ordnung': 'Vermerkt alle Punkte, die nur ein Mensch prüfen kann, auf einmal als von dir geprüft.',
+  '🤖 Prüfen': 'Der Tester-Agent prüft nur diesen Punkt noch einmal und hakt ihn ab, wenn er erfüllt ist.',
+  '🤖 Alle automatisch prüfen':
+    'Der Tester-Agent prüft alle offenen Punkte noch einmal; erfüllte hakt er ab, der Rest bleibt offen.',
   'Neu analysieren':
     'Der Assistent untersucht nur, warum der Auftrag hängt, und schlägt eine Lösung vor. Es wird kein Code ' +
     'geändert – umsetzen lässt du den Vorschlag danach selbst.',
-  Details: 'Zeigt Beschreibung, Meldungen der Agents, Analyse und Protokoll dieses Auftrags.',
-  'Details ausblenden': 'Blendet die Auftragsdetails wieder aus.',
   '✓ Freigeben': 'Gibt das Ergebnis frei: Der Worker übernimmt den Auftrags-Branch in den Sprint.',
   '↩ Zurückweisen': 'Schickt den Auftrag mit deiner Begründung zurück an die Agents.',
 };

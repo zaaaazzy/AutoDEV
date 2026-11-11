@@ -10,7 +10,12 @@ import {
 import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../../core/models.js';
 
 type SprintRef = { id: string; status: string; gitSync?: string | null };
-type ItemRef = { sprintId?: string | null; status: string };
+type ItemRef = { sprintId?: string | null; status: string; reviewApprovedAt?: string | null };
+
+/** Wartet auf die Abnahme: Status Freigabe und noch nicht abgenommen (dasselbe WHERE wie POST …/approve). */
+export function awaitsApproval(item: ItemRef): boolean {
+  return item.status === 'approval' && !item.reviewApprovedAt;
+}
 
 /** Welche Knöpfe das Sprint-Detail zeigt: Regeln des Servers (sprint-rules) und Rolle der Route. */
 export interface SprintButtons {
@@ -27,6 +32,8 @@ export interface SprintButtons {
   cancel: boolean;
   replan: boolean;
   remove: boolean;
+  /** „Alle abnehmen“: mit „Ausführen“ und mindestens einer wartenden Umsetzung im Sprint (POST /sprints/:id/approve). */
+  approveAll: boolean;
 }
 
 /**
@@ -64,6 +71,7 @@ export function sprintButtons(
     cancel: plan && canChangeSprintStatus(sprint.status, 'cancelled'),
     replan: plan && sprint.status === SPRINT_STATUS.cancelled && canChangeSprintStatus(sprint.status, 'planned'),
     remove: plan && canDeleteSprint(sprint, items),
+    approveAll: run && items.some((item) => item.sprintId === sprint.id && awaitsApproval(item)),
   };
 }
 

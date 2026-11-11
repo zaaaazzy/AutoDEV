@@ -99,34 +99,38 @@ export function parseCommand(text: string): string[] | null {
 export interface ModelPreset {
   id: string;
   label: string;
-  /** 0 = kostenlos, 1–3 = $ bis $$$ (grobe Richtwerte, Abrechnung beim jeweiligen Anbieter). */
-  tier: 0 | 1 | 2 | 3;
+  /** 0 = kostenlos, 1–4 = $ bis $$$$ (grobe Richtwerte, Abrechnung beim jeweiligen Anbieter). */
+  tier: 0 | 1 | 2 | 3 | 4;
   command: string;
 }
+
+/**
+ * Claude-Modelle für die Vorgaben hier und die Modellliste des Einrichtungsassistenten (`PROVIDERS` in
+ * project-wizard.component.ts) – die einzige Stelle mit Versionsnummern. Die Claude-CLI nimmt für die Aliase
+ * haiku/sonnet/opus/fable immer die neueste Version der Reihe; die Labels sind der Stand vom 2026-11-11 und werden
+ * hier nachgezogen, sobald die CLI eine neuere Generation liefert. Der gespeicherte Befehl bleibt dabei gleich.
+ */
+export const CLAUDE_MODELS: { alias: string; label: string; hint: string; tier: 1 | 2 | 3 | 4 }[] = [
+  { alias: 'haiku', label: 'Claude Haiku 5.5', hint: 'schnell, günstig', tier: 1 },
+  { alias: 'sonnet', label: 'Claude Sonnet 5.5', hint: 'ausgewogen', tier: 2 },
+  { alias: 'opus', label: 'Claude Opus 5.5', hint: 'stark', tier: 3 },
+  { alias: 'fable', label: 'Claude Fable 5.1', hint: 'am stärksten, am teuersten', tier: 4 },
+];
+
+/** Gleicher Befehl wie `agentCommand('claude', alias)` in src/api/setup.ts, damit `presetOf` ihn erkennt. */
+const claudeCommand = (alias: string): string => `claude --model ${alias} --permission-mode acceptEdits -p {prompt}`;
 
 const PROVIDER_ORDER = ['local', 'claude', 'copilot', 'gemini'];
 
 export const MODEL_PRESETS: ModelPreset[] = (
   [
     { id: 'local', label: 'Lokal (Ollama qwen3.5:9b)', tier: 0, command: '' },
-    {
-      id: 'claude-haiku',
-      label: 'Claude Haiku',
-      tier: 1,
-      command: 'claude --model haiku --permission-mode acceptEdits -p {prompt}',
-    },
-    {
-      id: 'claude-sonnet',
-      label: 'Claude Sonnet',
-      tier: 2,
-      command: 'claude --model sonnet --permission-mode acceptEdits -p {prompt}',
-    },
-    {
-      id: 'claude-opus',
-      label: 'Claude Opus',
-      tier: 3,
-      command: 'claude --model opus --permission-mode acceptEdits -p {prompt}',
-    },
+    ...CLAUDE_MODELS.map((model) => ({
+      id: `claude-${model.alias}`,
+      label: model.label,
+      tier: model.tier,
+      command: claudeCommand(model.alias),
+    })),
     {
       id: 'copilot',
       label: 'GitHub Copilot (Standardmodell)',

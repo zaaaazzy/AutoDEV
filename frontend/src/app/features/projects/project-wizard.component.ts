@@ -7,6 +7,7 @@ import { SetupService } from '../../core/setup.service.js';
 import { type CheckState, CheckStateComponent } from '../../shared/check-state.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { ModalComponent } from '../../shared/modal.component.js';
+import { CLAUDE_MODELS } from '../agents/agent-options.js';
 import { defined } from '../../../../../src/core/defined.js';
 
 interface FolderInfo {
@@ -57,11 +58,7 @@ export const PROVIDERS: { id: Provider; label: string; paid: boolean; models: { 
     id: 'claude',
     label: 'Claude',
     paid: true,
-    models: [
-      { id: 'haiku', label: 'Claude Haiku – schnell, günstig' },
-      { id: 'sonnet', label: 'Claude Sonnet – ausgewogen' },
-      { id: 'opus', label: 'Claude Opus – am stärksten' },
-    ],
+    models: CLAUDE_MODELS.map((model) => ({ id: model.alias, label: `${model.label} – ${model.hint}` })),
   },
   { id: 'copilot', label: 'GitHub Copilot', paid: true, models: [{ id: '', label: 'Standardmodell' }] },
   {

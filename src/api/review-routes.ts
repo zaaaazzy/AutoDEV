@@ -1,11 +1,14 @@
 import { logged } from '../core/log.js';
-import type { Router } from 'express';
+import type { Request, Response, Router } from 'express';
 import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
+import { approveWaitingOrders, findSprintProject, type ApprovalScope } from '../db/development-repository.js';
 import { access } from './access.js';
-import { DEV_COLUMNS, retryAutoRunSql, retryComment, retrySprintSql } from './development.js';
+import { parseApproveIds } from './development-input.js';
+import { DEV_COLUMNS, ORDER_NOT_FOUND, retryAutoRunSql, retryComment, retrySprintSql } from './development.js';
 import { guardGit } from './git-state.js';
+import { assertInProject } from './tenancy.js';
 
 const PORT_BASE = 4200;
 /** Sprints, deren Stände die Kopfzeile anbietet (laufender Sprint zuerst). */
@@ -149,7 +152,62 @@ async function requestSlot(
 }
 
 /**
- * Review-Freigabe und Review-Container: Ein fertiger Auftrag wartet (Status approval), bis ein Mensch ihn im Review-Container angesehen hat; in der Sprint-Ansicht lässt sich jeder Stand eines Sprints starten.
+ * Sammelabnahme („Alle abnehmen“): Git-Zustand einmal für alle prüfen, in einem UPDATE abnehmen und den Worker
+ * genau einmal wecken – er mergt die Umsetzungen danach nacheinander. Antwortet mit der Anzahl tatsächlich
+ * abgenommener Umsetzungen; inzwischen geänderte zählen nicht mit.
+ */
+async function approveAll(
+  pool: Pool,
+  slug: string,
+  scope: ApprovalScope,
+  request: Request,
+  response: Response,
+): Promise<void> {
+  if (!(await guardGit(pool, slug, 'approve', request.body, response))) return;
+  const approved = await approveWaitingOrders(pool, scope);
+  if (approved.length) {
+    await pool.query(`SELECT pg_notify('devlog_work', $1)`, [slug]).catch(logged('review-routes'));
+  }
+  response.json({ approved: approved.length, ids: approved.map((item) => item.id) });
+}
+
+/** POST /sprints/:id/approve: alle wartenden Umsetzungen dieses Sprints. */
+function approveSprint(pool: Pool) {
+  return async (request: Request, response: Response): Promise<void> => {
+    const sprintId = String(request.params.id ?? '');
+    const slug = isUuid(sprintId) ? await findSprintProject(pool, sprintId) : undefined;
+    if (!slug) {
+      response.status(404).json({ message: 'Sprint nicht gefunden.' });
+      return;
+    }
+    await approveAll(pool, slug, { sprintId }, request, response);
+  };
+}
+
+/** POST /projects/:slug/approve (Seite „Aktionen“): die im Dialog genannten Umsetzungen des Projekts. */
+function approveProject(pool: Pool) {
+  return async (request: Request, response: Response): Promise<void> => {
+    const slug = parseProjectSlug(String(request.params.slug ?? ''));
+    if (!slug) {
+      response.status(404).json({ message: 'Projekt nicht gefunden.' });
+      return;
+    }
+    const ids = parseApproveIds(request.body);
+    if (!ids.ok) {
+      response.status(400).json(ids.error);
+      return;
+    }
+    // Das UPDATE filtert nach Projekt; eine Liste mit fremden IDs wird trotzdem abgelehnt, statt teilweise abzunehmen.
+    if (!(await assertInProject(pool, 'development_items', ids.value, slug))) {
+      response.status(400).json({ field: 'ids', message: 'Umsetzungen gehören nicht zu diesem Projekt.' });
+      return;
+    }
+    await approveAll(pool, slug, { projectSlug: slug, ids: ids.value }, request, response);
+  };
+}
+
+/**
+ * Review-Freigabe und Review-Container:Ein fertiger Auftrag wartet (Status approval), bis ein Mensch ihn im Review-Container angesehen hat; in der Sprint-Ansicht lässt sich jeder Stand eines Sprints starten.
  * Freigeben merkt die Freigabe vor; gemergt wird vom Worker auf dem Host (dort liegt das Git-Repository).
  */
 export function registerReviewRoutes(app: Router, pool: Pool): void {
@@ -326,7 +384,11 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
         request.params.id,
       ])
     ).rows[0];
-    if (owner && !(await guardGit(pool, owner.slug, 'approve', request.body, response))) return;
+    if (!owner) {
+      response.status(404).json(ORDER_NOT_FOUND);
+      return;
+    }
+    if (!(await guardGit(pool, owner.slug, 'approve', request.body, response))) return;
     const result = await pool.query(
       `UPDATE development_items SET review_approved_at = COALESCE(review_approved_at, NOW()), updated_at = NOW()
         WHERE id = $1 AND status = '${DEVELOPMENT_STATUS.approval}' RETURNING ${DEV_COLUMNS}, project_slug AS "projectSlug"`,
@@ -341,6 +403,9 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
     await pool.query(`SELECT pg_notify('devlog_work', $1)`, [item.projectSlug]).catch(logged('review-routes'));
     response.json({ item });
   });
+
+  app.post('/sprints/:id/approve', access({ role: 'run', tenant: 'sprints' }), approveSprint(pool));
+  app.post('/projects/:slug/approve', access({ role: 'run', tenant: 'project' }), approveProject(pool));
 
   app.post(
     '/development/:id/review-reject',
@@ -399,8 +464,12 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
       ).rows[0];
       // Freigabe: Stand des Auftrags-Branches. Abnahme (Seite „Aktionen“): Stand, in dem der Auftrag steckt – den
       // Commit bestimmt der Worker beim Start (Sprint-Branch bzw. main), weil nur er das Repository sieht.
-      const approval = item?.status === DEVELOPMENT_STATUS.approval;
-      if (!item || (!approval && item.status === DEVELOPMENT_STATUS.inProgress)) {
+      if (!item) {
+        response.status(404).json(ORDER_NOT_FOUND);
+        return;
+      }
+      const approval = item.status === DEVELOPMENT_STATUS.approval;
+      if (!approval && item.status === DEVELOPMENT_STATUS.inProgress) {
         response.status(409).json({ message: 'Der Auftrag läuft gerade – erst danach im Review-Container prüfbar.' });
         return;
       }

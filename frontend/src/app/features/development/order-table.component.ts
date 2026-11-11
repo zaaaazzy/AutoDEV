@@ -104,6 +104,16 @@ export class OrderTableComponent {
   readonly editable = input(true);
   /** Filter aus Dashboard-Links (#development?status=…) anwenden; unter „Aktionen“ aus. */
   readonly linkFiltered = input(true);
+  /** Statt Aufklappen führt ein Klick auf Zeile oder Titel woandershin (Register „Anfragen“ → Seite „Aktionen“). */
+  readonly rowOpen = input<((item: DevelopmentItem) => void) | null>(null);
+  protected readonly rowLink = computed(() => {
+    const open = this.rowOpen();
+    if (!open) return null;
+    return (id: string): void => {
+      const item = this.items().find((entry) => entry.id === id);
+      if (item) open(item);
+    };
+  });
   protected readonly extraActions = contentChild(OrderActionsDirective);
   protected readonly customDetail = contentChild(OrderDetailSlotDirective);
 
@@ -192,6 +202,11 @@ export class OrderTableComponent {
   protected readonly displayTitle = orderTitle;
 
   protected toggleOrder(id: string): void {
+    const link = this.rowLink();
+    if (link) {
+      link(id);
+      return;
+    }
     this.openOrder.set(this.openOrder() === id ? null : id);
   }
 

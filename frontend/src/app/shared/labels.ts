@@ -1,5 +1,6 @@
 import type { DevelopmentItem, DevelopmentStatus, Sprint } from '../core/models.js';
 import { DEVELOPMENT_STATUS } from '../core/models.js';
+import { BUG_CATEGORY_VALUES, type BugCategoryValue } from '../../../../src/core/bug-category-values.js';
 
 export const DEVELOPMENT_STATUSES: DevelopmentStatus[] = [
   DEVELOPMENT_STATUS.backlog,
@@ -99,4 +100,21 @@ export function combinedCategory(categories: (string | null | undefined)[]): str
 
 export function categoryLabel(category: string | null | undefined): string {
   return category ? (CATEGORY_LABELS[category] ?? category) : 'Ohne Kategorie';
+}
+
+/** Feste Bug-Kategorien (`bugs.bug_category`), getrennt vom Bereich oben; Werte wie in der API und im CHECK. */
+export const BUG_CATEGORIES = BUG_CATEGORY_VALUES;
+const BUG_CATEGORY_LABELS: Record<BugCategoryValue, string> = {
+  security: 'Sicherheit',
+  'git-sync': 'Git-Abgleich',
+  ci: 'CI & Build',
+  ui: 'Oberfläche',
+  api: 'API & Server',
+  'agent-guard': 'Agent-Wächter',
+  budget: 'Budget',
+  docs: 'Dokumentation',
+};
+
+export function bugCategoryLabel(category: string | null | undefined): string {
+  return category ? (BUG_CATEGORY_LABELS[category as BugCategoryValue] ?? category) : 'Ohne Kategorie';
 }
