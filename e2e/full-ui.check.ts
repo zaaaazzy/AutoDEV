@@ -575,9 +575,7 @@ test('Ideen: Nutzen, Kosten und Wert in „Offene Ideen“', async ({ page, isMo
   await expect(sortedHeader(table)).toContainText('Erstellt');
   await expect(sortedHeader(table)).toHaveAttribute('aria-sort', 'descending');
   expect.soft(await headers(await groupTable('In Bearbeitung')), 'In Bearbeitung unverändert').toEqual(groupHeaders);
-  expect
-    .soft(await headers(await groupTable('Abgeschlossene Ideen')), 'Abgeschlossen unverändert')
-    .toEqual(groupHeaders);
+  expect.soft(await headers(await groupTable('Abgeschlossene Ideen')), 'Abgeschlossen unverändert').toEqual(groupHeaders);
 
   // Beta mit Visionär-Idee: Standard ist „Wert“ absteigend, Ideen ohne Wert stehen am Ende.
   const visionary = 'Wert: Vorschlag des Visionärs';
@@ -624,11 +622,7 @@ test('Ideen: Nutzen, Kosten und Wert in „Offene Ideen“', async ({ page, isMo
   // Filter „Nutzen“: nur Ideen mit dem gewählten Wert.
   await button(table, 'Nutzen filtern').click();
   const menu = page.locator('.dt-filter-menu');
-  await menu
-    .locator('.dt-option')
-    .filter({ has: page.locator('span', { hasText: /^8$/ }) })
-    .locator('input')
-    .check();
+  await menu.locator('.dt-option').filter({ has: page.locator('span', { hasText: /^8$/ }) }).locator('input').check();
   await expect.poll(() => titles(table)).toEqual([visionary]);
   await page.keyboard.press('Escape');
 
@@ -661,23 +655,17 @@ test('Bugs: anlegen, Status ändern, bearbeiten, löschen', async ({ page, isMob
   const openTable = page.locator('.dt-table').first();
   await button(openTable, 'Kategorie filtern').click();
   const menu = page.locator('.dt-filter-menu');
-  await expect
-    .soft(menu.locator('.dt-option span'), 'Filter bietet alle Kategorien an')
-    .toContainText([
-      'Alle',
-      'Frontend',
-      'Backend',
-      'Fullstack',
-      'Infrastruktur',
-      'Dokumentation',
-      'Sicherheit',
-      'Ohne Kategorie',
-    ]);
-  await menu
-    .locator('.dt-option')
-    .filter({ has: page.locator('span', { hasText: /^Backend$/ }) })
-    .locator('input')
-    .check();
+  await expect.soft(menu.locator('.dt-option span'), 'Filter bietet alle Kategorien an').toContainText([
+    'Alle',
+    'Frontend',
+    'Backend',
+    'Fullstack',
+    'Infrastruktur',
+    'Dokumentation',
+    'Sicherheit',
+    'Ohne Kategorie',
+  ]);
+  await menu.locator('.dt-option').filter({ has: page.locator('span', { hasText: /^Backend$/ }) }).locator('input').check();
   await page.keyboard.press('Escape');
   await expect(row).toBeVisible();
   await expect
@@ -803,9 +791,7 @@ test('Agents: anlegen, Reihenfolge, aktivieren, Detailansicht', async ({ page, i
   const handle = await dragged.locator('.workflow-step-handle').boundingBox();
   if (handle) await page.mouse.move(handle.x + 6, handle.y + handle.height + 12, { steps: 5 });
   await target().locator('.workflow-phase-head').hover();
-  await target()
-    .locator('.workflow-phase-head')
-    .hover({ position: { x: 20, y: 5 } });
+  await target().locator('.workflow-phase-head').hover({ position: { x: 20, y: 5 } });
   // Unter Playwright kommt dragover erst mit der nächsten Bewegung an (echte Browser feuern es laufend).
   const head = await target().locator('.workflow-phase-head').boundingBox();
   if (head) await page.mouse.move(head.x + 24, head.y + 8, { steps: 3 });
@@ -814,7 +800,9 @@ test('Agents: anlegen, Reihenfolge, aktivieren, Detailansicht', async ({ page, i
     .soft(await dragged.evaluate((node) => getComputedStyle(node).boxShadow), 'Schatten beim Ziehen')
     .not.toBe('none');
   await expect.soft(target(), 'Zielphase hervorgehoben').toHaveClass(/drop-active/);
-  await expect.soft(target().locator('.drop-before, .drop-here'), 'Einfügemarke an der Zielstelle').toHaveCount(1);
+  await expect
+    .soft(target().locator('.drop-before, .drop-here'), 'Einfügemarke an der Zielstelle')
+    .toHaveCount(1);
   await page.mouse.up();
   await expect(page.getByText('Reihenfolge gespeichert.')).toBeVisible();
   await page.reload();
@@ -959,9 +947,7 @@ test('Rollen: Autorin sieht nur, was sie darf', async ({ browser }: { browser: B
   await expect
     .soft(workflow.getByLabel('In Phase verschieben'), 'Ohne Agent-Verwaltung keine Phasen-Auswahl')
     .toHaveCount(0);
-  const reorder = await page.request.post('/api/projects/alpha/workflow/order', {
-    data: { phase: 'on_done', ids: [] },
-  });
+  const reorder = await page.request.post('/api/projects/alpha/workflow/order', { data: { phase: 'on_done', ids: [] } });
   expect(reorder.status(), 'Ablegen ohne Agent-Verwaltung ist wirkungslos').toBe(403);
   expect((await page.request.post('/api/users', { data: {} })).status()).toBe(403);
   await snap(page, info, 'Ansicht der Autorin');
