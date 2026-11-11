@@ -10,6 +10,7 @@ import {
   settledBacklogCategorization,
   startBacklogCategorization,
   suggestBugCategory,
+  suggestBugCategoryLater,
 } from './bug-category.js';
 import { resolveModel } from './ollama-client.js';
 
@@ -95,6 +96,26 @@ test('Texte ohne Inhalt (nur Limit- oder Kostenmeldung): keine Anfrage, keine ge
   const { fetchImpl, requests } = ollama(() => '{"category": "budget"}');
   assert.equal(await suggestBugCategory(limit, { fetchImpl }), null);
   assert.equal(requests.length, 0);
+});
+
+test('Nach dem Anlegen: Vorschlag nur als „vorgeschlagen“; ohne Ollama oder mit ungültiger Antwort kein Vorschlag', async () => {
+  const updates: unknown[][] = [];
+  const pool = {
+    query: async (_sql: string, values: unknown[]) => {
+      updates.push(values);
+      return { rows: [], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  await suggestBugCategoryLater(pool, 'bug-1', bug, { fetchImpl: ollama(() => '{"category": "ui"}').fetchImpl });
+  assert.deepEqual(updates, [['bug-1', 'ui']]);
+
+  const unreachable = (async () => {
+    throw new TypeError('fetch failed: ECONNREFUSED');
+  }) as unknown as typeof fetch;
+  // Kein Fehler nach aussen: Das Anlegen des Bugs bleibt davon unberührt.
+  await suggestBugCategoryLater(pool, 'bug-2', bug, { fetchImpl: unreachable });
+  await suggestBugCategoryLater(pool, 'bug-3', bug, { fetchImpl: ollama(() => '{"category": "frontend"}').fetchImpl });
+  assert.deepEqual(updates, [['bug-1', 'ui']]);
 });
 
 test('Altbestand: 61 Bugs ohne Kategorie → je genau ein Vorschlag, bug_category bleibt unberührt', async () => {

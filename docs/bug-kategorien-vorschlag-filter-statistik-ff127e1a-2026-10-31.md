@@ -34,7 +34,7 @@ Jeder Bug kann eine feste Bug-Kategorie aus acht Werten tragen (`security`, `git
 - Offene Entscheidung für den Auftraggeber: `bug_category` bleibt neben `category` (Annahme). Ein Ersetzen würde den Vererbungstrigger ändern.
 
 ### Teststand
-Der vorige Tester-Lauf scheiterte, weil der Testbefehl nicht freigegeben war, nicht an den Tests. Nach dem Nachziehen von Sprint 30 (11.11.2026) laufen lokal grün: `npm run typecheck`, `npm run lint` (0 Fehler, Schichten in Ordnung), `npm run format:check` und `npm run test:unit` (2111 bestanden, 0 fehlgeschlagen, 10 übersprungen). Übersprungen sind die Datenbank-Tests, weil `DEV_LOG_TEST_ADMIN_DATABASE_URL` fehlt, darunter der PostgreSQL-Test zu Migration 29 und die Summenprüfung Kategorie × Sprint. `e2e/full-ui.check.ts` wurde nicht ausgeführt.
+Der vorige Tester-Lauf scheiterte, weil der Testbefehl nicht freigegeben war, nicht an den Tests. Nach dem Nachziehen von Sprint 30 (11.11.2026) laufen lokal grün: `npm run typecheck`, `npm run lint` (0 Fehler, Schichten in Ordnung), `npm run format:check` und `npm run test:unit` (2112 bestanden, 0 fehlgeschlagen, 10 übersprungen). Neu ist ein Unit-Test ohne Datenbank in `src/agent/bug-category.test.ts`: Er prüft, dass nach dem Anlegen nur ein Vorschlag als „vorgeschlagen“ gespeichert wird und dass ohne erreichbares Ollama oder bei einer Antwort ausserhalb der Liste kein Vorschlag entsteht und kein Fehler nach aussen geht. Übersprungen sind die Datenbank-Tests, weil `DEV_LOG_TEST_ADMIN_DATABASE_URL` fehlt, darunter der PostgreSQL-Test zu Migration 29 und die Summenprüfung Kategorie × Sprint. `e2e/full-ui.check.ts` wurde nicht ausgeführt.
 
 ## Sprint
 
