@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import type { CommandExecutor, CommandResult } from '../core/command.js';
-import type { KnownBug } from '../api/bugs.js';
+import type { KnownBug } from '../core/known-bugs.js';
 import type { AgentStepStatus } from '../core/status.js';
 
 export interface WorkItem {
@@ -23,6 +23,8 @@ export interface WorkItem {
    */
   category?: string | null;
   effortHours?: number | null;
+  /** Token-Schätzung (für die Überschreitungsprüfung nach jedem Schritt). */
+  tokenEstimate?: number | null;
   estimateSource?: string | null;
   retryCount?: number;
 }
@@ -61,7 +63,8 @@ export type BuiltinAgent = (context: {
   changedFiles?: string[];
   /**
    * Führt die Shell-Befehle des Agents aus, etwa im Sandbox-Container (sonst runCommand auf dem Host). Beim Tester
-   * führt er die Projekttests aus (Testcontainer, mit Diensten nur im Compose-Netzwerk des Projekts).
+   * führt er die Projekttests aus (Modus workbench: im Arbeitscontainer mit den Diensten aus .aideation/workbench.json;
+   * Modus docker: im Testcontainer, mit Diensten nur im Compose-Netzwerk des Projekts).
    */
   execute?: CommandExecutor;
 }) => Promise<CommandResult>;

@@ -37,7 +37,7 @@ import {
   SANDBOX_WORKDIR,
   usesSandbox,
 } from './sandbox.js';
-import { READ_ONLY_ROLES } from '../agent/permission-rules.js';
+import { READ_ONLY_ROLES } from './permission-rules.js';
 import { usageLimitReset } from '../runner/autofix.js';
 
 const TOKEN = 'sk-ant-oat01-geheimer-test-token-1234567890';
@@ -477,9 +477,10 @@ test('Sandbox: npm im Container nutzt einen Cache unter /tmp, nicht ~/.npm aus d
   const index = command.indexOf('npm_config_cache=/tmp/npm-cache');
   assert.ok(index > 0);
   assert.equal(command[index - 1], '-e');
+  assert.ok(!command.some((part) => /^npm_config_cache=\/home\//.test(part)));
 });
 
-/** Worktree mit package.json, package-lock.json und node_modules als Link auf einen Host-Ordner. */
+/** Git-Worktree (.git als Datei) mit package.json, package-lock.json und node_modules als Link auf einen Host-Ordner. */
 function linkedWorktree(): { worktree: string; target: string } {
   const root = mkdtempSync(join(tmpdir(), 'sandbox-modules-'));
   const worktree = join(root, 'agent');
@@ -487,6 +488,7 @@ function linkedWorktree(): { worktree: string; target: string } {
   mkdirSync(worktree);
   mkdirSync(target);
   writeFileSync(join(target, 'bleibt.txt'), 'x');
+  writeFileSync(join(worktree, '.git'), `gitdir: ${join(root, '.git', 'worktrees', 'agent')}\n`);
   writeFileSync(join(worktree, 'package.json'), '{"name":"demo"}');
   writeFileSync(join(worktree, 'package-lock.json'), '{"lockfileVersion":3}');
   symlinkSync(target, join(worktree, 'node_modules'), 'dir');
@@ -500,6 +502,19 @@ test('Sandbox: verlinktes node_modules wird zum leeren Ordner, das Ziel bleibt u
   assert.ok(!stat.isSymbolicLink() && stat.isDirectory(), 'Einhängepunkt für das Volume');
   assert.ok(existsSync(join(target, 'bleibt.txt')), 'Ziel des Links nicht gelöscht');
   replaceLinkedModules(join(worktree, 'fehlt'));
+});
+
+test('Sandbox: im Projektordner der Menschen (.git als Ordner) bleibt ein node_modules-Symlink', () => {
+  const folder = mkdtempSync(join(tmpdir(), 'sandbox-human-'));
+  try {
+    mkdirSync(join(folder, '.git'));
+    mkdirSync(join(folder, 'vendor'));
+    symlinkSync(join(folder, 'vendor'), join(folder, 'node_modules'), 'dir');
+    replaceLinkedModules(folder);
+    assert.ok(lstatSync(join(folder, 'node_modules')).isSymbolicLink());
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
 });
 
 test('Sandbox: verlinkter Worktree bekommt die Abhängigkeiten ins Volume, nicht in das Ziel des Links', async () => {

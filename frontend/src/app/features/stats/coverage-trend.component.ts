@@ -44,12 +44,22 @@ const TARGET = 75;
                     [attr.aria-label]="'Verlauf ' + labels[entry.area] + ', ' + entry.points.length + ' Messungen'"
                   >
                     @for (tick of [0, 50, 100]; track tick) {
-                      <line class="grid" [attr.x1]="chart.left" [attr.x2]="chart.width - chart.right"
-                        [attr.y1]="y(tick)" [attr.y2]="y(tick)" />
+                      <line
+                        class="grid"
+                        [attr.x1]="chart.left"
+                        [attr.x2]="chart.width - chart.right"
+                        [attr.y1]="y(tick)"
+                        [attr.y2]="y(tick)"
+                      />
                       <text class="axis" [attr.x]="chart.left - 4" [attr.y]="y(tick) + 3">{{ tick }}</text>
                     }
-                    <line class="target" [attr.x1]="chart.left" [attr.x2]="chart.width - chart.right"
-                      [attr.y1]="y(target)" [attr.y2]="y(target)" />
+                    <line
+                      class="target"
+                      [attr.x1]="chart.left"
+                      [attr.x2]="chart.width - chart.right"
+                      [attr.y1]="y(target)"
+                      [attr.y2]="y(target)"
+                    />
                     @let lines = plotted(entry.points, 'lines');
                     @let branches = plotted(entry.points, 'branches');
                     <path class="series-lines" [attr.d]="linePath(lines)" />
@@ -63,7 +73,13 @@ const TARGET = 75;
                     }
                     @for (point of branches; track $index) {
                       @if (point) {
-                        <rect class="series-branches" [attr.x]="point.x - 4" [attr.y]="point.y - 4" width="8" height="8">
+                        <rect
+                          class="series-branches"
+                          [attr.x]="point.x - 4"
+                          [attr.y]="point.y - 4"
+                          width="8"
+                          height="8"
+                        >
                           <title>{{ tooltip(point.point) }}</title>
                         </rect>
                       }

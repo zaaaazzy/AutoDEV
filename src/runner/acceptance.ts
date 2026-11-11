@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { defined } from '../core/defined.js';
 
 export const DEFAULT_DEFINITION_OF_READY = [
   'Das Ziel ist in ein bis zwei Sätzen beschrieben.',
@@ -58,10 +59,11 @@ export function parseChecks(output: string): CheckResult[] {
   const results: CheckResult[] = [];
   for (const match of output.matchAll(/^\s*@@CHECK\s+(\{.*\})\s*$/gm)) {
     try {
-      const entry = JSON.parse(match[1]!) as Partial<CheckResult>;
-      if (!Number.isInteger(entry.nr)) continue;
+      const entry = JSON.parse(defined(match[1])) as Partial<CheckResult>;
+      const nr = entry.nr;
+      if (typeof nr !== 'number' || !Number.isInteger(nr)) continue;
       results.push({
-        nr: entry.nr!,
+        nr,
         met: entry.met === true,
         manual: entry.met !== true && entry.manual === true,
         note: String(entry.note ?? '').slice(0, 500),
@@ -212,7 +214,7 @@ export function parseEvidence(output: string): Evidence[] {
   const found = new Map<string, Evidence>();
   for (const match of output.matchAll(EVIDENCE)) {
     try {
-      const entry = JSON.parse(match[1]!) as Record<string, unknown>;
+      const entry = JSON.parse(defined(match[1])) as Record<string, unknown>;
       const befehl = typeof entry.befehl === 'string' ? entry.befehl.trim() : '';
       const datei = typeof entry.datei === 'string' ? entry.datei.trim() : '';
       const grund = entry.grund;

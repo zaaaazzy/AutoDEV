@@ -1,18 +1,23 @@
 import type { ConfirmOptions } from '../../core/confirm.service.js';
 import type { DevelopmentItem, Idea } from '../../core/models.js';
+import { DEVELOPMENT_STATUS, IDEATION_STATUS } from '../../core/models.js';
 import { isFinished } from '../../shared/labels.js';
 
-export const IDEA_STATUSES = [
-  'idea',
-  'considering',
-  'review',
-  'requested',
-  'drafting',
-  'accepted',
+export const IDEA_STATUSES: readonly string[] = [
+  IDEATION_STATUS.idea,
+  IDEATION_STATUS.considering,
+  IDEATION_STATUS.review,
+  IDEATION_STATUS.requested,
+  IDEATION_STATUS.drafting,
+  IDEATION_STATUS.accepted,
   'implemented',
-  'rejected',
+  IDEATION_STATUS.rejected,
 ];
-export const IDEA_SELECTABLE_STATUSES = ['idea', 'considering', 'review'];
+export const IDEA_SELECTABLE_STATUSES: readonly string[] = [
+  IDEATION_STATUS.idea,
+  IDEATION_STATUS.considering,
+  IDEATION_STATUS.review,
+];
 /** Bearbeitbar wie auf dem Server: nicht während der Auftragsautor schreibt und nicht nach der Annahme. */
 export const IDEA_EDITABLE_STATUSES = [...IDEA_SELECTABLE_STATUSES, 'rejected'];
 /** Ablehnen (einzeln und als Massenaktion) wie auf dem Server: nur aus den manuell bearbeitbaren Status. */
@@ -20,7 +25,13 @@ export const IDEA_REJECTABLE_STATUSES = IDEA_SELECTABLE_STATUSES;
 /** Höchstlänge des Ablehnungsgrunds wie `MAX_REJECTION_REASON` auf dem Server. */
 export const MAX_REJECTION_REASON = 1000;
 /** Noch nicht abgeschlossene Ideen: weder angenommen (bzw. umgesetzt) noch abgelehnt. */
-export const OPEN_IDEA_STATUSES = ['idea', 'considering', 'review', 'requested', 'drafting'];
+export const OPEN_IDEA_STATUSES: readonly string[] = [
+  IDEATION_STATUS.idea,
+  IDEATION_STATUS.considering,
+  IDEATION_STATUS.review,
+  IDEATION_STATUS.requested,
+  IDEATION_STATUS.drafting,
+];
 
 export function isOpenIdea(idea: Pick<Idea, 'status'>): boolean {
   return OPEN_IDEA_STATUSES.includes(idea.status);
@@ -29,7 +40,9 @@ export { MAX_IMAGE_BYTES } from '../../shared/image-upload.js';
 
 /** Anzeigestatus: Eine angenommene Idee gilt als umgesetzt, sobald ihr Auftrag erledigt ist. */
 export function ideaDisplayStatus(idea: Idea, order: DevelopmentItem | null | undefined): string {
-  return idea.status === 'accepted' && order?.status === 'done' ? 'implemented' : idea.status;
+  return idea.status === IDEATION_STATUS.accepted && order?.status === DEVELOPMENT_STATUS.done
+    ? 'implemented'
+    : idea.status;
 }
 
 /**
@@ -45,8 +58,8 @@ export function ideaPhase(
 ): IdeaPhase {
   if (isOpenIdea(idea)) return 'open';
   if (idea.status === 'implemented') return 'implemented';
-  if (idea.status === 'accepted' && order) {
-    if (order.status === 'done') return 'implemented';
+  if (idea.status === IDEATION_STATUS.accepted && order) {
+    if (order.status === DEVELOPMENT_STATUS.done) return 'implemented';
     if (!isFinished(order.status)) return 'in_progress';
   }
   return 'discarded';

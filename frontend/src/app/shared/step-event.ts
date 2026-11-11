@@ -1,3 +1,5 @@
+import { defined } from '../../../../src/core/defined.js';
+
 export type StepEventKind = 'read' | 'write' | 'run' | 'note' | 'state';
 
 export interface StepEventView {
@@ -67,7 +69,14 @@ export function describeStepEvent(text: string): StepEventView {
     const match = pattern.exec(text);
     if (match) {
       const icon = label === 'Sucht' ? 'search' : kind === 'read' ? 'read' : kind === 'write' ? 'write' : 'run';
-      return { kind, label, target: match[1]!.replace(/^„|“$/g, ''), text: '', file: FILE_LABELS.has(label), icon };
+      return {
+        kind,
+        label,
+        target: defined(match[1]).replace(/^„|“$/g, ''),
+        text: '',
+        file: FILE_LABELS.has(label),
+        icon,
+      };
     }
   }
   return { kind: STATE.test(text) ? 'state' : 'note', label: '', target: '', text, file: false, icon: null };

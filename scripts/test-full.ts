@@ -41,6 +41,7 @@ import {
   updateTestRunStepProgress,
 } from '../src/db/test-runs.js';
 import { stepProgress } from '../src/core/test-progress.js';
+import { defined } from '../src/core/defined.js';
 
 const ROOT = join(import.meta.dirname, '..');
 const argument = (name: string) => {
@@ -408,7 +409,7 @@ async function main(): Promise<void> {
   // und brauchen beide nur die gebaute Oberfläche aus dem Schritt davor.
   const PARALLEL = new Set(['E2E-Tests', 'Oberflächentest']);
   for (let position = 0; position < steps.length; position++) {
-    const step = steps[position]!;
+    const step = defined(steps[position]);
     const next = steps[position + 1];
     if (next && PARALLEL.has(step.name) && PARALLEL.has(next.name)) {
       results.push(

@@ -57,8 +57,7 @@ export function isContentless(bug: BugCategoryText): boolean {
 }
 
 /** JSON mit maskierten spitzen Klammern: Der Bugtext kann den Datenblock nicht schliessen. */
-const dataJson = (value: unknown): string =>
-  JSON.stringify(value).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+const dataJson = (value: unknown): string => JSON.stringify(value).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
 
 /** Chat-Nachrichten: Regeln als System-Nachricht, der Bug allein als Datenblock in der Nutzer-Nachricht. */
 export function bugCategoryMessages(bug: BugCategoryText): { role: 'system' | 'user'; content: string }[] {
@@ -95,7 +94,10 @@ export function parseBugCategoryAnswer(answer: string): BugCategoryValue | null 
   } catch {
     // Klartext
   }
-  const value = text.trim().toLowerCase().replace(/^["'`]+|["'`.]+$/g, '');
+  const value = text
+    .trim()
+    .toLowerCase()
+    .replace(/^["'`]+|["'`.]+$/g, '');
   return isBugCategoryValue(value) ? value : null;
 }
 

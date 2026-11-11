@@ -400,6 +400,45 @@
         </ul>
       </details>
     }
+    @if (counterCheck(); as check) {
+      <details class="run-step order-brief counter-check" open>
+        <summary>Gegenprobe ohne Fix</summary>
+        @if (check.verdict === 'unproven') {
+          <p class="counter-check-passes">
+            <strong>{{ unprovenMark }}</strong>
+          </p>
+        } @else if (check.reason) {
+          <p class="muted">{{ check.reason }}</p>
+        }
+        <ul class="changed-file-list">
+          @for (entry of check.cases ?? []; track entry.file + entry.name) {
+            <li [class]="'counter-check-' + (entry.result === 'inconclusive' ? 'error' : entry.result)">
+              {{ entry.name }} <span class="muted">({{ entry.file }})</span>:
+              <strong>{{ probeLabels[entry.result] }}</strong>
+              @if (entry.detail) {
+                <span class="muted"> – {{ entry.detail }}</span>
+              }
+            </li>
+          }
+          @for (file of check.files; track file.path) {
+            <li [class]="'counter-check-' + file.result">
+              {{ file.path }}: <strong>{{ counterCheckLabels[file.result] }}</strong>
+              @if (file.result === 'passes') {
+                <span class="muted"> – der Test beweist den Fix nicht (grün auch vor dem Fix).</span>
+              } @else if (file.detail) {
+                <span class="muted"> – {{ file.detail }}</span>
+              }
+            </li>
+          }
+          @if (check.error) {
+            <li class="counter-check-error">
+              <strong>{{ counterCheckLabels.error }}</strong
+              ><span class="muted"> – {{ check.error }}</span>
+            </li>
+          }
+        </ul>
+      </details>
+    }
     @if (item.analysis && !embedded()) {
       <details class="run-step order-brief">
         <summary>Analyse des Assistenten</summary>

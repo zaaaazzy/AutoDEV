@@ -6,6 +6,7 @@ import { acquireTree, withProjectLock } from '../core/project-lock.js';
 import { sendPush } from '../core/push.js';
 import { completedSprintTags, DEPLOY_STALE_SQL, deployProject, deployRunning } from './deploy.js';
 import { gitHelpers, previousSprintTag } from './git-sync.js';
+import { AGENT_RUN_STATUS } from '../core/status.js';
 
 /**
  * Rollback-Vorschlag nach einem kritischen Betriebsfehler: Liegt ein Ereignis des Bugs in den 30 Minuten nach einem
@@ -189,7 +190,7 @@ export async function processRollback(
       `UPDATE production_rollbacks SET status = 'running', started_at = NOW()
         WHERE id = (SELECT id FROM production_rollbacks WHERE project_slug = $1 AND status = 'requested'
                      ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-          AND NOT EXISTS (SELECT 1 FROM agent_runs WHERE project_slug = $1 AND status = 'running')
+          AND NOT EXISTS (SELECT 1 FROM agent_runs WHERE project_slug = $1 AND status = '${AGENT_RUN_STATUS.running}')
           AND NOT EXISTS (SELECT 1 FROM projects WHERE slug = $1 AND deploy_started_at > NOW() - ${DEPLOY_STALE_SQL})
         RETURNING id, bug_id AS "bugId", from_tag AS "fromTag", to_tag AS "toTag"`,
       [project],

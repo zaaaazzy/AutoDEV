@@ -7,6 +7,7 @@ import { SetupService } from '../../core/setup.service.js';
 import { type CheckState, CheckStateComponent } from '../../shared/check-state.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { ModalComponent } from '../../shared/modal.component.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 interface FolderInfo {
   exists: boolean;
@@ -313,7 +314,7 @@ export class ProjectWizardComponent implements OnDestroy {
         this.folderError.set(job.result?.error ?? 'Prüfung fehlgeschlagen.');
         return;
       }
-      const info = job.result!;
+      const info = defined(job.result, 'Prüfergebnis');
       this.folderInfo.set(info);
       this.folderState.set(info.exists ? (info.isDirectory ? 'ok' : 'error') : 'warn');
       if (info.exists && !info.isDirectory) this.folderError.set('Der Pfad ist eine Datei, kein Ordner.');
@@ -390,7 +391,7 @@ export class ProjectWizardComponent implements OnDestroy {
       return;
     }
     this.github.set(job.result);
-    const info = job.result!;
+    const info = defined(job.result, 'GitHub-Status');
     this.githubState.set(info.gh.authenticated ? 'ok' : info.ssh.ok ? 'warn' : 'error');
     if (this.gitMode() === 'local' && !this.folderInfo()?.git?.isRepo && info.gh.authenticated)
       this.gitMode.set('github-new');

@@ -58,7 +58,7 @@ const RESTART_ENTRY: MenuEntry = {
   title: 'AIdeation neu starten',
   summary: 'Container neu bauen und Worker neu starten – lädt neuen Code und neue Agents',
   detail:
-    'Baut alle AIdeation-Container mit dem aktuellen Code neu (docker compose up -d --build) und startet danach den Worker neu, damit auch er den neuen Code und die neuen Agents lädt. Laufende Aufgaben werden abgewartet (höchstens 15 Minuten); was dann noch läuft, wird nach dem Neustart fortgesetzt.',
+    'Baut alle AIdeation-Container mit dem aktuellen Code neu (docker compose up -d --build) und startet danach den Worker neu, damit auch er den neuen Code und die neuen Agents lädt. Laufende Aufgaben werden abgewartet (höchstens 15 Minuten); was dann noch läuft, wird nach dem Neustart fortgesetzt. Solange der Worker wartet, lässt sich der Neustart in der Statusleiste oben abbrechen.',
   runner: 'Worker (auf dem Rechner)',
   effect:
     'Das Dashboard ist während des Neustarts kurz nicht erreichbar und verbindet sich danach selbst neu. Der Stand steht hier im Menü.',

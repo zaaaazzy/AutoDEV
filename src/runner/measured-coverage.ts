@@ -4,6 +4,7 @@ import type { CommandExecutor } from '../core/command.js';
 import { canonicalArea, COVERAGE_AREA_KEYS, type CoverageAreaKey } from '../core/coverage-areas.js';
 import { type CoverageArea, type CoverageReport, validateCoverage } from './coverage.js';
 import { runProjectCommand } from './project-command.js';
+import { defined } from '../core/defined.js';
 
 /**
  * Eigene Abdeckungsmessung von AIdeation: Für Testbefehle, deren npm-Skript den Node-Test-Runner nutzt
@@ -35,7 +36,7 @@ export function parseNodeCoverage(
 }
 
 /**
- * Fester Bereich zum Workspace-Namen über dieselbe Zuordnung wie Migration 24 („mainty-backend“ → backend). Ohne
+ * Fester Bereich zum Workspace-Namen über dieselbe Zuordnung wie Migration 25 („mainty-backend“ → backend). Ohne
  * Workspace (Messung im Projektordner selbst) ist es „gesamt“. Ein Workspace ohne passenden Bereich (z. B.
  * „builder“) ergibt null: Die Messung wird verworfen, statt einen neuen Bereich anzulegen.
  */
@@ -200,7 +201,7 @@ export function directRunner(command: string[]): Pick<TestRunner, 'binary' | 'ar
   const index = command.findIndex((part, position) => /^(tsx|node)$/.test(part) && command[position + 1] === '--test');
   if (index < 0 || !RUNNER_PREFIXES.has(command.slice(0, index).join(' '))) return null;
   const args = command.slice(index + 2).filter((part) => !part.startsWith('--test-coverage') && part !== COVERAGE_FLAG);
-  return { binary: command[index]!, args };
+  return { binary: defined(command[index]), args };
 }
 
 /** Startet den Testläufer mit Abdeckung (gefiltertes Environment) und liest das Ergebnis. */

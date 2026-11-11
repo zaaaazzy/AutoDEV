@@ -143,9 +143,7 @@ test('Kategorie × Sprint: alle acht Kategorien, „Kein Sprint“ zuletzt, Summ
 
 test('Kategorie × Sprint: ohne Bugs leer, ohne unkategorisierte Bugs keine Zeile „Ohne Kategorie“', () => {
   assert.equal(bugCategoryMatrix([]).total, 0);
-  const matrix = bugCategoryMatrix([
-    { category: 'budget', sprintId: null, sprintName: null, open: 2, buried: 0 },
-  ]);
+  const matrix = bugCategoryMatrix([{ category: 'budget', sprintId: null, sprintName: null, open: 2, buried: 0 }]);
   assert.equal(matrix.rows.length, BUG_CATEGORIES.length);
   assert.deepEqual(matrix.sprints, [{ id: null, name: 'Kein Sprint' }]);
   assert.equal(matrix.total, 2);

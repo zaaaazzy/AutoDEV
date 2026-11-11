@@ -10,6 +10,7 @@ import {
   parseWorkbenchExtras,
   resetWorkbenches,
   runInWorkbench,
+  stopLeftoverWorkbenchRuns,
   WORKBENCH_DOCKER_HOST,
   workbenchCompose,
   workbenchContainer,
@@ -22,10 +23,15 @@ const TOKEN = 'sk-ant-oat01-geheimer-test-token-1234567890';
 const ok = (output = ''): CommandResult => ({ exitCode: 0, durationMs: 1, output });
 
 interface Service {
+  image?: string;
   privileged?: boolean;
   network_mode?: string;
   volumes?: string[];
   cap_drop?: string[];
+  cap_add?: string[];
+  devices?: string[];
+  security_opt?: string[];
+  command?: string[];
   environment?: Record<string, string>;
   ports?: unknown;
   labels?: Record<string, string>;
@@ -57,7 +63,7 @@ function fakeDocker(answer: (command: string[]) => CommandResult | null = () => 
   return { calls, docker };
 }
 
-test('Arbeitscontainer: nur der Docker-Dienst ist privilegiert, alle teilen den Namensraum der workbench', () => {
+test('Arbeitscontainer: kein Dienst ist privilegiert, Docker läuft rootless, alle teilen den Namensraum der workbench', () => {
   const compose = workbenchCompose('/srv/demo/agent', {
     project: 'Demo',
     platform: 'darwin',
@@ -82,13 +88,26 @@ test('Arbeitscontainer: nur der Docker-Dienst ist privilegiert, alle teilen den 
   assert.equal(workbench.environment?.DEV_LOG_DATABASE_URL, 'postgresql://t:t@127.0.0.1:5433/t');
   assert.equal((workbench as { container_name?: string }).container_name, 'agents_demo_workbench');
   assert.equal((postgres as { container_name?: string }).container_name, 'agents_demo_postgres');
-  assert.equal(docker.privileged, true);
+  assert.equal(docker.image, 'docker:29-dind-rootless');
+  assert.equal(docker.privileged, undefined, 'dind-rootless statt privilegiertem dind (Ausbruch zum Host)');
+  assert.deepEqual(docker.cap_drop, ['ALL']);
+  assert.deepEqual(docker.cap_add, ['SETUID', 'SETGID'], 'nur newuidmap/newgidmap');
+  assert.deepEqual(docker.devices, ['/dev/net/tun:/dev/net/tun'], 'nur das tun-Gerät, keine Block-Geräte');
+  assert.ok(docker.security_opt?.includes('systempaths=unconfined'), 'proc im Benutzer-Namensraum einhängbar');
+  assert.ok(!docker.security_opt?.some((option) => option.startsWith('no-new-privileges')), 'newuidmap ist setuid');
   assert.equal(docker.network_mode, 'service:workbench');
-  assert.ok(
-    !JSON.stringify((compose.services.docker as { command?: string[] }).command).includes('0.0.0.0'),
-    'Docker lauscht nicht im Agent-Netzwerk (nur 127.0.0.1 und Socket)',
+  assert.ok(docker.command?.includes('--host=tcp://127.0.0.1:2375') && !docker.command.join(' ').includes('0.0.0.0'));
+  assert.equal(
+    docker.environment?.DOCKERD_ROOTLESS_ROOTLESSKIT_FLAGS,
+    '-p 127.0.0.1:2375:2375/tcp',
+    'rootlesskit reicht den Port nur an 127.0.0.1 der workbench weiter, nicht ins Agent-Netzwerk',
   );
   assert.ok(docker.volumes?.includes('/srv/demo/agent:/workspace'), 'gleicher Pfad für Bind-Mounts der Agents');
+  assert.ok(
+    docker.volumes?.includes('agents_demo_docker_rootless:/home/rootless/.local/share/docker'),
+    'eigenes Volume: das des früheren dind gehört root',
+  );
+  assert.ok(!JSON.stringify(compose).includes('privileged'), 'nirgends privileged');
   assert.ok(!docker.volumes?.some((volume) => volume.includes('docker.sock')), 'nie der Socket des Hosts');
   assert.equal(postgres.network_mode, 'service:workbench');
   const start = (workbench as { command?: string[] }).command?.join(' ') ?? '';
@@ -199,6 +218,58 @@ test('Arbeitscontainer: startet den Stapel, installiert einmal und führt dann d
     else process.env.DEV_LOG_WORKBENCH_DIR = previous;
     cleanup();
   }
+});
+
+test('Arbeitscontainer: nach dem Gate im Ordner der Menschen startet der nächste Agent-Lauf wieder seinen Worktree', async () => {
+  resetAgentNetwork();
+  resetWorkbenches();
+  const { root, worktree, cleanup } = fixture();
+  const source = join(root, 'source');
+  mkdirSync(source);
+  const previous = process.env.DEV_LOG_WORKBENCH_DIR;
+  process.env.DEV_LOG_WORKBENCH_DIR = join(root, 'compose');
+  try {
+    const { calls, docker } = fakeDocker();
+    const run = (directory: string, runId: string) =>
+      runInSandbox(['npm', 'test'], directory, { runId, project: 'demo', docker, mode: 'workbench', environment: {} });
+    await run(worktree, 'agent-1');
+    await run(source, 'gate');
+    await run(worktree, 'agent-2');
+    const ups = calls.filter((call) => call.includes('compose') && call.includes('up'));
+    assert.equal(ups.length, 3, 'der Stapel wird für den Agent-Worktree erneut erstellt, nicht aus dem Cache genommen');
+  } finally {
+    if (previous === undefined) delete process.env.DEV_LOG_WORKBENCH_DIR;
+    else process.env.DEV_LOG_WORKBENCH_DIR = previous;
+    cleanup();
+  }
+});
+
+test('Arbeitscontainer: beim Start werden Läufe des Vorgängers in den Containern beendet', async () => {
+  const { calls, docker } = fakeDocker((command) => {
+    if (command[1] === 'ps') return ok('agents_demo_workbench\nagents_demo_docker\nagents_demo_db\n');
+    if (command[1] === 'exec') return ok('2\n');
+    return null;
+  });
+  const stopped = await stopLeftoverWorkbenchRuns(docker, tmpdir());
+  assert.equal(stopped, 2);
+  const execs = calls.filter((call) => call[1] === 'exec');
+  assert.deepEqual(
+    execs.map((call) => call[2]),
+    ['agents_demo_workbench'],
+    'nur die workbench, nicht docker oder Zusatzdienste',
+  );
+  const script = execs[0]!.at(-1)!;
+  assert.match(script, /\/tmp\/aideation-run-\*\.pid/);
+  assert.match(script, /kill -TERM -"\$p"/);
+  assert.match(script, /kill -KILL -"\$p"/);
+  assert.match(script, /\[ "\$p" -gt 1 \] \|\| continue/, 'nie Gruppe 1 (hält den Container)');
+});
+
+test('Arbeitscontainer: Aufräumen beim Start ohne Docker tut nichts', async () => {
+  const { docker } = fakeDocker((command) =>
+    command[1] === 'ps' ? { exitCode: 1, durationMs: 1, output: 'Cannot connect' } : null,
+  );
+  assert.equal(await stopLeftoverWorkbenchRuns(docker, tmpdir()), 0);
 });
 
 test('Arbeitscontainer: lesende Läufe bleiben kurzlebige Container mit :ro', async () => {

@@ -1,10 +1,10 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { access } from './access.js';
-import { readRestart, requestRestart } from '../runner/system-restart.js';
+import { cancelRestart, readRestart, requestRestart } from '../runner/system-restart.js';
 import type { Principal } from './roles.js';
 
-/** Neustart von AIdeation (Container neu bauen, Worker neu starten): anfordern und lesen nur mit Administration (Mandant `admin`). */
+/** Neustart von AIdeation (Container neu bauen, Worker neu starten): anfordern, abbrechen und lesen nur mit Administration (Mandant `admin`). */
 export function registerSystemRestartRoutes(app: Router, pool: Pool): void {
   app.get('/system/restart', access({ tenant: 'admin' }), async (_request, response, next) => {
     try {
@@ -27,6 +27,31 @@ export function registerSystemRestartRoutes(app: Router, pool: Pool): void {
       response.status(created ? 201 : 409).json({
         restart: state,
         ...(created ? {} : { message: 'Ein Neustart läuft bereits.' }),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Abbrechen geht nur, solange der Worker noch wartet („requested“); ab „building“ laufen die Container-Builds.
+  app.delete('/system/restart', access({ role: 'admin', tenant: 'admin' }), async (_request, response, next) => {
+    try {
+      const principal = response.locals.principal as Principal | undefined;
+      const { state, cancelled } = await cancelRestart(pool, principal?.displayName ?? null);
+      if (cancelled) {
+        response.json({ restart: state });
+        return;
+      }
+      if (!state) {
+        response.status(404).json({ message: 'Es ist kein Neustart angefordert.' });
+        return;
+      }
+      response.status(409).json({
+        restart: state,
+        message:
+          state.status === 'building' || state.status === 'restarting'
+            ? 'Der Neubau läuft schon und lässt sich nicht mehr abbrechen.'
+            : 'Es wartet kein Neustart mehr.',
       });
     } catch (error) {
       next(error);

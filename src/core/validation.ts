@@ -1,3 +1,5 @@
+import { defined } from './defined.js';
+
 export const PRIORITIES = new Set(['low', 'medium', 'high']);
 export const CATEGORIES = new Set(['frontend', 'backend', 'fullstack', 'infrastructure', 'docs', 'security']);
 export const PROJECT_SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -63,7 +65,7 @@ export function normalizeFolder(value: string): string | null {
     if (parts.at(-1) === '') parts.pop();
     // Windows entfernt Punkte und Leerzeichen am Namensende („..“ hiesse sonst auch „.. “ oder „...“).
     if (parts.some((part) => !part || /[<>:"|?*]/.test(part) || /[. ]$/.test(part))) return null;
-    return `${value[0]!.toUpperCase()}:\\${parts.join('\\')}`;
+    return `${value.charAt(0).toUpperCase()}:\\${parts.join('\\')}`;
   }
   if (!value.startsWith('/') || value.includes('//')) return null;
   const parts = value.split('/').filter(Boolean);
@@ -96,7 +98,7 @@ function blockedWindowsFolder(folder: string): boolean {
   const parts = folder.slice(3).toLowerCase().split('\\').filter(Boolean);
   return (
     parts.length === 0 ||
-    BLOCKED_WINDOWS_FOLDERS.includes(parts[0]!) ||
+    BLOCKED_WINDOWS_FOLDERS.includes(defined(parts[0])) ||
     (parts[0] === 'users' && (parts.length <= 2 || parts[2] === 'appdata'))
   );
 }

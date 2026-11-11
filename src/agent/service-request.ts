@@ -1,3 +1,5 @@
+import { defined } from '../core/defined.js';
+
 // Dienst-Aktionen der Agents (services.*): Form und Prüfung einer Anfrage. Ohne Abhängigkeiten, weil auch der
 // gebündelte Wächter im Sandbox-Container die Namen der Aktionen braucht. Ausgeführt wird im Worker (service-actions.ts).
 
@@ -139,7 +141,7 @@ export function parseServiceMarker(line: string): ServiceRequest | string {
 
 /** Alle Marker einer Antwort (höchstens MAX_SERVICE_ACTIONS) und der Text ohne die Marker-Zeilen. */
 export function extractServiceMarkers(output: string): { text: string; requests: string[] } {
-  const requests = [...output.matchAll(SERVICE_MARKER)].map((match) => match[1]!.trim());
+  const requests = [...output.matchAll(SERVICE_MARKER)].map((match) => defined(match[1]).trim());
   return { text: output.replace(SERVICE_MARKER, '').trim(), requests };
 }
 

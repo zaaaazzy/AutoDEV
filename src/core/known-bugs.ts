@@ -1,7 +1,14 @@
-import type { KnownBug } from '../api/bugs.js';
-import { containsUntrusted } from '../runner/hoster.js';
-import { fenceExternalText, isUntrustedBugSource } from './bug-trust.js';
-import { BUG_STATUS } from './status.js';
+import { containsUntrusted, fenceExternalText, isUntrustedBugSource } from './bug-trust.js';
+import { type BugStatus, BUG_STATUS } from './status.js';
+
+export interface KnownBug {
+  title: string;
+  description: string;
+  severity: string;
+  status: BugStatus;
+  fixNotes: string;
+  source: string;
+}
 
 /**
  * Zeile für „Bekannte Bugs“ im Prompt. Auch freigegebene Bugs aus Betrieb oder GitHub bleiben Fremdtext: Titel,

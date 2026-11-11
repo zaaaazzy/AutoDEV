@@ -12,8 +12,8 @@
             @if (run.running) {
               <div class="bug-category-actions" role="status">
                 <span class="muted"
-                  >Altbestand wird kategorisiert: {{ run.done }} von {{ run.total }} geprüft, {{ run.suggested }}
-                  Vorschläge</span
+                  >Altbestand wird kategorisiert: {{ run.done }} von {{ run.total }} geprüft,
+                  {{ run.suggested }} Vorschläge</span
                 >
                 <button class="button secondary" type="button" [disabled]="busy()" (click)="cancelBacklog()">
                   Lauf abbrechen
@@ -128,9 +128,7 @@
           <button class="button primary" type="button" [disabled]="busy()" (click)="confirmSelectedSuggestions()">
             {{ selectedSuggestionCount() }} Vorschl{{ selectedSuggestionCount() === 1 ? 'ag' : 'äge' }} bestätigen
           </button>
-          <button class="button secondary" type="button" (click)="clearSuggestionSelection()">
-            Auswahl aufheben
-          </button>
+          <button class="button secondary" type="button" (click)="clearSuggestionSelection()">Auswahl aufheben</button>
         </div>
       }
       <app-data-table
@@ -272,8 +270,8 @@
                   ><span>Kategorie</span>{{ bugCategoryLabel(bug.bugCategory) }}
                   @if (bug.bugCategoryState === 'suggested') {
                     (Vorschlag: {{ bugCategoryLabel(bug.bugCategorySuggested) }})
-                  }</span
-                >
+                  }
+                </span>
               }
               @if (awaitsApproval(bug) && (bug.status === 'open' || bug.status === 'in_progress') && mayRun()) {
                 <button

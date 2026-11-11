@@ -6,6 +6,8 @@ import type { Pool } from 'pg';
 import type { CommandExecutor } from '../../core/command.js';
 import { runProjectCommand } from '../project-command.js';
 import { ciLogExcerpt, gateFailureSummary, maskSecrets, TEST_TIMEOUT_MS } from './ci.js';
+import { defined } from '../../core/defined.js';
+import { BUG_STATUS } from '../../core/status.js';
 
 export const CI_MIRROR_WORKFLOW = join('.github', 'workflows', 'ci.yml');
 
@@ -27,7 +29,7 @@ export function mirroredSteps(workflow: string): string[][] {
   const seen = new Set<string>();
   for (const line of workflow.split(/\r?\n/)) {
     const run = /^\s*(?:-\s+)?run:\s*(['"]?)(.*?)\1\s*(?:#.*)?$/.exec(line);
-    const script = run && /^npm run ([\w:.-]+)$/.exec(run[2]!.trim())?.[1];
+    const script = run && /^npm run ([\w:.-]+)$/.exec(defined(run[2]).trim())?.[1];
     // Mehrere Jobs können denselben Schritt enthalten: einmal reicht.
     if (!script || !MIRRORED_SCRIPTS.has(script) || seen.has(script)) continue;
     seen.add(script);
@@ -73,7 +75,7 @@ export async function runCiMirror(
     const noDatabase = command[2] === DATABASE_STEP && NO_DATABASE.test(result.output);
     if (result.exitCode === 0) {
       if (noDatabase) log.push(`CI-Spiegel: \`${step}\` grün, Datenbank-Tests nicht prüfbar (keine Datenbank).`);
-      green.push(command[2]!);
+      green.push(defined(command[2]));
       continue;
     }
     if (noDatabase) {
@@ -118,7 +120,7 @@ export async function reportCiMirrorFailure(
     `INSERT INTO bugs (project_slug, title, description, severity, source)
        SELECT $1, $2, $3, 'high', 'github'
         WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND source = 'github' AND title = $2
-                            AND status IN ('open', 'in_progress') AND position($4 IN description) > 0)
+                            AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}') AND position($4 IN description) > 0)
      RETURNING id`,
     [project, title, description, marker],
   );

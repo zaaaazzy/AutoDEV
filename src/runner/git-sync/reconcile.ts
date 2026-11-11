@@ -17,6 +17,7 @@ import {
   stageAll,
 } from './git-helpers.js';
 import { clearStaleLocks } from './stale-lock.js';
+import { SPRINT_STATUS } from '../../core/status.js';
 
 /**
  * Aufräumen des Agent-Arbeitsordners beim Start des Workers. Wurde der Worker mitten in einem Commit oder Merge
@@ -54,7 +55,7 @@ async function baseOf(pool: Pool, project: string, branch: string, git: GitHelpe
     const row = (
       await pool.query<{ name: string | null; branch: string | null }>(
         `SELECT s.name, s.branch FROM development_items d
-           LEFT JOIN sprints s ON s.id = d.sprint_id AND s.status NOT IN ('completed', 'cancelled')
+           LEFT JOIN sprints s ON s.id = d.sprint_id AND s.status NOT IN ('${SPRINT_STATUS.completed}', '${SPRINT_STATUS.cancelled}')
           WHERE d.project_slug = $1 AND d.id::text LIKE $2 LIMIT 1`,
         [project, `${prefix}%`],
       )

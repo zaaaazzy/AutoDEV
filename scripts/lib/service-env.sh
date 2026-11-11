@@ -1,6 +1,6 @@
 # Gemeinsame Helfer der Installationsskripte (install-worker.sh, install-watchdog.sh, install-worker-linux.sh).
 # Zugänge (Datenbank-URL, Schlüssel) stehen nie in Plist oder Unit, sondern in einer Env-Datei mit Rechten 600;
-# scripts/run-with-env.sh liest sie beim Start. Diese Datei wird mit `source` eingebunden.
+# unter macOS liest Node sie selbst (--env-file), unter Linux scripts/run-with-env.sh. Diese Datei wird mit `source` eingebunden.
 
 # Ordner für die Env-Dateien der Dienste (nur für den Benutzer lesbar).
 SERVICE_ENV_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/aideation"

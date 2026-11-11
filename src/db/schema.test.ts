@@ -34,8 +34,8 @@ test('Mehrfach definierte CHECK-Listen: jede Fassung erlaubt alle Werte der letz
     versions.set(match[1], [...(versions.get(match[1]) ?? []), values]);
   }
   assert.ok(versions.has('sprints_status_check'));
-  // Ausnahme: Migration 23 bereinigt test_coverage_areas im selben Schritt vor ihrem CHECK (nicht zuordenbare Zeilen
-  // fallen weg), eine Zeile mit 'auftrag' kann sie also nicht scheitern lassen; Migration 24 ergänzt 'auftrag'.
+  // Ausnahme: Migration 24 bereinigt test_coverage_areas im selben Schritt vor ihrem CHECK (nicht zuordenbare Zeilen
+  // fallen weg), eine Zeile mit 'auftrag' kann sie also nicht scheitern lassen; Migration 25 ergänzt 'auftrag'.
   // Auch hier darf aber keine spätere Fassung einen Wert verlieren.
   const cleanedBeforeCheck = new Set(['test_coverage_areas_area_check']);
   for (const [name, lists] of versions) {

@@ -41,7 +41,6 @@ import {
   StatusLabelPipe,
   CategoryLabelPipe,
 } from '../../shared/pipes.js';
-import { buildWorkflow } from '../../shared/workflow.js';
 import { IdeaDetailComponent } from './idea-detail.component.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
 import { ChangedFilesComponent } from '../../shared/changed-files.component.js';
@@ -66,11 +65,18 @@ import {
   SOURCE_FILTER_OPTIONS,
   sourceLabel,
 } from './idea-options.js';
+import { defined } from '../../../../../src/core/defined.js';
+import { IDEATION_STATUS } from '../../core/models.js';
 
 const VISIONARY_POLL_MS = 3000;
 const OPEN_RUN = new Set(['requested', 'running']);
 
-const DEFAULT_STATUS_FILTER = ['idea', 'considering', 'review', 'requested'].map(statusLabel);
+const DEFAULT_STATUS_FILTER = [
+  IDEATION_STATUS.idea,
+  IDEATION_STATUS.considering,
+  IDEATION_STATUS.review,
+  IDEATION_STATUS.requested,
+].map(statusLabel);
 const PRIORITY_RANK = ['low', 'medium', 'high'];
 const POPOVER_WIDTH = 320;
 const POPOVER_GAP = 6;
@@ -166,7 +172,6 @@ export class IdeationComponent {
   protected readonly busy = this.store.busy;
   protected readonly auth = inject(AuthService);
   private readonly confirm = inject(ConfirmService);
-  protected readonly defaultStatusFilter = DEFAULT_STATUS_FILTER;
   private readonly defaultFilters = { status: DEFAULT_STATUS_FILTER };
   /** Dashboard-Link mit Filter hat Vorrang vor dem Standardfilter. */
   protected readonly ideaFilters = computed(() => {
@@ -221,15 +226,15 @@ export class IdeationComponent {
   ];
   /** In Bearbeitung und Abgeschlossen: Status aus Idee und Auftrag abgeleitet. */
   protected readonly groupColumns: DataColumn<Idea>[] = [
-    this.ideaColumns.find((column) => column.id === 'title')!,
+    defined(this.ideaColumns.find((column) => column.id === 'title')),
     {
       id: 'status',
       header: 'Status',
       value: (idea) => statusLabel(this.ideaStatus(idea)),
       sortValue: (idea) => IDEA_STATUSES.indexOf(this.ideaStatus(idea)),
     },
-    this.ideaColumns.find((column) => column.id === 'category')!,
-    this.ideaColumns.find((column) => column.id === 'createdAt')!,
+    defined(this.ideaColumns.find((column) => column.id === 'category')),
+    defined(this.ideaColumns.find((column) => column.id === 'createdAt')),
   ];
   protected readonly categories = CATEGORIES;
   /** Badge-Text wie Spalte und Filter „Herkunft“. */
@@ -357,10 +362,6 @@ export class IdeationComponent {
     ];
   }
 
-  protected workflowOf(order: DevelopmentItem) {
-    return buildWorkflow(this.data(), order);
-  }
-
   protected ideaStatus(idea: Idea): string {
     return ideaDisplayStatus(idea, this.closedIdeaOrder(idea));
   }
@@ -455,7 +456,7 @@ export class IdeationComponent {
   protected onViewportChange(): void {
     if (!this.popover() || !this.anchor) return;
     if (!this.anchor.isConnected) this.closePopover(false);
-    else this.popover.update((open) => open && { ...open, ...popoverPosition(this.anchor!) });
+    else this.popover.update((open) => open && { ...open, ...popoverPosition(defined(this.anchor)) });
   }
 
   /** Massenablehnung der markierten Ideen mit einem gemeinsamen Grund. */
@@ -483,7 +484,7 @@ export class IdeationComponent {
           ...body,
         });
       },
-      () => bulkMessage(action, ideas.length, outcome.result!),
+      () => bulkMessage(action, ideas.length, defined(outcome.result)),
     );
     if (!outcome.result) return false;
     this.closePopover();

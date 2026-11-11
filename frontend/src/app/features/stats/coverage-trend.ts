@@ -1,4 +1,5 @@
 import type { CoverageTrendPoint } from '../../core/models.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 /** Zeichenfläche einer Zeitreihe (viewBox), Prozent 0–100 von unten nach oben. */
 export const CHART = { width: 320, height: 120, left: 28, right: 8, top: 8, bottom: 8 };
@@ -29,7 +30,7 @@ export function plotted(points: CoverageTrendPoint[], key: 'lines' | 'branches')
   const xs = xPositions(points);
   return points.map((point, index) => {
     const value = point[key];
-    return value === null ? null : { x: xs[index]!, y: yPosition(value), value, point };
+    return value === null ? null : { x: defined(xs[index]), y: yPosition(value), value, point };
   });
 }
 

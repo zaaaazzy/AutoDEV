@@ -1,10 +1,6 @@
 import { refuseDefaultDatabasePassword } from '../core/default-credentials.js';
-import { logged } from '../core/log.js';
 import { Pool } from 'pg';
-import { ensureDefaultAgents, ensureReviewer } from '../api/agents.js';
 import { runMigrations } from './migrations.js';
-import { seedDefaultActions, seedRoutineTemplates } from '../api/agent-tasks.js';
-import { materializeAgentCommands } from '../agent/tool-permissions.js';
 
 export interface DatabaseConfig {
   databaseUrl: string;
@@ -69,21 +65,7 @@ export async function createDatabasePool(config: DatabaseConfig): Promise<Pool> 
     } finally {
       client.release();
     }
-    const projects = await pool.query<{ slug: string }>('SELECT slug FROM projects WHERE NOT agents_seeded');
-    for (const project of projects.rows) {
-      await ensureDefaultAgents(pool, project.slug);
-    }
-    // Standard-Aktionen (Quick Actions) einmalig je Projekt anlegen und dem Tester zuweisen.
-    for (const project of (await pool.query<{ slug: string }>('SELECT slug FROM projects')).rows) {
-      await seedDefaultActions(pool, project.slug).catch(logged('database'));
-      // Routine-Vorlagen (deaktiviert) einmalig je Projekt.
-      await seedRoutineTemplates(pool, project.slug).catch(logged('database'));
-      await materializeAgentCommands(pool, project.slug).catch(logged('database'));
-    }
-    const withoutReviewer = await pool.query<{ slug: string }>('SELECT slug FROM projects WHERE NOT reviewer_seeded');
-    for (const project of withoutReviewer.rows) {
-      await ensureReviewer(pool, project.slug);
-    }
+    // Startdaten (Standard-Agents, Aktionen, Rechte) säen die Aufrufer mit seedProjectDefaults (src/agent).
     return pool;
   } catch (error) {
     await pool.end();

@@ -1,3 +1,5 @@
+import { defined } from '../../../../../src/core/defined.js';
+
 /**
  * Eingabehilfen im Chat: „@“ spricht einen Agent oder eine Person im Projekt an, „/“ verweist auf Auftrag, Idee,
  * Bug, Sprint, Doku oder Git, „/auftrag/…“ auf einen bestimmten Eintrag. Reine Logik ohne Angular, damit sie
@@ -63,7 +65,7 @@ export function findTrigger(text: string, caret: number): Trigger | null {
   const before = text.slice(0, caret);
   const match = before.match(/(^|\s)([/@][^\s]*)$/);
   if (!match) return null;
-  const token = match[2]!;
+  const token = defined(match[2]);
   const start = caret - token.length;
   const end = caret;
   if (token.startsWith('@')) return { kind: 'agent', query: token.slice(1), start, end };

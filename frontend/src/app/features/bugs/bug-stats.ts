@@ -1,11 +1,13 @@
 import type { Bug, Sprint } from '../../core/models.js';
+import { BUG_STATUS } from '../../core/models.js';
 import { NAVIGATION } from '../../core/navigation.js';
 import { BUG_CATEGORIES, bugCategoryLabel, categoryLabel } from '../../shared/labels.js';
 import type { BugCategoryValue } from '../../../../../src/core/bug-category-values.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 /** Begraben: behoben, nicht behoben (kein Fix) oder abgelehnt – liegt auf dem Bug-Friedhof. */
 export function isBuried(bug: Pick<Bug, 'status'>): boolean {
-  return bug.status === 'fixed' || bug.status === 'wontfix' || bug.status === 'rejected';
+  return bug.status === BUG_STATUS.fixed || bug.status === BUG_STATUS.wontfix || bug.status === BUG_STATUS.rejected;
 }
 
 export interface BugStatRow {
@@ -77,19 +79,19 @@ const AREA_LABELS: Record<string, string> = {
 function finder(bug: Bug): string {
   if (bug.source === 'test') return 'Oberflächentest';
   const match = KNOWN_FINDERS.exec(bug.title);
-  if (match) return match[1]!;
+  if (match) return defined(match[1]);
   return bug.source === 'manual' ? 'Von Hand gemeldet' : 'Agent';
 }
 
 function places(bug: Bug): string[] {
   const found = new Set<string>();
   for (const match of bug.description.matchAll(FINDING_PAGE)) {
-    const page = PAGE_LABELS.get(match[1]!);
+    const page = PAGE_LABELS.get(defined(match[1]));
     if (page) found.add(`Seite ${page}`);
   }
   if (bug.category) found.add(categoryLabel(bug.category));
   if (!found.size) {
-    for (const match of bug.description.matchAll(PATH_AREA)) found.add(AREA_LABELS[match[1]!]!);
+    for (const match of bug.description.matchAll(PATH_AREA)) found.add(defined(AREA_LABELS[defined(match[1])]));
   }
   return found.size ? [...found] : ['Ohne Zuordnung'];
 }
@@ -97,9 +99,9 @@ function places(bug: Bug): string[] {
 function tests(bug: Bug): string[] {
   const found = new Set<string>();
   const ui = UI_TEST.exec(bug.description);
-  if (ui) found.add(ui[2] ? `${ui[1]} (${ui[2]})` : ui[1]!);
-  for (const match of bug.description.matchAll(NOT_OK)) found.add(match[1]!.trim().slice(0, 80));
-  for (const match of bug.description.matchAll(TEST_FILE)) found.add(match[1]!);
+  if (ui) found.add(ui[2] ? `${ui[1]} (${ui[2]})` : defined(ui[1]));
+  for (const match of bug.description.matchAll(NOT_OK)) found.add(defined(match[1]).trim().slice(0, 80));
+  for (const match of bug.description.matchAll(TEST_FILE)) found.add(defined(match[1]));
   return [...found];
 }
 
@@ -186,9 +188,12 @@ export function bugCategoryMatrix(pairs: BugCategorySprintPair[]): BugCategoryMa
       total: cells.reduce((sum, entry) => sum + entry.open + entry.buried, 0),
     };
   });
-  const totals = sprintIds.map((_, index) => ({
-    open: rows.reduce((sum, row) => sum + row.cells[index]!.open, 0),
-    buried: rows.reduce((sum, row) => sum + row.cells[index]!.buried, 0),
-  }));
+  const totals = sprintIds.map((sprintId) => {
+    const column = categories.map((category) => cell(category, sprintId));
+    return {
+      open: column.reduce((sum, entry) => sum + entry.open, 0),
+      buried: column.reduce((sum, entry) => sum + entry.buried, 0),
+    };
+  });
   return { sprints, rows, totals, total: rows.reduce((sum, row) => sum + row.total, 0) };
 }

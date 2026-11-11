@@ -1,6 +1,6 @@
 # Worker und Ausfall-Wächter als Compose-Dienste (Profil worker, docker-compose.yml). Das Image enthält nur Werkzeuge:
-# Node in derselben Version wie API und Agent-Image, Git, SSH, gh sowie Docker-CLI mit Compose und Buildx (über den
-# eingebundenen Socket). Den Code lädt der Worker aus dem eingebundenen AIdeation-Ordner – so bringt „AIdeation neu
+# Node in derselben Version wie API und Agent-Image, Git, SSH, gh, Docker-CLI mit Compose und Buildx (über den
+# eingebundenen Socket) sowie der Postgres-Client 17 (pg_restore für den Wartungs-Job backup_check). Den Code lädt der Worker aus dem eingebundenen AIdeation-Ordner – so bringt „AIdeation neu
 # starten“ neuen Code ohne neues Image (Exit-Code 75, Docker startet den Container neu).
 FROM node:22.22.3-bookworm-slim
 RUN apt-get update \
@@ -8,13 +8,17 @@ RUN apt-get update \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli.gpg \
-    && chmod a+r /etc/apt/keyrings/docker.asc /etc/apt/keyrings/githubcli.gpg \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /etc/apt/keyrings/postgresql.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc /etc/apt/keyrings/githubcli.gpg /etc/apt/keyrings/postgresql.asc \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" \
       > /etc/apt/sources.list.d/docker.list \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
       > /etc/apt/sources.list.d/github-cli.list \
+    && echo "deb [signed-by=/etc/apt/keyrings/postgresql.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin docker-buildx-plugin gh \
+       postgresql-client-17 \
     && rm -rf /var/lib/apt/lists/*
 # Eingebundene Ordner gehören dem Benutzer des Hosts, nicht dem des Containers: Git soll sie trotzdem lesen.
 RUN git config --system --add safe.directory '*'

@@ -331,7 +331,7 @@
                 @if (!githubRemote()) {
                   Nur mit einem GitHub-Repository (github.com) möglich.
                 } @else if ((project.githubMode ?? 'aus') === 'aus') {
-                  Aus – Dev Log ruft GitHub nicht auf. Die Anmeldung wird geprüft, sobald ein Modus gespeichert ist.
+                  Aus – AIdeation ruft GitHub nicht auf. Die Anmeldung wird geprüft, sobald ein Modus gespeichert ist.
                 } @else if (project.githubAuth === 'ok') {
                   ✓ Angemeldet (gh auth status{{
                     project.githubAuthCheckedAt
@@ -355,7 +355,8 @@
               Issues mit Label <code>idea</code> bzw. <code>bug</code> werden alle 5 Minuten als Idee bzw. Bug
               übernommen (Bilder nur als Link); Statuswechsel kommen als Kommentar ins Issue, „erledigt“ schließt es. Im
               PR-Modus öffnet der Sprint-Abschluss einen Pull Request und merged erst nach grüner CI. Es wird kein Token
-              gespeichert: Dev Log nutzt die Anmeldung der GitHub CLI (<code>gh auth login</code>) des Worker-Benutzers.
+              gespeichert: AIdeation nutzt die Anmeldung der GitHub CLI (<code>gh auth login</code>) des
+              Worker-Benutzers.
             </p>
           </div>
         </details>

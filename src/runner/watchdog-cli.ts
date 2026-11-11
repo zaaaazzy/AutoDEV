@@ -4,7 +4,10 @@ import { warnDefaultDatabasePassword } from '../core/default-credentials.js';
 import { loadInstallEnv, requireDatabaseUrl } from '../core/local-database.js';
 import { runWatchdog } from './watchdog.js';
 
-/** Einmaliger Wächter-Durchlauf; launchd startet ihn alle zwei Minuten (scripts/install-watchdog.sh). */
+/**
+ * Einmaliger Wächter-Durchlauf alle zwei Minuten: per launchd (scripts/install-watchdog.sh) oder im Compose-Dienst
+ * watchdog (deploy/worker/entrypoint.sh).
+ */
 const root = join(import.meta.dirname, '..', '..');
 // Env-Datei des Dienstes (--env-file) vor der .env der Installation; ohne Datenbank-URL kein Standardpasswort.
 loadInstallEnv(root);

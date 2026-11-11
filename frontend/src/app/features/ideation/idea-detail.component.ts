@@ -72,7 +72,7 @@ export class IdeaDetailComponent {
   }
 
   protected statusOptions(idea: Idea): string[] {
-    return IDEA_SELECTABLE_STATUSES.includes(idea.status) ? IDEA_SELECTABLE_STATUSES : [idea.status];
+    return IDEA_SELECTABLE_STATUSES.includes(idea.status) ? [...IDEA_SELECTABLE_STATUSES] : [idea.status];
   }
 
   protected displayStatus(idea: Idea): string {
@@ -114,6 +114,7 @@ export class IdeaDetailComponent {
           ...(IDEA_SELECTABLE_STATUSES.includes(idea.status) ? { status: values['status'] } : {}),
           priority: values['priority'],
           category: values['category'] || null,
+          kind: values['kind'] === 'bug' ? 'bug' : 'feature',
         }),
       'Idee gespeichert.',
     );
@@ -139,10 +140,12 @@ export class IdeaDetailComponent {
 
   /** Ablehnen mit Grund: Status „Abgelehnt“, der Grund wird gespeichert und fliesst in den nächsten Visionär-Lauf. */
   protected async rejectIdea(idea: Idea, reason: string): Promise<void> {
-    await this.store.perform(
+    const rejected = await this.store.perform(
       () => this.api.post(`/api/ideation/${encodeURIComponent(idea.id)}/reject`, { reason }),
       'Idee abgelehnt.',
     );
+    // Gescheitert: Formular mit dem Grund stehen lassen.
+    if (!rejected) return;
     this.rejecting.set(false);
   }
 

@@ -1312,8 +1312,7 @@ test('Abnahme: ohne gültige Messung durch AIdeation gilt die fehlende Abdeckung
     { criteria, done: DONE_WITH_UNMEASURED },
     {
       coverageOutput: 'keine Abdeckung',
-      testerCoverage:
-        '@@COVERAGE {"summary":"x","areas":[{"area":"backend","unit":3,"lines":null,"branches":null}]}',
+      testerCoverage: '@@COVERAGE {"summary":"x","areas":[{"area":"backend","unit":3,"lines":null,"branches":null}]}',
     },
   );
   assert.equal(result, 'failed');
@@ -1335,7 +1334,9 @@ test('Abnahme: ungültiger Tester-Block wird verworfen, die eigene Messung bleib
     areas.map((query) => query.values[1]),
     ['backend'],
   );
-  assert.ok(stepEvents(queries).some((text) => /Testabdeckung des Testers verworfen: Bereich „Sonstiges“ unbekannt/.test(text)));
+  assert.ok(
+    stepEvents(queries).some((text) => /Testabdeckung des Testers verworfen: Bereich „Sonstiges“ unbekannt/.test(text)),
+  );
 });
 
 test('Abnahme: ein unbelegtes Kriterium oder rote Tests bleiben trotz Abdeckungs-Hinweis abgelehnt', async () => {
@@ -1387,6 +1388,53 @@ test('Nutzungslimit des Agent-Kontos: Auftrag bleibt geplant mit Startzeit nach 
   assert.match(step.sql, /tokens = \$5, cost_usd = \$6/);
   assert.equal(step.values[4], 1234, 'Tokens des Versuchs zählen fürs Budget');
   assert.equal(step.values[5], 0.5, 'Kosten des Versuchs zählen fürs Budget');
+});
+
+test('Arbeitscontainer defekt: Projekt pausiert eine Stunde, kein Bug, keine Problemanalyse', async () => {
+  const { pool, queries } = fakePool();
+  const execute: CommandExecutor = async (command) => ({
+    exitCode: command[0] === 'b' ? 1 : 0,
+    durationMs: 1,
+    output:
+      command[0] === 'b'
+        ? 'npm error Your cache folder contains root-owned files\nnpm error Log files were not written due to an error writing to the directory: /home/agent/.npm/_logs'
+        : '',
+  });
+  const agents = [agent('a', 'pre_task', 1, ['a']), agent('b', 'while_task', 1, ['b'])];
+  assert.equal(await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute }), 'failed');
+  const settled = queries.filter((query) => query.sql.includes('UPDATE development_items')).at(-1);
+  assert.match(settled?.sql ?? '', /'planned'/);
+  const retry = queries.find((query) => query.sql.includes('SET retry_after = $2'));
+  assert.ok(retry?.values[1] instanceof Date, 'Pause bis zum nächsten Versuch gespeichert');
+  assert.match(String(retry?.values[2]), /Arbeitscontainer bzw\. Sandbox defekt/);
+  assert.ok(
+    queries.some((query) => marksStepInterrupted(query.sql)),
+    'Schritt als unterbrochen markiert',
+  );
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')), 'kein Bug-Bericht');
+  assert.ok(!queries.some((query) => /analysis_status = CASE/.test(query.sql)), 'keine Problemanalyse');
+});
+
+test('Arbeitscontainer weiter defekt nach zwei Pausen: Auftrag blockiert mit „Aktion notwendig“, kein Bug', async () => {
+  const { pool: inner, queries } = fakePool();
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) =>
+      sql.includes('COUNT(*) AS count FROM agent_run_steps') ? { rows: [{ count: '2' }] } : inner.query(sql, values),
+  } as unknown as Pool;
+  const execute: CommandExecutor = async (command) => ({
+    exitCode: command[0] === 'b' ? 1 : 0,
+    durationMs: 1,
+    output: command[0] === 'b' ? 'Error response from daemon: No such exec instance: 7b6620d2a9e1' : '',
+  });
+  const agents = [agent('a', 'pre_task', 1, ['a']), agent('b', 'while_task', 1, ['b'])];
+  assert.equal(await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute }), 'failed');
+  assert.ok(!queries.some((query) => query.sql.includes('SET retry_after = $2')), 'keine weitere Pause');
+  assert.ok(
+    queries.some((query) => query.values.some((value) => String(value).startsWith('Arbeitscontainer bzw. Sandbox'))),
+    'Aktion notwendig gesetzt',
+  );
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')), 'kein Bug-Bericht');
+  assert.ok(!queries.some((query) => /analysis_status = CASE/.test(query.sql)), 'keine Problemanalyse');
 });
 
 test('Projektordner während des Schritts weg: Schritt unterbrochen, Tokens und Kosten bleiben am Schritt', async () => {

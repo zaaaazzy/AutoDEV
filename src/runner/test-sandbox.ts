@@ -1,6 +1,7 @@
 // Projekttests in der Docker-Sandbox (Tester-Schritt, Test-Gate beim Live schalten, Komplettlauf test:full,
-// Abdeckungsmessung): Der Host führt keinen Projektcode mehr aus. Braucht das Projekt Dienste (z. B. Datenbank),
-// startet der Worker sie per Compose und hängt den Testcontainer nur an das Netzwerk dieses Compose-Projekts.
+// Abdeckungsmessung): Der Host führt keinen Projektcode mehr aus. Im Modus workbench laufen die Tests im
+// Arbeitscontainer (Dienste aus .aideation/workbench.json). Im Modus docker startet der Worker benötigte Dienste
+// (z. B. Datenbank) per Compose und hängt den Testcontainer nur an das Netzwerk dieses Compose-Projekts.
 import { existsSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import type { Pool } from 'pg';
@@ -95,7 +96,7 @@ const failing =
   async (): Promise<CommandResult> => ({ exitCode: 1, durationMs: 0, output: `${message}\n` });
 
 /**
- * Executor für Projekttests im Container. Ohne Testdienste: das interne Agent-Netzwerk (npm nur über den
+ * Executor für Projekttests im Container. Modus workbench: der Arbeitscontainer des Projekts. Sonst ohne Testdienste: das interne Agent-Netzwerk (npm nur über den
  * Egress-Proxy). Mit Testdiensten: Compose startet sie (geprüft wie services.up), der Testcontainer hängt nur im
  * Netzwerk des Compose-Projekts. Scheitert das, scheitern die Tests mit Meldung – nichts läuft auf dem Host.
  */

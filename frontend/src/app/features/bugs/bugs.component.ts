@@ -6,6 +6,7 @@ import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import { ConfirmService } from '../../core/confirm.service.js';
 import type { Bug, BugCategoryBacklog, BugStatus, Sprint } from '../../core/models.js';
+import { FocusOnce } from '../../core/focus-once.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { visibleInterval } from '../../core/visible-interval.js';
 import { errorMessage } from '../../core/errors.js';
@@ -19,13 +20,7 @@ import {
   DataTableComponent,
 } from '../../shared/data-table/data-table.component.js';
 import { formatIsoDate } from '../../shared/format.js';
-import {
-  BUG_CATEGORIES,
-  CATEGORIES,
-  bugCategoryLabel,
-  severityLabel,
-  statusLabel,
-} from '../../shared/labels.js';
+import { BUG_CATEGORIES, CATEGORIES, bugCategoryLabel, severityLabel, statusLabel } from '../../shared/labels.js';
 import { categoryColumn } from '../../shared/data-table/columns.js';
 import { GalleryComponent } from '../../shared/gallery.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
@@ -40,9 +35,16 @@ import {
   StatusClassPipe,
   StatusLabelPipe,
 } from '../../shared/pipes.js';
+import { BUG_STATUS } from '../../core/models.js';
 
 const SEVERITY_RANK = ['low', 'medium', 'high', 'critical'];
-const BUG_STATUS_RANK = ['open', 'in_progress', 'fixed', 'wontfix', 'rejected'];
+const BUG_STATUS_RANK: readonly string[] = [
+  BUG_STATUS.open,
+  BUG_STATUS.inProgress,
+  BUG_STATUS.fixed,
+  BUG_STATUS.wontfix,
+  BUG_STATUS.rejected,
+];
 
 /** Pro Statistik-Karte höchstens so viele Zeilen, der Rest wird zusammengefasst. */
 const STAT_ROWS = 10;
@@ -112,7 +114,13 @@ export class BugsComponent {
   protected readonly editTitleMax = EDIT_TITLE_MAX;
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
-  protected readonly bugStatuses: BugStatus[] = ['open', 'in_progress', 'fixed', 'wontfix', 'rejected'];
+  protected readonly bugStatuses: BugStatus[] = [
+    BUG_STATUS.open,
+    BUG_STATUS.inProgress,
+    BUG_STATUS.fixed,
+    BUG_STATUS.wontfix,
+    BUG_STATUS.rejected,
+  ];
   protected readonly openBug = signal<string | null>(null);
   protected readonly bugId = (bug: Bug): string => bug.id;
   protected readonly bugColumns: DataColumn<Bug>[] = [
@@ -201,9 +209,7 @@ export class BugsComponent {
     `Vorschlag „${bugCategoryLabel(bug.bugCategorySuggested)}“ für „${bug.title}“ auswählen`;
   /** Altbestandslauf dieses Projekts; busy = ein Lauf (auch eines anderen Projekts) belegt das lokale Modell. */
   protected readonly backlog = signal<BugCategoryBacklog>(NO_BACKLOG);
-  protected readonly uncategorized = computed(
-    () => this.data().bugs.filter((bug) => !bug.bugCategoryState).length,
-  );
+  protected readonly uncategorized = computed(() => this.data().bugs.filter((bug) => !bug.bugCategoryState).length);
 
   protected statGroups(stats: BugStats) {
     const group = (title: string, column: string, rows: BugStatRow[], empty: string) => ({
@@ -239,9 +245,11 @@ export class BugsComponent {
 
   constructor() {
     // Link auf einen Bug (#bugs/<id>, z. B. aus einem Bericht): Zeile aufklappen und hinscrollen.
+    // Einmal je Link: Ein Nachladen im Hintergrund klappt die Zeile nicht wieder auf und scrollt nicht zurück.
+    const focus = new FocusOnce();
     effect(() => {
       const id = this.store.focusId();
-      if (!id || !this.data().bugs.some((bug) => bug.id === id)) return;
+      if (!focus.take(id, !!id && this.data().bugs.some((bug) => bug.id === id))) return;
       untracked(() => {
         this.openBug.set(id);
         globalThis.setTimeout(
@@ -315,8 +323,7 @@ export class BugsComponent {
   /** Einzeln bestätigen: ohne Auswahl den Vorschlag, mit Auswahl die korrigierte Kategorie. */
   protected async confirmCategory(bug: Bug, category: string | null = null): Promise<void> {
     await this.store.perform(
-      () =>
-        this.api.post(`/api/bugs/${encodeURIComponent(bug.id)}/category/confirm`, category ? { category } : {}),
+      () => this.api.post(`/api/bugs/${encodeURIComponent(bug.id)}/category/confirm`, category ? { category } : {}),
       category && category !== bug.bugCategorySuggested
         ? `Kategorie „${bugCategoryLabel(category)}“ gesetzt.`
         : 'Kategorie bestätigt.',

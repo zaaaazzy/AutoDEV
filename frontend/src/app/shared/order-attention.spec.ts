@@ -52,12 +52,28 @@ test('Erledigte Aufträge mit altem Aktionshinweis brauchen keine Aktion mehr', 
 
 test('Manuelle Prüfpunkte werden gezählt, ausser es wartet eine Aktion', () => {
   const checks = [manualCheck('a', 1), manualCheck('a', 2), manualCheck('b', 1)];
-  const [entry] = orderAttention([order({ id: 'a', status: 'in_progress' })], checks);
+  const [entry] = orderAttention([order({ id: 'a', status: 'done' })], checks);
   assert.equal(entry!.checks.length, 2);
   assert.equal(entry!.reasons[0]!.label, '2 Punkte von dir zu prüfen');
-  const [todo] = orderAttention([order({ id: 'b', status: 'in_progress', actionTodo: 'Zugang geben' })], checks);
+  const [todo] = orderAttention([order({ id: 'b', status: 'approval', actionTodo: 'Zugang geben' })], checks);
   assert.deepEqual(todo!.checks, []);
-  assert.equal(todo!.reasons[0]!.label, 'Aktion notwendig');
+  assert.deepEqual(
+    todo!.reasons.map((reason) => reason.label),
+    ['Wartet auf Freigabe'],
+  );
+});
+
+test('Geplante und laufende Aufträge warten mit Prüfpunkten noch nicht auf dich', () => {
+  const checks = [manualCheck('planned', 1), manualCheck('running', 1), manualCheck('approved', 1)];
+  const entries = orderAttention(
+    [
+      order({ id: 'planned', status: 'planned' }),
+      order({ id: 'running', status: 'in_progress' }),
+      order({ id: 'approved', status: 'approval', reviewApprovedAt: '2026-10-22T16:00:00Z' }),
+    ],
+    checks,
+  );
+  assert.deepEqual(entries, []);
 });
 
 const proof = (values: Partial<TestEvidence>): TestEvidence => ({

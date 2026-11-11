@@ -3,10 +3,12 @@ import { fencedBugDescriptionSql, unapprovedBugSql } from '../core/bug-trust.js'
 import { folderAvailable } from '../core/folder-guard.js';
 import { summarizeTestFailure } from '../core/test-results.js';
 import { humanActionFor, setActionTodo } from './action-todo.js';
-import { DEVELOPMENT_STATUS } from '../core/status.js';
+import { AGENT_STEP_STATUS, DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
 import { shortTitle } from '../core/validation.js';
 import type { Pool } from 'pg';
-import { reportAgentBug } from '../api/bugs.js';
+import { reportAgentBug } from '../db/bugs-repository.js';
+import { afterBugCreated } from '../agent/bug-classifier.js';
+import { categoryFromBug } from '../core/bug-category.js';
 import type { BugCategoryValue } from '../core/bug-category-values.js';
 import { UNTRUSTED_START } from './hoster.js';
 
@@ -105,6 +107,25 @@ export const ENVIRONMENT_TODO =
  */
 export const GIT_FOLDER_TODO = 'Arbeitsordner aufräumen (Git)';
 
+/**
+ * Arbeitscontainer bzw. Sandbox kaputt (npm-Cache gehört root, Abhängigkeiten nicht installierbar, Befehl fehlt im
+ * Image, Container unter dem Lauf erneuert): kein Fehler im Auftrag. Jeder weitere Auftrag des Projekts liefe in dieselbe
+ * Wand – Bug-Berichte, Problemanalysen und Wiederholungen kosten dann nur Tokens.
+ */
+const SANDBOX_PATTERNS = [
+  /^(?:Sandbox|Arbeitscontainer): /m,
+  /Your cache folder contains root-owned files/,
+  /npm error Log files were not written due to an error writing to the directory/,
+  /Error response from daemon: (?:No such (?:exec instance|container)|Container \S+ is not running)/i,
+];
+export const SANDBOX_TODO =
+  'Arbeitscontainer bzw. Sandbox defekt – reparieren, dann den Auftrag erneut starten (kein Fehler im Code)';
+
+export function isSandboxFailure(output: string): boolean {
+  const tail = output.slice(-3000);
+  return SANDBOX_PATTERNS.some((pattern) => pattern.test(tail));
+}
+
 /** Ein Agent hat wegen einer Projektregel (Do's and Don'ts) abgelehnt: „@@REGEL: <Regel>“. */
 export function ruleRefusal(output: string): string | null {
   return output.match(/^\s*@@REGEL:\s*(.+)$/m)?.[1]?.trim() || null;
@@ -139,12 +160,16 @@ export function failureDetail(output: string): string | null {
 export async function registerFailure(pool: Pool, item: FailedItem, agentName: string, output: string): Promise<void> {
   const tail = output.trim().slice(-3000) || 'Keine Ausgabe vorhanden.';
   const detail = failureDetail(output) ?? tail;
-  // Umgebung (Laufwerk weg) und Projektregeln sind keine Code-Fehler: kein Bug-Auftrag, sondern „Aktion notwendig“.
+  // Umgebung (Laufwerk weg, Arbeitscontainer defekt) und Projektregeln sind keine Code-Fehler: kein Bug-Auftrag und
+  // keine Problemanalyse, sondern „Aktion notwendig“.
   const rule = ruleRefusal(output);
-  if (rule || isEnvironmentFailure(tail)) {
+  const sandbox = !rule && isSandboxFailure(tail);
+  if (rule || sandbox || isEnvironmentFailure(tail)) {
     const todo = rule
       ? `Projektregel verhindert den Auftrag: ${rule} – Auftrag anpassen oder verwerfen`
-      : ENVIRONMENT_TODO;
+      : sandbox
+        ? SANDBOX_TODO
+        : ENVIRONMENT_TODO;
     // Verstoss gegen eine Projektregel: Status „abgelehnt“ (ein Bug-Auftrag lehnt per Trigger auch den Bug ab).
     await pool.query(
       `UPDATE development_items SET failure = $2, auto_run = FALSE${rule ? `, status = '${DEVELOPMENT_STATUS.rejected}'` : ''} WHERE id = $1`,
@@ -189,14 +214,20 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
     );
     return;
   }
+  // Kurz: Agent und Auftrag; die Fehlerausgabe steht in der Beschreibung. Die Kategorie kommt aus den genannten
+  // Pfaden, sonst stuft das lokale Modell im Hintergrund ein (ohne Einfluss auf den Auto-Fix-Ablauf).
+  const bugTitle = `${agentName}: ${shortTitle(item.title)}`;
+  const category = categoryFromBug({ title: bugTitle, description: detail });
+  const bugCategory = failureBugCategory(output);
   const bugId = await reportAgentBug(pool, {
     projectSlug: item.projectSlug,
-    // Kurz: Agent und Auftrag; die Fehlerausgabe steht in der Beschreibung.
-    title: `${agentName}: ${shortTitle(item.title)}`,
+    title: bugTitle,
     description: detail,
     developmentId: item.id,
-    bugCategory: failureBugCategory(output),
+    category,
+    bugCategory,
   });
+  afterBugCreated(pool, bugId, category, { title: bugTitle, description: detail }, bugCategory);
   // Bevor ein Behebungsauftrag entsteht, prüft die Problemanalyse (ein zweiter Agent), ob die Diagnose stimmt.
   await pool.query(
     `UPDATE development_items SET failure = $2, failure_bug_id = $3, auto_run = FALSE,
@@ -246,8 +277,8 @@ export async function delegateAfterAnalysis(
 export async function resumeAfterEnvironment(pool: Pool, project: string, cwd?: string): Promise<void> {
   if (cwd !== undefined && !folderAvailable(cwd)) return;
   await pool.query(
-    `UPDATE development_items SET status = 'planned', auto_run = TRUE, failure = NULL, action_todo = NULL, retry_count = retry_count + 1, updated_at = NOW()
-      WHERE project_slug = $1 AND status = 'blocked' AND action_todo = ANY($2::text[]) AND retry_count < $3`,
+    `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE, failure = NULL, action_todo = NULL, retry_count = retry_count + 1, updated_at = NOW()
+      WHERE project_slug = $1 AND status = '${DEVELOPMENT_STATUS.blocked}' AND action_todo = ANY($2::text[]) AND retry_count < $3`,
     [project, [ENVIRONMENT_TODO, GIT_FOLDER_TODO], MAX_AUTO_RETRIES],
   );
 }
@@ -261,10 +292,10 @@ export async function resumeAfterEnvironment(pool: Pool, project: string, cwd?: 
 export async function detachFromClosedSprints(pool: Pool, project: string): Promise<number> {
   const result = await pool.query(
     `UPDATE development_items d
-        SET sprint_id = (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = 'active' ORDER BY created_at LIMIT 1),
+        SET sprint_id = (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = '${SPRINT_STATUS.active}' ORDER BY created_at LIMIT 1),
             sprint_rank = NULL, updated_at = NOW()
-      WHERE d.project_slug = $1 AND d.status = 'planned' AND d.auto_run
-        AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.status IN ('completed', 'cancelled'))`,
+      WHERE d.project_slug = $1 AND d.status = '${DEVELOPMENT_STATUS.planned}' AND d.auto_run
+        AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.status IN ('${SPRINT_STATUS.completed}', '${SPRINT_STATUS.cancelled}'))`,
     [project],
   );
   return result.rowCount ?? 0;
@@ -287,8 +318,8 @@ export async function queueBugFix(
     `INSERT INTO development_items (project_slug, sprint_id, title, description, status, priority, kind, bug_id, auto_run)
      SELECT b.project_slug,
             CASE WHEN $2::uuid IS NOT NULL THEN COALESCE(
-              (SELECT s.id FROM sprints s WHERE s.id = $2::uuid AND s.status NOT IN ('completed', 'cancelled')),
-              (SELECT s.id FROM sprints s WHERE s.project_slug = b.project_slug AND s.status = 'active'
+              (SELECT s.id FROM sprints s WHERE s.id = $2::uuid AND s.status NOT IN ('${SPRINT_STATUS.completed}', '${SPRINT_STATUS.cancelled}')),
+              (SELECT s.id FROM sprints s WHERE s.project_slug = b.project_slug AND s.status = '${SPRINT_STATUS.active}'
                 ORDER BY s.created_at LIMIT 1)) END,
             left('Bug: ' || b.title, 180),
             COALESCE($4, 'Behebe den Fehler, der den Auftrag „' || $3 || '“ blockiert. Danach wird der Auftrag automatisch erneut gestartet.') || E'\n\n' ||
@@ -303,8 +334,8 @@ export async function queueBugFix(
 /** Nach erfolgreicher Behebung: den blockierten Ursprungsauftrag erneut einplanen (begrenzte Versuche). */
 export async function resumeBlockedByBug(pool: Pool, bugId: string): Promise<void> {
   await pool.query(
-    `UPDATE development_items d SET status = 'planned', auto_run = TRUE, failure = NULL, action_todo = NULL, retry_count = retry_count + 1, updated_at = NOW()
-      WHERE d.failure_bug_id = $1 AND d.status = 'blocked' AND d.kind <> 'bug' AND d.retry_count < $2
+    `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE, failure = NULL, action_todo = NULL, retry_count = retry_count + 1, updated_at = NOW()
+      WHERE d.failure_bug_id = $1 AND d.status = '${DEVELOPMENT_STATUS.blocked}' AND d.kind <> 'bug' AND d.retry_count < $2
         AND (SELECT auto_bugfix FROM projects WHERE slug = d.project_slug)`,
     [bugId, MAX_AUTO_RETRIES],
   );
@@ -321,9 +352,9 @@ export async function backfillFailures(pool: Pool, project: string): Promise<voi
        FROM development_items d
        LEFT JOIN LATERAL (
          SELECT st.agent_name, st.output, st.run_id FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
-          WHERE r.development_id = d.id AND st.status = 'failed' ORDER BY r.started_at DESC, st.position DESC LIMIT 1
+          WHERE r.development_id = d.id AND st.status = '${AGENT_STEP_STATUS.failed}' ORDER BY r.started_at DESC, st.position DESC LIMIT 1
        ) last ON TRUE
-      WHERE d.project_slug = $1 AND d.status = 'blocked' AND d.failure IS NULL AND d.kind <> 'bug' AND last.agent_name IS NOT NULL
+      WHERE d.project_slug = $1 AND d.status = '${DEVELOPMENT_STATUS.blocked}' AND d.failure IS NULL AND d.kind <> 'bug' AND last.agent_name IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM agent_run_steps c WHERE c.run_id = last.run_id AND c.cancel_requested)`,
     [project],
   );

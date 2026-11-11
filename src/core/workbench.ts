@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
 import {
@@ -31,7 +31,8 @@ import {
   sandboxFailureNote,
   sandboxProblem,
   sandboxUser,
-} from './sandbox.js';
+} from './sandbox-base.js';
+import { defined } from './defined.js';
 
 /**
  * Arbeitscontainer je Projekt (Schalter DEV_LOG_AGENT_SANDBOX bzw. projects.agent_sandbox = „workbench“, Standard):
@@ -40,9 +41,10 @@ import {
  *
  * - workbench: Image aideation-agent, der Worktree als /workspace, node_modules als Volume des Projekts, ohne
  *   Capabilities, im internen Agent-Netzwerk (hinaus nur über den Egress-Proxy).
- * - docker: eigener Docker-Dienst (docker:dind, privilegiert, aber nur in seinem eigenen Container) im
- *   Netzwerk-Namensraum der workbench, also unter 127.0.0.1:2375. Images, Container und Volumes der Agents liegen in
- *   seinem Volume, nie im Docker des Hosts. Veröffentlichte Ports sind in der workbench unter localhost erreichbar.
+ * - docker: eigener Docker-Dienst (docker:dind-rootless: dockerd als Benutzer ohne Rechte in einem eigenen
+ *   Benutzer-Namensraum, nicht privilegiert) im Netzwerk-Namensraum der workbench, also unter 127.0.0.1:2375. Images,
+ *   Container und Volumes der Agents liegen in seinem Volume, nie im Docker des Hosts. Veröffentlichte Ports sind in
+ *   der workbench unter localhost erreichbar. Innere Container können nicht privilegiert laufen (kein sysfs-Mount).
  * - Dienste aus .aideation/workbench.json des Projekts (z. B. Postgres für die Tests), ebenfalls unter localhost.
  *
  * Der Worker steuert alles von aussen (docker compose, docker exec). Git-Push, Merge und Live schalten bleiben beim
@@ -51,10 +53,14 @@ import {
 
 export const WORKBENCH_LABEL = 'aideation.workbench';
 const WORKBENCH_HASH_LABEL = 'aideation.workbench.hash';
-/** Docker-Dienst im Stapel; Version wie das übrige Docker-Setup. */
-export const WORKBENCH_DOCKER_IMAGE = 'docker:29-dind';
+/** Docker-Dienst im Stapel (rootless, Benutzer „rootless“ = uid 1000); Version wie das übrige Docker-Setup. */
+export const WORKBENCH_DOCKER_IMAGE = 'docker:29-dind-rootless';
+const WORKBENCH_DOCKER_PORT = 2375;
 /** Docker im Stapel, aus Sicht der workbench (gemeinsamer Netzwerk-Namensraum). */
-export const WORKBENCH_DOCKER_HOST = 'tcp://127.0.0.1:2375';
+export const WORKBENCH_DOCKER_HOST = `tcp://127.0.0.1:${WORKBENCH_DOCKER_PORT}`;
+/** Socket und Datenordner des rootless dockerd (XDG_RUNTIME_DIR bzw. HOME des Benutzers rootless im Image). */
+const WORKBENCH_DOCKER_SOCKET = 'unix:///run/user/1000/docker.sock';
+const WORKBENCH_DOCKER_DATA = '/home/rootless/.local/share/docker';
 /** Datei im Projekt (Stand des Live-Ordners, nicht des Agent-Worktrees) mit zusätzlichen Diensten. */
 export const WORKBENCH_FILE = '.aideation/workbench.json';
 const COMPOSE_TIMEOUT_MS = 10 * 60_000;
@@ -146,7 +152,7 @@ export function mainCheckout(worktree: string): string {
   try {
     const text = readFileSync(marker, 'utf8');
     const match = /^gitdir:\s*(.+?)[\\/]\.git[\\/]worktrees[\\/][^\\/]+\s*$/m.exec(text);
-    return match ? match[1]! : worktree;
+    return match ? defined(match[1]) : worktree;
   } catch {
     return worktree;
   }
@@ -208,10 +214,17 @@ export function workbenchCompose(worktree: string, options: WorkbenchOptions): R
   const user = sandboxUser(options);
   const workspace = `${hostMount(worktree, platform)}:${SANDBOX_WORKDIR}`;
   const modules = modulesVolume(options.project);
-  const dockerData = `${name}_docker`;
+  // Eigener Name: das Volume des früheren privilegierten dind (agents_<projekt>_docker) gehört root und wäre für den
+  // Benutzer rootless nicht beschreibbar. Ein leeres Volume übernimmt beim ersten Start Eigentümer und Inhalt des Images.
+  const dockerData = `${name}_docker_rootless`;
   const proxy = { HTTPS_PROXY: EGRESS_URL, HTTP_PROXY: EGRESS_URL, https_proxy: EGRESS_URL, http_proxy: EGRESS_URL };
   const noProxy = { NO_PROXY: SANDBOX_NO_PROXY, no_proxy: SANDBOX_NO_PROXY };
   const shared = { network_mode: 'service:workbench', depends_on: ['workbench'], restart: 'unless-stopped' };
+  const limits = {
+    cpus: Number(options.cpus ?? (process.env.DEV_LOG_AGENT_SANDBOX_CPUS?.trim() || '4')),
+    mem_limit: options.memory ?? (process.env.DEV_LOG_AGENT_SANDBOX_MEMORY?.trim() || '6g'),
+    pids_limit: 4096,
+  };
   const services: Record<string, unknown> = {
     workbench: {
       image: options.image ?? SANDBOX_IMAGE,
@@ -220,9 +233,7 @@ export function workbenchCompose(worktree: string, options: WorkbenchOptions): R
       ...(user ? { user } : {}),
       cap_drop: ['ALL'],
       security_opt: ['no-new-privileges:true'],
-      cpus: Number(options.cpus ?? (process.env.DEV_LOG_AGENT_SANDBOX_CPUS?.trim() || '4')),
-      mem_limit: options.memory ?? (process.env.DEV_LOG_AGENT_SANDBOX_MEMORY?.trim() || '6g'),
-      pids_limit: 4096,
+      ...limits,
       restart: 'unless-stopped',
       networks: ['agents'],
       volumes: [workspace, `${modules}:${SANDBOX_WORKDIR}/node_modules`],
@@ -243,16 +254,44 @@ export function workbenchCompose(worktree: string, options: WorkbenchOptions): R
     docker: {
       image: WORKBENCH_DOCKER_IMAGE,
       container_name: workbenchContainer(options.project, 'docker'),
-      privileged: true,
       ...shared,
-      // Ausdrücklich „dockerd“: sonst hängt das Entrypoint-Skript tcp://0.0.0.0:2375 an – erreichbar aus dem ganzen
-      // Agent-Netzwerk, also aus den Stapeln anderer Projekte. Ohne TLS nur auf 127.0.0.1 (gemeinsamer Namensraum).
-      command: ['dockerd', '--host=unix:///var/run/docker.sock', '--host=tcp://127.0.0.1:2375', '--tls=false'],
+      // Rootless statt privilegiert: dockerd läuft als Benutzer rootless in einem eigenen Benutzer-Namensraum. Dafür
+      // reichen SETUID/SETGID (newuidmap/newgidmap sind setuid, darum kein no-new-privileges), /dev/net/tun für das
+      // Netz von rootlesskit (slirp4netns) und das Aufheben von seccomp, AppArmor und den maskierten /proc- und
+      // /sys-Pfaden (sonst lässt sich im neuen Namensraum kein proc einhängen). Ohne privileged sieht der Dienst keine
+      // Geräte des Rechners: Block-Geräte einhängen oder den Docker des Hosts erreichen ist nicht mehr möglich.
+      cap_drop: ['ALL'],
+      cap_add: ['SETUID', 'SETGID'],
+      devices: ['/dev/net/tun:/dev/net/tun'],
+      security_opt: ['seccomp=unconfined', 'apparmor=unconfined', 'systempaths=unconfined'],
+      // Ohne cgroups im rootless Docker gelten innere Grenzen nicht; die Grenzen dieses Containers fangen das auf.
+      ...limits,
+      // Ausdrücklich „dockerd“: sonst hängt das Entrypoint-Skript tcp://0.0.0.0:2375 an und veröffentlicht den Port im
+      // ganzen Agent-Netzwerk, also für die Stapel anderer Projekte. dockerd lauscht im Netz-Namensraum von rootlesskit
+      // nur auf 127.0.0.1 (innere Container erreichen die API so nicht); rootlesskit reicht genau 127.0.0.1:2375 der
+      // workbench dorthin weiter. Ohne TLS (gemeinsamer Namensraum).
+      command: [
+        'dockerd',
+        `--host=${WORKBENCH_DOCKER_SOCKET}`,
+        `--host=tcp://127.0.0.1:${WORKBENCH_DOCKER_PORT}`,
+        '--tls=false',
+      ],
       // up --wait wartet so, bis Docker antwortet – der erste Befehl darf es schon brauchen.
-      healthcheck: { test: ['CMD', 'docker', 'info'], interval: '2s', timeout: '5s', retries: 60, start_period: '5s' },
-      environment: { DOCKER_TLS_CERTDIR: '', ...proxy, ...noProxy },
+      healthcheck: {
+        test: ['CMD', 'docker', '-H', WORKBENCH_DOCKER_HOST, 'info'],
+        interval: '2s',
+        timeout: '5s',
+        retries: 60,
+        start_period: '5s',
+      },
+      environment: {
+        DOCKER_TLS_CERTDIR: '',
+        DOCKERD_ROOTLESS_ROOTLESSKIT_FLAGS: `-p 127.0.0.1:${WORKBENCH_DOCKER_PORT}:${WORKBENCH_DOCKER_PORT}/tcp`,
+        ...proxy,
+        ...noProxy,
+      },
       // Gleicher Pfad wie in der workbench: Bind-Mounts aus Compose-Dateien der Agents (./src:/app) gelten hier.
-      volumes: [workspace, `${dockerData}:/var/lib/docker`],
+      volumes: [workspace, `${dockerData}:${WORKBENCH_DOCKER_DATA}`],
       labels: { [WORKBENCH_LABEL]: options.project },
     },
   };
@@ -287,11 +326,20 @@ export function workbenchHash(compose: Record<string, unknown>): string {
 
 /** Ablage der Compose-Dateien (Konfiguration des Workers, nicht im Projekt und nicht für Agents erreichbar). */
 export function workbenchDirectory(environment: NodeJS.ProcessEnv = process.env): string {
-  return environment.DEV_LOG_WORKBENCH_DIR?.trim() || join(homedir(), '.config', 'aideation', 'workbench');
+  const configured = environment.DEV_LOG_WORKBENCH_DIR?.trim();
+  if (configured) return configured;
+  // Tests schreiben nie in die echte Konfiguration des Workers.
+  if (environment.NODE_TEST_CONTEXT) return join(tmpdir(), 'aideation-workbench-test');
+  return join(homedir(), '.config', 'aideation', 'workbench');
 }
 
 const failed = (error: unknown): CommandResult => ({ exitCode: 1, durationMs: 0, output: String(error) });
-const ready = new Map<string, Promise<string | null>>();
+/**
+ * Zuletzt gestarteter Fingerabdruck je Projekt. Je Projekt gibt es nur einen Stapel: Ein Schlüssel „Name:Hash“ hielte
+ * einen früheren Stand (z. B. den Agent-Worktree) für bereit, nachdem das Merge-Gate den Stapel mit dem Ordner der
+ * Menschen neu erstellt hat – der nächste Agent hätte dann dort gearbeitet.
+ */
+const ready = new Map<string, { hash: string; pending: Promise<string | null> }>();
 
 /**
  * Startet den Stapel, falls er fehlt oder seine Konfiguration veraltet ist (Label mit dem Fingerabdruck). Liefert ein
@@ -305,16 +353,17 @@ export function ensureWorkbench(
   const compose = workbenchCompose(worktree, options);
   const hash = workbenchHash(compose);
   const name = workbenchName(options.project);
-  const key = `${name}:${hash}`;
-  let pending = ready.get(key);
-  if (!pending) {
-    pending = startWorkbench(docker, worktree, options, compose, hash).then((problem) => {
-      if (problem) ready.delete(key);
+  const cached = ready.get(name);
+  if (cached?.hash === hash) return cached.pending;
+  const entry = {
+    hash,
+    pending: startWorkbench(docker, worktree, options, compose, hash).then((problem) => {
+      if (problem && ready.get(name) === entry) ready.delete(name);
       return problem;
-    });
-    ready.set(key, pending);
-  }
-  return pending;
+    }),
+  };
+  ready.set(name, entry);
+  return entry.pending;
 }
 
 /** Nur für Tests: vergisst gestartete Stapel. */
@@ -349,7 +398,8 @@ async function startWorkbench(
   try {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const labelled = structuredClone(compose) as { services: Record<string, { labels?: Record<string, string> }> };
-    labelled.services.workbench!.labels = { ...labelled.services.workbench!.labels, [WORKBENCH_HASH_LABEL]: hash };
+    const service = defined(labelled.services.workbench, 'Dienst workbench');
+    service.labels = { ...service.labels, [WORKBENCH_HASH_LABEL]: hash };
     writeFileSync(file, `${JSON.stringify(labelled, null, 2)}\n`, { mode: 0o600 });
   } catch (error) {
     return `Arbeitscontainer: Compose-Datei liess sich nicht schreiben (${file}). ${String(error)}`;
@@ -477,7 +527,7 @@ export async function runInWorkbench(
       const installed = await install;
       if (installed.exitCode !== 0) {
         const message = `Arbeitscontainer: Abhängigkeiten liessen sich nicht installieren (Exit-Code ${installed.exitCode}). Befehl nicht gestartet.\n${installed.output.trim().slice(-800)}`;
-        noteProblem(options.project, message.split('\n')[0]!);
+        noteProblem(options.project, defined(message.split('\n')[0]));
         return blocked(message, redactWith);
       }
     }
@@ -496,7 +546,7 @@ export async function runInWorkbench(
         name,
         'sh',
         '-c',
-        `p=$(cat ${file} 2>/dev/null) && kill -TERM -- -"$p" 2>/dev/null; rm -f ${file}`,
+        `p=$(cat ${file} 2>/dev/null) && kill -TERM -"$p" 2>/dev/null; rm -f ${file}`,
       ],
       worktree,
       { timeoutMs: KILL_TIMEOUT_MS, env },
@@ -525,17 +575,47 @@ export async function runInWorkbench(
   };
 }
 
-/** Beendet den Stapel eines Projekts (Compose-Projekt aus der abgelegten Datei); Volumes bleiben. */
-export async function stopWorkbench(
-  project: string,
-  worktree: string,
+/**
+ * Beendet alle Läufe eines Vorgängers in den Arbeitscontainern (Prozessgruppen aus den pid-Dateien), zuerst mit TERM,
+ * nach ein paar Sekunden mit KILL. Nötig beim Start des Workers: killPreviousProcesses beendet nur den Client von
+ * „docker exec“ auf dem Rechner, der Prozess im Container (Agent, Test, npm) liefe sonst neben dem neu eingeplanten
+ * Lauf im selben Worktree weiter. Gruppe 1 (sleep infinity, hält den Container) wird nie angefasst.
+ */
+export async function stopLeftoverWorkbenchRuns(
   docker: CommandExecutor = runCommand,
-): Promise<CommandResult> {
-  const name = workbenchName(project);
-  const file = join(workbenchDirectory(), `${name}.json`);
-  if (!existsSync(file)) return { exitCode: 0, durationMs: 0, output: 'Kein Arbeitscontainer.\n' };
-  return docker(['docker', 'compose', '-f', file, '-p', name, 'down'], worktree, {
-    timeoutMs: COMPOSE_TIMEOUT_MS,
-    env: dockerClientEnvironment(),
-  }).catch(failed);
+  cwd: string = process.cwd(),
+): Promise<number> {
+  const env = dockerClientEnvironment();
+  const list = await docker(['docker', 'ps', '--filter', `label=${WORKBENCH_LABEL}`, '--format', '{{.Names}}'], cwd, {
+    timeoutMs: CHECK_TIMEOUT_MS,
+    env,
+  }).catch(() => null);
+  if (!list || list.exitCode !== 0) return 0;
+  const containers = list.output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^agents_[a-z0-9-]+_workbench$/.test(line));
+  const script = [
+    'groups=""',
+    'for f in /tmp/aideation-run-*.pid; do',
+    '  [ -f "$f" ] || continue',
+    '  p=$(cat "$f" 2>/dev/null); rm -f "$f"',
+    '  case "$p" in ""|*[!0-9]*) continue;; esac',
+    '  [ "$p" -gt 1 ] || continue',
+    '  kill -TERM -"$p" 2>/dev/null && groups="$groups $p"',
+    'done',
+    '[ -n "$groups" ] || exit 0',
+    'sleep 3',
+    'for p in $groups; do kill -KILL -"$p" 2>/dev/null; done',
+    'echo $groups | wc -w',
+  ].join('\n');
+  let stopped = 0;
+  for (const container of containers) {
+    const result = await docker(['docker', 'exec', container, 'sh', '-c', script], cwd, {
+      timeoutMs: KILL_TIMEOUT_MS + 5_000,
+      env,
+    }).catch(() => null);
+    if (result?.exitCode === 0) stopped += Number.parseInt(result.output.trim(), 10) || 0;
+  }
+  return stopped;
 }

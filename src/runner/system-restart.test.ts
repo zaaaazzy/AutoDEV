@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { CommandExecutor } from '../core/command.js';
 import {
+  cancelRestart,
   completeRestart,
   composeEnvironment,
   DEPENDENCY_COMMAND,
@@ -27,6 +28,12 @@ function memoryPool() {
       if (sql.startsWith('SELECT')) {
         const value = rows.get(String(values[0]));
         return { rows: value === undefined ? [] : [{ value }] };
+      }
+      // Vergleich-und-Tausch (cancelRestart, claim im Worker): nur schreiben, wenn der alte Wert noch steht.
+      if (sql.startsWith('UPDATE')) {
+        if (rows.get(String(values[0])) !== String(values[2])) return { rows: [] };
+        rows.set(String(values[0]), String(values[1]));
+        return { rows: [{ value: values[1] }] };
       }
       rows.set(String(values[0]), String(values[1]));
       return { rows: [] };
@@ -107,6 +114,43 @@ test('Neustart: wartet auf laufende Aufgaben, aber nicht unbegrenzt', async () =
   assert.match((await readRestart(pool))?.message ?? '', /Wartet auf 2 laufende Aufgaben/);
   const late = () => new Date(requested.getTime() + 16 * 60_000);
   assert.equal(await processRestart(pool, '/x', () => 2, ok, late, { health: async () => true }), 'restart');
+});
+
+test('Neustart abbrechen: nur solange der Worker wartet, danach nicht mehr', async () => {
+  const pool = memoryPool();
+  assert.deepEqual(await cancelRestart(pool, 'Patrick'), { state: null, cancelled: false }, 'ohne Anforderung nichts');
+  await requestRestart(pool, 'Patrick', new Date('2026-10-31T00:00:00Z'));
+  const cancelled = await cancelRestart(pool, 'Patrick', new Date('2026-10-31T00:01:00Z'));
+  assert.equal(cancelled.cancelled, true);
+  assert.equal(cancelled.state?.status, 'cancelled');
+  assert.equal(cancelled.state?.cancelledBy, 'Patrick');
+  assert.equal(cancelled.state?.finishedAt, '2026-10-31T00:01:00.000Z');
+  assert.match(cancelled.state?.message ?? '', /Abgebrochen von Patrick/);
+  // Der Worker baut danach nichts und startet nicht neu; eine neue Anforderung ist sofort möglich.
+  assert.equal(await processRestart(pool, '/x', () => 0, ok), 'idle');
+  assert.equal((await readRestart(pool))?.status, 'cancelled');
+  assert.equal((await requestRestart(pool, 'Patrick')).created, true);
+  // Ab „building“ greift der Abbruch nicht mehr; die Antwort nennt den tatsächlichen Stand.
+  const state = await readRestart(pool);
+  pool.rows.set('system:restart', JSON.stringify({ ...state, status: 'building' }));
+  const late = await cancelRestart(pool, 'Patrick');
+  assert.equal(late.cancelled, false);
+  assert.equal(late.state?.status, 'building');
+});
+
+test('Neustart abbrechen: ein Abbruch während der Git-Prüfung gewinnt gegen den Neubau', async () => {
+  const pool = memoryPool();
+  await requestRestart(pool, 'Patrick');
+  const calls: string[][] = [];
+  // Während der Worker den Git-Stand prüft, kommt der Abbruch aus der Oberfläche.
+  const execute: CommandExecutor = async (command, cwd) => {
+    calls.push(command);
+    if (command[0] === 'git' && command[1] === 'rev-parse') await cancelRestart(pool, 'Patrick');
+    return ok(command, cwd);
+  };
+  assert.equal(await processRestart(pool, '/x', () => 0, execute, undefined, { health: async () => true }), 'idle');
+  assert.equal((await readRestart(pool))?.status, 'cancelled', 'der Abbruch bleibt stehen');
+  assert.ok(!calls.some((command) => command.includes('--build')), 'kein docker compose build');
 });
 
 test('Neustart: fehlgeschlagener Build lässt den Worker weiterlaufen und meldet die Ausgabe', async () => {

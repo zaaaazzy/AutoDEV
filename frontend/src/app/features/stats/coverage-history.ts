@@ -1,5 +1,6 @@
 import { COVERAGE_AREA_KEYS, COVERAGE_AREA_LABELS } from '../../../../../src/core/coverage-areas.js';
 import type { CoverageAreaKey, CoverageHistoryPoint } from '../../core/models.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 /** Ziel der Zeilenabdeckung (wie beim Tester und im Dashboard). */
 export const COVERAGE_TARGET = 75;
@@ -37,6 +38,8 @@ export function coverageSeries(history: CoverageHistoryPoint[]): CoverageSeries[
       });
     if (!points.length) return [];
     const path = points.map((point, index) => `${index ? 'L' : 'M'}${point.x.toFixed(1)} ${point.y.toFixed(1)}`);
-    return [{ area, label: COVERAGE_AREA_LABELS[area], points, path: path.join(' '), last: points.at(-1)!.lines }];
+    return [
+      { area, label: COVERAGE_AREA_LABELS[area], points, path: path.join(' '), last: defined(points.at(-1)).lines },
+    ];
   });
 }

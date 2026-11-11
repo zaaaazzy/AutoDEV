@@ -1,7 +1,7 @@
 # Sandbox für Agents (src/core/sandbox.ts und workbench.ts, Schalter DEV_LOG_AGENT_SANDBOX): Image des
 # Arbeitscontainers je Projekt (workbench, Standard) und der kurzlebigen Container je Lauf (docker). Eingebunden wird
 # nur der Worktree (/workspace) und node_modules als Volume je Projekt. Docker-CLI, Compose und Buildx sprechen im
-# Arbeitscontainer mit dem eigenen Docker des Stapels (docker:dind), nie mit dem des Hosts.
+# Arbeitscontainer mit dem eigenen Docker des Stapels (docker:dind-rootless), nie mit dem des Hosts.
 # Gebaut aus dem Wurzelordner: docker build -t aideation-agent -f deploy/agent/Dockerfile .
 
 # Wächter (agent-guard.ts) als eine Datei bündeln: der PreToolUse-Hook prüft auch im Container jeden Zugriff.
@@ -62,8 +62,13 @@ COPY --from=guard /out/agent-guard.mjs /out/egress-proxy.mjs /out/visual-capture
 # ESM-Bündel lösen „playwright“ über node_modules neben sich auf: dort liegen die global installierten Pakete.
 RUN ln -s /usr/local/lib/node_modules /opt/aideation/node_modules
 # Ohne root: Der Container läuft mit der UID des Worker-Benutzers (--user), die hier keinen Eintrag hat. Home und
-# Arbeitsordner sind darum für alle beschreibbar; der Container ist kurzlebig (--rm), nichts bleibt liegen.
-RUN mkdir -p /home/agent /workspace && chmod 1777 /home/agent /workspace
+# Arbeitsordner sind darum für alle beschreibbar; der Container ist kurzlebig (--rm), nichts bleibt liegen. Nichts
+# darin darf root gehören (ein root-eigenes ~/.npm liess jedes npm der Agents mit EACCES scheitern).
+RUN rm -rf /home/agent/.npm && mkdir -p /home/agent /workspace && chmod 1777 /home/agent /workspace
+# npm-Cache in /tmp wie in sandboxRunArgs (npm_config_cache): greift auch, wenn ein Worker mit älterem Code den
+# Container ohne -e npm_config_cache startet (Tester: EACCES auf /home/agent/.npm/_cacache). Erst nach „npm install -g“
+# gesetzt, damit root dort kein Cache anlegt.
+ENV npm_config_cache=/tmp/npm-cache
 USER pwuser
 WORKDIR /workspace
 ENTRYPOINT ["/usr/bin/tini", "--"]

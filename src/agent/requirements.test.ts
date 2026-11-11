@@ -4,7 +4,7 @@ import type { Pool } from 'pg';
 import type { CommandExecutor } from '../core/command.js';
 import { beginShutdown } from '../core/shutdown.js';
 import { shortTitle, TITLE_MAX } from '../core/validation.js';
-import { UNTRUSTED_HINT } from '../runner/hoster.js';
+import { UNTRUSTED_HINT } from '../core/bug-trust.js';
 import { buildRequirementPrompt, draftRequirements, runAuthorAgent, splitTitle } from './requirements.js';
 
 test('Auftragsautor: „@@TITEL:“ wird zum kurzen Titel und verschwindet aus der Anforderung', () => {
@@ -415,7 +415,14 @@ function draftPool(overrides: [RegExp, Answer][] = []) {
     ...overrides,
     [/SET status = 'drafting'/, [{ ...idea, source: 'manual', category: 'backend' }]],
     [/FROM ideation_comments/, [{ line: 'Anna: bitte mit Filter' }]],
-    [/percentile_cont/, [{ count: '2', hours: '0.5', tokens: '1000' }]],
+    // Ist-Referenz (loadActualReference): zwei erledigte Aufträge derselben Kategorie und Art.
+    [
+      /d\.status = 'done' AND d\.category/,
+      [
+        { hours: '0.5', tokens: '1000', description: 'x' },
+        { hours: '0.5', tokens: '1000', description: 'y' },
+      ],
+    ],
     [/FROM bugs/, BUGS],
     [/FROM agents\b/, [CLAUDE_AGENT]],
     ...PROJECT,

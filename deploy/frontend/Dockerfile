@@ -13,11 +13,18 @@ COPY src/core/cron.ts ./src/core/cron.ts
 COPY src/core/development-transitions.ts ./src/core/development-transitions.ts
 # Sprint-Regeln (Statuswechsel, Löschen, Abschluss) – dieselben wie in PATCH/DELETE /sprints/:id.
 COPY src/core/sprint-rules.ts ./src/core/sprint-rules.ts
+# Gemeinsame Typen (Status, Budget, Modell-Routing) und defined() – siehe CLAUDE.md, „Gemeinsame Typen“.
+COPY src/core/status.ts ./src/core/status.ts
+COPY src/core/shared-types.ts ./src/core/shared-types.ts
+COPY src/core/defined.ts ./src/core/defined.ts
+# Schätzungs-Überschreitung und feste Coverage-Bereiche (Sprint 30) – dieselben Schlüssel wie Worker und Migrationen.
+COPY src/core/estimate-overrun.ts ./src/core/estimate-overrun.ts
+COPY src/core/coverage-areas.ts ./src/core/coverage-areas.ts
 RUN npm run build:ui
 
 # Ohne root schon im Master-Prozess: PID-Datei und Zwischenablagen unter /tmp, damit läuft der Container auch mit
 # read_only (docker-compose.yml, /tmp als tmpfs). Port 8080/8081 braucht kein root.
-FROM nginxinc/nginx-unprivileged:1.27.3-alpine
+FROM nginxinc/nginx-unprivileged:1.31.7-alpine
 COPY deploy/frontend/nginx.conf /etc/nginx/conf.d/default.conf
 # Ausserhalb von conf.d: wird nur in den server-Blöcken von nginx.conf eingebunden.
 COPY deploy/frontend/app-locations.conf /etc/nginx/app-locations.conf

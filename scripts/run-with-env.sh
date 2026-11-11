@@ -1,6 +1,6 @@
 #!/bin/bash
 # Startet einen Hintergrunddienst (Worker, Wächter) mit den Zugängen aus einer geschützten Env-Datei.
-# Aufruf (aus Plist bzw. systemd-Unit): /bin/bash scripts/run-with-env.sh <env-datei> <befehl> [argumente …]
+# Aufruf (aus der systemd-Unit, scripts/install-worker-linux.sh): /bin/bash scripts/run-with-env.sh <env-datei> <befehl> [argumente …]
 # Die Datei hat Zeilen KEY=Wert; nichts wird ausgewertet. Fehlt sie oder dürfen andere sie lesen, bricht der Start
 # mit Fehler ab, statt still ohne Zugänge zu laufen.
 set -euo pipefail

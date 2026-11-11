@@ -23,6 +23,7 @@ import {
   parseVisualSettings,
   type VisualSettings,
 } from './visual-settings.js';
+import { defined } from '../core/defined.js';
 
 export {
   type Credentials,
@@ -280,7 +281,7 @@ export async function runVisualStep(input: VisualStepInput): Promise<CommandResu
     const reason = timedOut
       ? `Zeitlimit von ${Math.round(timeoutMs / 60_000)} Minuten überschritten`
       : error instanceof Error
-        ? error.message.split('\n')[0]!.slice(0, 300)
+        ? defined(error.message.split('\n')[0]).slice(0, 300)
         : String(error);
     const note = hideSecrets(`${UNAVAILABLE}: ${reason}`, secrets);
     const finding: VisualFinding = { check: 'step', text: 'Visuelle Prüfung', met: false, manual: true, note };

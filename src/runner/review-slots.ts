@@ -4,9 +4,10 @@ import { maskSecrets } from '../core/secret-mask.js';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
-import { DEVELOPMENT_STATUS } from '../core/status.js';
+import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
 import { sprintBranchOf } from './git-sync.js';
 import { gitEnvironment } from './project-command.js';
+import { defined } from '../core/defined.js';
 
 /**
  * Review-Container: projektübergreifend geteilte Docker-Container, die der Administrator freigibt (einer ist
@@ -266,7 +267,7 @@ export class ReviewSlots {
       )
     ).rows.filter((item) => !shown.has(item.id));
     for (const [index, item] of waiting.slice(0, free.length).entries()) {
-      const slot = free[index]!;
+      const slot = defined(free[index]);
       await update(this.pool, slot.slot, {
         status: 'requested',
         project_slug: item.projectSlug,
@@ -319,7 +320,7 @@ export class ReviewSlots {
     const sprint = (
       await this.pool.query<{ name: string; branch: string | null }>(
         `SELECT s.name, s.branch FROM development_items d JOIN sprints s ON s.id = d.sprint_id
-          WHERE d.id = $1 AND s.status IN ('planned', 'active')`,
+          WHERE d.id = $1 AND s.status IN ('${SPRINT_STATUS.planned}', '${SPRINT_STATUS.active}')`,
         [developmentId],
       )
     ).rows[0];

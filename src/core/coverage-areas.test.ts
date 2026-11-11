@@ -49,7 +49,7 @@ test('Vollständiger Lauf: Zeilen, Verzweigungen und Funktionen gesetzt', () => 
   assert.equal(isCompleteCoverage({ lines: 80, branches: 60, functions: null }), false);
 });
 
-test('Migration 24: CHECK auf test_coverage_areas.area enthält genau die Schlüssel aus dem Code', () => {
+test('Migration 25: CHECK auf test_coverage_areas.area enthält genau die Schlüssel aus dem Code', () => {
   const sql = MIGRATIONS.find((step) => step.name === 'coverage-feste-bereiche')?.sql ?? '';
   const check = /CHECK \(area IN \(([^)]*)\)\) NOT VALID/.exec(sql)?.[1];
   assert.ok(check, 'CHECK-Constraint vorhanden');
@@ -57,7 +57,7 @@ test('Migration 24: CHECK auf test_coverage_areas.area enthält genau die Schlü
     check.split(',').map((entry) => entry.trim().replace(/^'|'$/g, '')),
     [...COVERAGE_AREA_KEYS],
   );
-  // Die Zuordnung der Migration 23 kennt jeden damaligen Schlüssel als Ergebnis („auftrag“ kam erst mit 24).
+  // Die Zuordnung der Migration 24 kennt jeden damaligen Schlüssel als Ergebnis („auftrag“ kam erst mit 24).
   const legacy = MIGRATIONS.find((step) => step.name === 'testabdeckung-feste-bereiche')?.sql ?? '';
   for (const key of COVERAGE_AREA_KEYS.filter((key) => key !== 'auftrag')) {
     assert.ok(legacy.includes(`THEN '${key}'`), key);

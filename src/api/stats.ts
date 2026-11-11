@@ -4,14 +4,22 @@ import { access } from './access.js';
 import { localTimeZone } from '../core/time-zone.js';
 import { parseProjectSlug } from '../core/validation.js';
 import {
+  type Calibration,
+  calibratedHours,
   calibratedSql,
+  calibratedTokens,
+  calibrationSummary,
+  estimateHit,
   type EstimateOverrun,
+  type HitRate,
+  hitRate,
   loadCalibration,
   loadEstimateOverruns,
 } from '../core/estimate-calibration.js';
 import { realFailureSql } from '../core/interrupted-steps.js';
 import { logged } from '../core/log.js';
 import { BUG_CATEGORY_VALUES, type BugCategoryValue } from '../core/bug-category-values.js';
+import { AGENT_STEP_STATUS, BUG_STATUS, DEVELOPMENT_STATUS, SPRINT_STATUS, TEST_RUN_STATUS } from '../core/status.js';
 
 type CountRow = { key: string; count: string };
 const counts = (rows: CountRow[]): Record<string, number> =>
@@ -30,7 +38,7 @@ async function sprintStats(pool: Pool, slug: string): Promise<Record<string, unk
     await pool.query<{ id: string; name: string; startDate: string; endDate: string | null }>(
       `SELECT id, name, to_char(COALESCE(start_date, (created_at AT TIME ZONE $2::text)::date), 'YYYY-MM-DD') AS "startDate",
             to_char(end_date, 'YYYY-MM-DD') AS "endDate"
-       FROM sprints WHERE project_slug = $1 AND status = 'active'`,
+       FROM sprints WHERE project_slug = $1 AND status = '${SPRINT_STATUS.active}'`,
       [slug, timeZone],
     )
   ).rows[0];
@@ -53,7 +61,7 @@ async function sprintStats(pool: Pool, slug: string): Promise<Record<string, unk
   );
   const progress = (
     await pool.query<{ total: string; done: string }>(
-      `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'done') AS done FROM development_items WHERE sprint_id = $1`,
+      `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = '${DEVELOPMENT_STATUS.done}') AS done FROM development_items WHERE sprint_id = $1`,
       [active.id],
     )
   ).rows[0];
@@ -101,8 +109,8 @@ export async function bugCategoryStats(pool: Pick<Pool, 'query'>, slug: string):
       buried: string;
     }>(
       `SELECT b.bug_category AS category, b.sprint_id AS "sprintId", s.name AS "sprintName",
-              COUNT(*) FILTER (WHERE b.status IN ('open', 'in_progress')) AS open,
-              COUNT(*) FILTER (WHERE b.status NOT IN ('open', 'in_progress')) AS buried
+              COUNT(*) FILTER (WHERE b.status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')) AS open,
+              COUNT(*) FILTER (WHERE b.status NOT IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')) AS buried
          FROM bugs b LEFT JOIN sprints s ON s.id = b.sprint_id
         WHERE b.project_slug = $1
         GROUP BY b.bug_category, b.sprint_id, s.name, s.created_at
@@ -142,7 +150,7 @@ export function retrospectiveInput(pool: Pick<Pool, 'query'>, slug: string): Pro
 export async function collectStats(pool: Pool, slug: string): Promise<Record<string, unknown>> {
   // Geschätzte Stunden und Tokens in Agent-Stunden bzw. gemessenen Tokens (kalibriert), vergleichbar mit „actual“.
   const calibration = await loadCalibration(pool, slug);
-  const [orders, kinds, ideas, bugs, severities, effort, tests, agentSteps, sprint, velocity, actual, testTotal] =
+  const [orders, kinds, ideas, bugs, severities, effort, tests, agentSteps, sprint, velocity, actual, testTotal, hits] =
     await Promise.all([
       pool.query<CountRow>(
         'SELECT status AS key, COUNT(*) AS count FROM development_items WHERE project_slug = $1 GROUP BY status',
@@ -162,12 +170,12 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
       ),
       pool.query<CountRow>(
         `SELECT severity AS key, COUNT(*) AS count FROM bugs
-        WHERE project_slug = $1 AND status IN ('open', 'in_progress') GROUP BY severity`,
+        WHERE project_slug = $1 AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}') GROUP BY severity`,
         [slug],
       ),
       pool.query<{ planned: string; done: string; tokens: string }>(
         `SELECT COALESCE(SUM(${calibratedSql('effort_hours', calibration)}), 0) AS planned,
-              COALESCE(SUM(${calibratedSql('effort_hours', calibration)}) FILTER (WHERE status = 'done'), 0) AS done,
+              COALESCE(SUM(${calibratedSql('effort_hours', calibration)}) FILTER (WHERE status = '${DEVELOPMENT_STATUS.done}'), 0) AS done,
               COALESCE(SUM(${calibratedSql('token_estimate', calibration)}), 0) AS tokens
          FROM development_items WHERE project_slug = $1`,
         [slug],
@@ -179,9 +187,9 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
       ),
       pool.query<{ agent: string; passed: string; failed: string; skipped: string }>(
         `SELECT st.agent_name AS agent,
-              COUNT(*) FILTER (WHERE st.status = 'passed') AS passed,
+              COUNT(*) FILTER (WHERE st.status = '${AGENT_STEP_STATUS.passed}') AS passed,
               COUNT(*) FILTER (WHERE ${realFailureSql('st')}) AS failed,
-              COUNT(*) FILTER (WHERE st.status = 'skipped') AS skipped
+              COUNT(*) FILTER (WHERE st.status = '${AGENT_STEP_STATUS.skipped}') AS skipped
          FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
         WHERE r.project_slug = $1 GROUP BY st.agent_name ORDER BY st.agent_name`,
         [slug],
@@ -190,6 +198,7 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
       // Schätzfehler je Sprint: Median von Ist ÷ Schätzung (roh, wie geschätzt) der erledigten Aufträge mit Messung;
       // ohne solche Aufträge null statt 0.
       pool.query<{
+        id: string;
         name: string;
         status: string;
         total: string;
@@ -199,8 +208,10 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
         tokenError: number | null;
         errorSamples: string;
       }>(
-        `SELECT s.name, s.status, COUNT(d.id) AS total, COUNT(d.id) FILTER (WHERE d.status = 'done') AS done,
-              COALESCE(SUM(${calibratedSql('effort_hours', calibration, 'd')}) FILTER (WHERE d.status = 'done'), 0) AS hours,
+        `SELECT s.id, s.name, s.status, COUNT(d.id) AS total,
+              COUNT(d.id) FILTER (WHERE d.status = '${DEVELOPMENT_STATUS.done}') AS done,
+              COALESCE(SUM(${calibratedSql('effort_hours', calibration, 'd')})
+                FILTER (WHERE d.status = '${DEVELOPMENT_STATUS.done}'), 0) AS hours,
               percentile_cont(0.5) WITHIN GROUP (ORDER BY m.hours / d.effort_hours)
                 FILTER (WHERE m.hours > 0 AND d.effort_hours > 0) AS "hourError",
               percentile_cont(0.5) WITHIN GROUP (ORDER BY m.tokens / d.token_estimate)
@@ -222,12 +233,24 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
         [slug],
       ),
       pool.query<{ count: string }>('SELECT COUNT(*) AS count FROM test_runs WHERE project_slug = $1', [slug]),
+      // Trefferquote je Sprint: erledigte Aufträge mit Schätzung und gemessenem Verbrauch aller Agent-Schritte.
+      pool.query<HitRow>(
+        `SELECT d.sprint_id AS "sprintId", d.effort_hours AS "estHours", d.token_estimate AS "estTokens",
+                d.estimate_source AS source, SUM(st.duration_ms) / 3600000.0 AS hours, SUM(st.tokens) AS tokens
+           FROM development_items d
+           JOIN agent_runs r ON r.development_id = d.id
+           JOIN agent_run_steps st ON st.run_id = r.id
+          WHERE d.project_slug = $1 AND d.status = 'done' AND d.kind <> 'express' AND d.sprint_id IS NOT NULL
+          GROUP BY d.id`,
+        [slug],
+      ),
     ]);
+  const hitsBySprint = sprintHitRates(hits.rows, calibration);
   // Laufende Aufträge über dem Dreifachen ihrer kalibrierten Schätzung; ein Fehler hier lässt die Statistik stehen.
   const overruns = await loadEstimateOverruns(pool, slug).catch(logged('stats', [] as EstimateOverrun[]));
   const { bugsByCategory, bugsByCategorySprint } = await bugCategoryStats(pool, slug);
 
-  const finishedTests = tests.rows.filter((run) => run.status !== 'running');
+  const finishedTests = tests.rows.filter((run) => run.status !== TEST_RUN_STATUS.running);
   return {
     orders: counts(orders.rows),
     kinds: counts(kinds.rows),
@@ -250,7 +273,9 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
       total: Number(testTotal.rows[0]?.count ?? 0),
       recent: [...tests.rows].reverse(),
       passRate: finishedTests.length
-        ? Math.round((finishedTests.filter((run) => run.status === 'passed').length / finishedTests.length) * 100)
+        ? Math.round(
+            (finishedTests.filter((run) => run.status === TEST_RUN_STATUS.passed).length / finishedTests.length) * 100,
+          )
         : null,
     },
     agents: agentSteps.rows.map((row) => ({
@@ -261,17 +286,49 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
     })),
     sprint,
     velocity: [...velocity.rows].reverse().map((row) => ({
+      id: row.id,
       name: row.name,
       status: row.status,
       total: Number(row.total),
       done: Number(row.done),
       hours: Number(row.hours),
+      hitRate: hitsBySprint.get(row.id) ?? hitRate([]),
       hourError: errorValue(row.hourError),
       tokenError: errorValue(row.tokenError),
       errorSamples: Number(row.errorSamples ?? 0),
     })),
+    // Korrekturfaktor je Herkunft (Median Ist ÷ Schätzung) samt Anzahl der Messwerte.
+    calibration: calibrationSummary(calibration),
     overruns,
   };
+}
+
+/** Erledigter Auftrag eines Sprints: gespeicherte Schätzung samt Herkunft und gemessener Verbrauch. */
+export type HitRow = {
+  sprintId: string;
+  estHours: number | string | null;
+  estTokens: number | string | null;
+  source: string | null;
+  hours: number | string | null;
+  tokens: number | string | null;
+};
+
+const numberOrNull = (value: number | string | null): number | null => (value === null ? null : Number(value));
+
+/** Treffer je Sprint: Stunden und Tokens zwischen 0,5- und 2,0-mal der kalibrierten Schätzung. */
+export function sprintHitRates(rows: HitRow[], calibration: Calibration): Map<string, HitRate> {
+  const results = new Map<string, (boolean | null)[]>();
+  for (const row of rows) {
+    const hit = estimateHit(
+      { hours: numberOrNull(row.hours), tokens: numberOrNull(row.tokens) },
+      {
+        hours: calibratedHours(numberOrNull(row.estHours), row.source, calibration),
+        tokens: calibratedTokens(numberOrNull(row.estTokens), row.source, calibration),
+      },
+    );
+    results.set(row.sprintId, [...(results.get(row.sprintId) ?? []), hit]);
+  }
+  return new Map([...results].map(([sprintId, list]) => [sprintId, hitRate(list)]));
 }
 
 export function registerStatsRoutes(app: Router, pool: Pool): void {

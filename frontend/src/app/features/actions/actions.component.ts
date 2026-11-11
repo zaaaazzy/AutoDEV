@@ -1,8 +1,10 @@
 import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
+import { FocusOnce } from '../../core/focus-once.js';
 import type { AcceptanceCheck, DevelopmentItem, TestEvidence } from '../../core/models.js';
 import { SettingsGroups } from '../settings/settings-group.js';
+import { DEVELOPMENT_STATUS } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { AcceptanceTicks } from '../../shared/acceptance-ticks.js';
 import type { AttentionCard, CardStep } from '../../shared/attention-card.js';
@@ -70,10 +72,12 @@ export class ActionsComponent {
 
   constructor() {
     // Aus einem Link (#actions/<id> oder umgeleitet von #development/<id>): Die Tabelle klappt die Zeile auf,
-    // hier wird nur hingescrollt.
+    // hier wird nur hingescrollt – einmal je Link, nicht bei jedem Nachladen im Hintergrund (sonst springt die Seite
+    // beim Lesen alle paar Sekunden zurück an den Anfang des Auftrags).
+    const focus = new FocusOnce();
     effect(() => {
       const id = this.store.focusId();
-      if (!id || !this.store.attentionIds().has(id)) return;
+      if (!focus.take(id, !!id && this.store.attentionIds().has(id))) return;
       untracked(() =>
         globalThis.setTimeout(() => {
           const target = document.getElementById(`order-${id}`)?.closest('tr')?.previousElementSibling;
@@ -200,7 +204,7 @@ export class ActionsComponent {
   /** Antwortfeld nur, wo eine Antwort den Auftrag weiterbringt (blockiert und neu startbar). */
   protected canAnswer(item: DevelopmentItem, step: CardStep): boolean {
     return (
-      item.status === 'blocked' &&
+      item.status === DEVELOPMENT_STATUS.blocked &&
       item.kind !== 'express' &&
       this.auth.can('run') &&
       (step === 'retry' || step === 'suggestion' || step === 'task')

@@ -6,6 +6,7 @@ import { type CommandExecutor, runCommand } from '../core/command.js';
 import { acquireTree } from '../core/project-lock.js';
 import { resumeBlockedByBug } from './autofix.js';
 import { followPreview, mergeApprovedBranch, type OrderBranch } from './git-sync.js';
+import { defined } from '../core/defined.js';
 
 /**
  * Review-Freigabe: Ein fertiger Auftrag wird nicht sofort in den Sprint-Branch gemergt, sondern wartet (Status
@@ -218,7 +219,7 @@ async function mergeApprovals(
       { project },
     );
     // Fängt Fehler selbst ab: Eine Vorschau, die nicht nachzieht, macht den Merge nicht ungeschehen.
-    await followProjectPreview(pool, project, cwd, item.base!, execute);
+    await followProjectPreview(pool, project, cwd, defined(item.base), execute);
     if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(logged('review-gate'));
   }
   return merged;

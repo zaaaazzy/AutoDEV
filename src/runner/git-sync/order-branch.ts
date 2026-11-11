@@ -94,7 +94,8 @@ async function foreignChanges(git: GitHelpers['git']): Promise<string[]> {
 
 /**
  * Wechselt für einen Auftrag auf seinen eigenen Branch: bei Sprint-Aufträgen vom Sprint-Branch abgezweigt, sonst vom
- * aktuellen Branch. Existiert der Branch schon (erneuter Versuch), wird er fortgesetzt und der Basis-Stand eingemergt.
+ * aktuellen Branch. Existiert der Branch schon (erneuter Versuch), wird er fortgesetzt und der Basis-Stand eingemergt –
+ * sofern er keine fremden Commits mitbringt (sonst geparkt, siehe parkForeignOrderBranch).
  * Gelingt das nicht, wirft sie OrderBranchError – nie arbeitet ein Auftrag auf main, dem Sprint oder einem fremden
  * Auftrags-Branch weiter. Projekte ohne Git: null.
  */
@@ -104,6 +105,36 @@ async function foreignChanges(git: GitHelpers['git']): Promise<string[]> {
  */
 export function leavesForMain(branch: string): boolean {
   return branch === 'HEAD' || ['sprint/', 'wip/', 'auftrag/'].some((prefix) => branch.startsWith(prefix));
+}
+
+/**
+ * Ein bestehender Auftrags-Branch wird nur fortgesetzt, wenn alles, was er der Basis voraus hat, von diesem Auftrag
+ * stammt (Zeile „Auftrag: <id>“ in jedem Commit, Merges ausgenommen). Sonst zweigte er von einem anderen Stand ab, etwa
+ * einem abgebrochenen Sprint, und brächte dessen ungeprüfte Commits in die Basis. Dann wird er als wip/… geparkt (die
+ * Arbeit bleibt erhalten), und der Auftrag zweigt frisch von der Basis ab. Gibt true zurück, wenn geparkt wurde.
+ */
+async function parkForeignOrderBranch(
+  { must }: GitHelpers,
+  branch: string,
+  base: string,
+  itemId: string,
+): Promise<boolean> {
+  const foreign = await must(
+    'rev-list',
+    '--no-merges',
+    '--invert-grep',
+    '--fixed-strings',
+    `--grep=Auftrag: ${itemId}`,
+    `${base}..${branch}`,
+  );
+  if (!foreign) return false;
+  const parked = `wip/${branch.slice('auftrag/'.length)}-fremde-basis-${Date.now()}`;
+  await must('branch', '-m', branch, parked);
+  const count = foreign.split('\n').length;
+  console.warn(
+    `[${itemId}] ${branch} enthält ${count} Commit(s), die nicht von diesem Auftrag und nicht aus ${base} stammen – als ${parked} geparkt, Auftrag startet neu von ${base}.`,
+  );
+  return true;
 }
 
 export async function enterOrderBranch(
@@ -168,8 +199,10 @@ export async function enterOrderBranch(
           : `Arbeitsordner ${cwd} steht noch auf dem fremden Auftrags-Branch ${base}.`,
       );
     }
+    const resumable = async (from: string) =>
+      (await branchExists(git, branch)) && !(await parkForeignOrderBranch({ git, must }, branch, from, item.id));
     if (detachedBase) {
-      if (await branchExists(git, branch)) {
+      if (await resumable(detachedBase)) {
         await must('checkout', branch);
         const merged = await git('merge', '--no-edit', detachedBase);
         if (merged.exitCode !== 0) {
@@ -181,7 +214,7 @@ export async function enterOrderBranch(
         await must('checkout', '-b', branch, detachedBase);
       }
     } else if (!(await git('rev-parse', '--verify', '--quiet', 'HEAD')).exitCode) {
-      if (await branchExists(git, branch)) {
+      if (await resumable(base)) {
         await must('checkout', branch);
         const merged = await git('merge', '--no-edit', base);
         if (merged.exitCode !== 0) {

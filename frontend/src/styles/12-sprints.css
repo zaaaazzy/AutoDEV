@@ -149,7 +149,7 @@
 .sprint-popover-progress span {
   display: block;
   height: 100%;
-  background: #328455;
+  background: var(--success-strong);
 }
 .sprint-popover-orders {
   display: grid;
@@ -436,7 +436,7 @@
   border: 1px solid #b9d3c7;
   border-left: 4px solid var(--green);
   border-radius: 8px;
-  background: #eef6f1;
+  background: var(--success-surface);
   font-size: 13.5px;
 }
 .sprint-go span {
@@ -444,7 +444,7 @@
   color: var(--muted);
 }
 .sprint-go.failed {
-  border-color: #e6b8b3;
+  border-color: var(--error-border-soft);
   border-left-color: var(--danger);
   background: #fdf1ef;
 }

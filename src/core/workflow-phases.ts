@@ -12,7 +12,6 @@ export const WORKFLOW_PHASES = [
   'on_rejected',
   'on_done',
 ] as const;
-export type WorkflowPhase = (typeof WORKFLOW_PHASES)[number];
 
 /** Phasen, die als Schritte eines Auftrags nacheinander laufen. */
 export const ORDER_PHASES = ['pre_task', 'while_task', 'after_task'] as const;

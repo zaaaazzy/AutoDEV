@@ -5,6 +5,8 @@ import { loadSystemSettings, systemAgents, systemCommand } from '../agent/system
 import { productionGuide } from './production-snippets.js';
 import { ROLE_INFO, type Role } from './roles.js';
 import { workflowDocs } from './workflow-docs.js';
+import { defined } from '../core/defined.js';
+import { TEST_RUN_STATUS } from '../core/status.js';
 
 /**
  * Automatisch erzeugte, schreibgeschützte Dokumente für die Dokumentation: Testberichte (aus test:full),
@@ -51,7 +53,9 @@ const date = (value: Date | string | null): string =>
 function modelOf(command: string[] | null): string {
   if (!command?.length) return 'Lokal (Ollama)';
   const model = command[command.indexOf('--model') + 1];
-  return command[0] === 'claude' ? `Claude${command.includes('--model') && model ? ` · ${model}` : ''}` : command[0]!;
+  return command[0] === 'claude'
+    ? `Claude${command.includes('--model') && model ? ` · ${model}` : ''}`
+    : defined(command[0]);
 }
 
 async function testReports(pool: Pool, slug: string): Promise<GeneratedDoc[]> {
@@ -73,7 +77,7 @@ async function testReports(pool: Pool, slug: string): Promise<GeneratedDoc[]> {
     id: run.id,
     projectSlug: slug,
     kind: 'test',
-    title: `Testbericht ${date(run.startedAt)}${run.status === 'passed' ? '' : run.status === 'failed' ? ' – mit Befunden' : ' – läuft'}`,
+    title: `Testbericht ${date(run.startedAt)}${run.status === TEST_RUN_STATUS.passed ? '' : run.status === TEST_RUN_STATUS.failed ? ' – mit Befunden' : ' – läuft'}`,
     content: run.report,
     developmentId: null,
     sprintId: null,
@@ -237,7 +241,7 @@ export async function generatedDocs(
   const production = settingsDoc(
     slug,
     'betrieb',
-    'Betrieb: Fehler an Dev Log melden',
+    'Betrieb: Fehler an AIdeation melden',
     productionGuide(baseUrl, slug),
     null,
   );

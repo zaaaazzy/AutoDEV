@@ -9,8 +9,26 @@
     }
   </summary>
 
-  <p class="visual-intro">Den Auftrag in einer Umgebung ansehen, die Änderungen optisch prüfen und danach freigeben.</p>
+  @let state = status();
+  <div class="visual-status" [class]="'visual-status ' + state.tone" role="status">
+    <strong>{{ state.title }}</strong>
+    @if (approval().approvedAt) {
+      <span>Freigegeben von {{ approval().approvedBy || 'Unbekannt' }} am {{ approval().approvedAt | dateTime }}.</span>
+    }
+    <span class="muted">{{ state.next }}</span>
+  </div>
 
+  @if (approval().approvedAt) {
+    <details class="visual-more">
+      <summary>Abnahme-Schritte anzeigen (optional)</summary>
+      <ng-container *ngTemplateOutlet="steps" />
+    </details>
+  } @else {
+    <ng-container *ngTemplateOutlet="steps" />
+  }
+</details>
+
+<ng-template #steps>
   <ol class="visual-steps plain-list">
     <li class="visual-step">
       <h4><span class="visual-step-no" aria-hidden="true">1</span> In einer Umgebung ansehen</h4>
@@ -69,6 +87,9 @@
               <div class="visual-env-text">
                 <strong>Umgebung {{ slot.slot }}</strong>
                 <span class="visual-env-status">{{ statusText(slot) }}</span>
+                @if (slotHint(slot); as hint) {
+                  <span class="visual-env-hint">{{ hint }}</span>
+                }
                 @if (slot.status !== 'idle') {
                   <span class="visual-env-loaded" [title]="slot.commit ?? ''">
                     Geladen: {{ loadedText(slot) }}
@@ -92,16 +113,36 @@
                   >Öffnen ↗</a
                 >
               }
-              @if (slot.projectSlug && slot.status !== 'idle' && slot.status !== 'stopping' && auth.can('run')) {
+              @if (slot.status === 'failed' && isOwn(slot) && slot.enabled) {
+                <button
+                  class="button primary small"
+                  type="button"
+                  [disabled]="busy() || !canRestart()"
+                  [title]="spawnHint()"
+                  (click)="$event.stopPropagation(); restart(slot)"
+                >
+                  ↻ Umgebung neu starten
+                </button>
+              } @else if (slot.projectSlug && slot.status !== 'idle' && slot.status !== 'stopping' && auth.can('run')) {
                 <button
                   class="button secondary small"
                   type="button"
                   [disabled]="busy()"
-                  title="Beendet den Container; die Umgebung wird wieder frei."
+                  [title]="
+                    slot.status === 'failed'
+                      ? 'Räumt die fehlerhafte Umgebung auf; danach ist sie wieder frei.'
+                      : 'Beendet den Container; die Umgebung wird wieder frei.'
+                  "
                   (click)="$event.stopPropagation(); stop(slot)"
                 >
-                  ■ Beenden
+                  {{ slot.status === 'failed' ? 'Aufräumen' : '■ Beenden' }}
                 </button>
+              }
+              @if (slotLog(slot); as log) {
+                <details class="visual-env-log" (click)="$event.stopPropagation()">
+                  <summary>Meldung des Containers</summary>
+                  <pre>{{ log }}</pre>
+                </details>
               }
             </li>
           }
@@ -205,18 +246,20 @@
             class="button secondary small"
             type="button"
             [disabled]="busy()"
-            title="Nimmt die optische Freigabe zurück; die Version geht dann nicht weiter in die produktive Umgebung."
+            title="Nimmt die optische Freigabe zurück, z. B. wenn sich der Auftrag noch geändert hat."
             (click)="approve(false)"
           >
             Freigabe zurücknehmen
           </button>
-        } @else {
-          <p>Sieht alles richtig aus? Mit der Freigabe geht diese Version weiter in die produktive Umgebung.</p>
+        } @else if (status().canApprove) {
+          <p>Sieht alles richtig aus? Die Freigabe hält fest, dass du das Aussehen geprüft hast.</p>
           <button class="button primary" type="button" [disabled]="busy()" [title]="why" (click)="approve(true)">
             ✓ Optisch freigeben
           </button>
+        } @else {
+          <p class="muted">Freigeben geht, sobald der Auftrag fertig bearbeitet ist.</p>
         }
       </div>
     </li>
   </ol>
-</details>
+</ng-template>

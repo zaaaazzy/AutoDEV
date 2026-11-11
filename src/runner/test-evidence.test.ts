@@ -134,8 +134,8 @@ test('Nachweis-Lauf: ohne gespeicherte Zeile kein Befehl', async () => {
 test('test_evidence: Migration wiederholbar, ein Nachweis je Befehl und Auftrag, kein action_todo, Sprint fertig', async (t) => {
   await withMigratedDatabase(t, 'devlog_test_evidence', async (db) => {
     assert.deepEqual(await runMigrations(db), [], 'zweiter Start ändert nichts');
-    // Migration 22 erneut ausgeführt (z. B. nach abgebrochenem Start): ohne Fehler.
-    await db.query(MIGRATIONS.find((migration) => migration.version === 22)!.sql);
+    // Migration 23 erneut ausgeführt (z. B. nach abgebrochenem Start): ohne Fehler.
+    await db.query(MIGRATIONS.find((migration) => migration.version === 23)!.sql);
     await db.query(`INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop')`);
     const sprint = (
       await db.query<{ id: string }>(
@@ -190,7 +190,7 @@ test('test_evidence: Migration wiederholbar, ein Nachweis je Befehl und Auftrag,
     );
     await assert.rejects(db.query(`INSERT INTO test_requests (project_slug, scope) VALUES ('shop', 'datei')`), /check/);
     // Erneut auf einer Bestands-Datenbank mit allen geschriebenen Umfängen: die Prüfung lässt jeden Wert zu.
-    await db.query(MIGRATIONS.find((migration) => migration.version === 22)!.sql);
+    await db.query(MIGRATIONS.find((migration) => migration.version === 23)!.sql);
     const scopes = (await db.query<{ scope: string }>('SELECT DISTINCT scope FROM test_requests ORDER BY scope')).rows;
     assert.deepEqual(
       scopes.map((row) => row.scope),
