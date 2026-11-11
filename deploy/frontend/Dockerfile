@@ -20,7 +20,6 @@ COPY src/core/defined.ts ./src/core/defined.ts
 # Schätzungs-Überschreitung und feste Coverage-Bereiche (Sprint 30) – dieselben Schlüssel wie Worker und Migrationen.
 COPY src/core/estimate-overrun.ts ./src/core/estimate-overrun.ts
 COPY src/core/coverage-areas.ts ./src/core/coverage-areas.ts
-# Feste Bug-Kategorien (Sprint 30) – dieselbe Liste wie CHECK-Constraint und Vorschlags-Agent.
 COPY src/core/bug-category-values.ts ./src/core/bug-category-values.ts
 RUN npm run build:ui
 
