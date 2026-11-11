@@ -55,6 +55,10 @@ Migration 29 `folgevorschlaege-aus-doku` (`src/db/migrations.ts`; zuerst als 27 
 - `afterStep` legt keinen Bug und keine Idee an, ein Fehler bricht nicht ab
 - Mit Datenbank der ganze Ablauf: Dubletten nur gegen offene Einträge, zweiter Lauf, gleichzeitiges Annehmen (200/409), Verwerfen, Liste nur `proposed`
 
+`src/runner/runner-steps.test.ts` spielt einen fehlgeschlagenen Dokumentierer-Schritt über `runStep` durch. Dabei
+entstehen keine Doku, kein Vorschlag und kein Bug. Zur Gegenprobe speichert derselbe Schritt mit Erfolg Doku und
+Vorschlag.
+
 `roles.test.ts` prüft die Rechte der neuen Routen. In `migrations.test.ts` hängen die Versionslisten nicht mehr an der letzten Migration.
 
 ## Offen
