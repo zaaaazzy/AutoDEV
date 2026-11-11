@@ -2,11 +2,11 @@
 
 Auftrag ff127e1a-6b7d-4358-a136-f9be1f6ca313 (Feature). Dieses Kapitel beschreibt die feste Bug-Kategorie (Feld `bug_category`): wann sie gesetzt wird, wann sie nur vorgeschlagen ist, wie du Vorschläge bestätigst oder korrigierst, wie du nach Kategorie filterst und wie die Statistik zählt.
 
-> **Abgrenzung:** Die Bug-Kategorie ist **nicht** der Bereich (Frontend, Backend, Fullstack, Infrastructure, Docs, Security). Der Bereich steht im Feld `category` und wird an Aufträge vererbt. Er bleibt unverändert. In der Bugliste heißt diese Spalte jetzt „Bereich“. Zum Bereich siehe `docs/benutzerhandbuch-bugs-kategorie-automatisch-2026-10-31.md`.
+> **Abgrenzung:** Die Bug-Kategorie ist **nicht** der Bereich (Frontend, Backend, Fullstack, Infrastructure, Docs, Security). Der Bereich steht im Feld `category` und wird an Aufträge vererbt. Er bleibt unverändert. In der Bugliste heißt diese Spalte jetzt „Bereich“. Zum Bereich siehe `docs/bug-kategorien.md`.
 
-> **Printscreens:** keine. Auf dem Agent-Host ist kein Browser installiert, und der Browser-Cache ist für den Agenten gesperrt. Die Aufnahmen stehen in Abschnitt 9 als Liste mit dem nötigen Zustand. Die Beschreibungen stammen aus dem Code (`src/api/bugs.ts`, `src/agent/bug-category.ts`, `src/agent/bug-classifier.ts`, `src/api/stats.ts`, `frontend/src/app/features/bugs/bugs.component.html` und `.ts`, `bug-stats.ts`, `bug-category-matrix.component.ts`, `frontend/src/app/features/stats/stats.component.html`).
+> **Printscreens:** keine in dieser Fassung. Die Oberfläche ist in dieser Sitzung nicht gestartet, und es wurden keine Aufnahmen gemacht. Die nötigen Aufnahmen stehen in Abschnitt 9 als Liste mit dem Zustand, den sie zeigen sollen. Die Beschreibungen stammen aus dem Code, geprüft gegen (`src/api/bugs.ts`, `src/agent/bug-category.ts`, `src/agent/bug-classifier.ts`, `src/api/stats.ts`, `frontend/src/app/features/bugs/bugs.component.html` und `.ts`, `bug-stats.ts`, `bug-category-matrix.component.ts`, `frontend/src/app/features/stats/stats.component.html`).
 
-> **Tests:** Der erste Tester-Lauf scheiterte, weil der Testbefehl nicht freigegeben war; die Kriterien blieben ungeprüft. Der Entwickler meldet danach grün: `npm run typecheck`, `npm run lint`, `npm run format:check` und `npm run test:unit` (2111 bestanden, 0 fehlgeschlagen, 10 übersprungen). Übersprungen sind die Datenbank-Tests (`DEV_LOG_TEST_ADMIN_DATABASE_URL` fehlt) und der Oberflächentest. Der Dokumentierer hat selbst keine Tests ausgeführt. Ob die Oberfläche so arbeitet, wie hier beschrieben, bestätigt der Tester.
+> **Tests:** Der erste Tester-Lauf scheiterte, weil der Testbefehl nicht freigegeben war; die Kriterien blieben ungeprüft. Der Entwickler meldet danach grün: `npm run typecheck`, `npm run lint`, `npm run format:check` und `npm run test:unit` (2111 bestanden, 0 fehlgeschlagen, 10 übersprungen). Übersprungen sind die Datenbank-Tests (`DEV_LOG_TEST_ADMIN_DATABASE_URL` fehlt) und der Oberflächentest. Der Dokumentierer und ich haben keine Tests ausgeführt; die Angaben oben sind nicht nachgeprüft. Ob die Oberfläche so arbeitet, wie hier beschrieben, bestätigt der Tester.
 
 ---
 
@@ -118,7 +118,8 @@ Alle Aktionen in diesem Abschnitt brauchen das Recht **Planen**. Die Prüfung l�
 - Der aufgeklappte Bug hat das Formular **Bearbeiten**. Es erscheint nur mit dem Recht **Planen**.
 - Das Feld **Kategorie** zeigt die bestätigte Kategorie. Ist keine gesetzt, steht als Auswahl „Nur Vorschlag“ bzw. „Ohne Kategorie“.
 - Wählst du eine Kategorie und speicherst, ist sie bestätigt.
-- Ob die Auswahl „Nur Vorschlag“ bzw. „Ohne Kategorie“ eine bestätigte Kategorie wieder entfernt, prüft der Tester (Abschnitt 10).
+- Wählst du „Nur Vorschlag“ (wenn ein Vorschlag da ist) oder „Ohne Kategorie“, wird die bestätigte Kategorie entfernt. Der Bug fällt auf den Vorschlag zurück, oder er hat danach keine Kategorie. Die Statistik zählt ihn dann nicht mehr unter der alten Kategorie (`src/api/bugs.ts`, PATCH: `bugCategoryStateSql`).
+- Offen ist nur, ob das Formular den leeren Wert als `null` sendet. Das prüft der Tester (Abschnitt 10).
 
 ---
 
@@ -149,7 +150,7 @@ Mit dem Knopf **Altbestand kategorisieren** schlägt das lokale Modell für alle
 - Die Auswahl enthält die acht Kategorien, **Vorschlag offen** und **Ohne Kategorie**. Auch Kategorien ohne Treffer stehen darin.
   - **Vorschlag offen** zeigt nur Bugs mit Vorschlag, der noch nicht bestätigt ist. Diese Bugs zählen sonst als „Ohne Kategorie“.
   - **Ohne Kategorie** zeigt Bugs ohne Kategorie und ohne Vorschlag.
-- Der Filter wird zusammen mit den anderen Filtern gespeichert und mit **Zurücksetzen** geleert.
+- Der Filter wirkt zusammen mit den anderen Filtern. **Zurücksetzen** leert ihn mit den übrigen.
 - Ohne Treffer zeigt die Liste den Leertext der Gruppe, z. B. „Keine offenen Bugs – alles ruht in Frieden.“ oder im Friedhof „Der Friedhof ist noch leer.“.
 
 ### 6.2 Karte „Nach Kategorie“ (Bugs-Seite)
@@ -230,5 +231,5 @@ Die folgenden Prüfungen sind **nicht** erfolgt:
 5. Rechte: `POST /projects/:slug/bugs/categorize-backlog`, `POST /bugs/:id/category/confirm` und die gesammelte Bestätigung ohne Recht Planen liefern eine Ablehnung.
 6. Migration: Die Datenbank lehnt einen Wert außerhalb der acht Kategorien ab; `bugs.category` und der Trigger `development_items_inherit_category` sind unverändert. Der Auftrag nennt Migration 20, im Code ist es Migration **29**, weil die Nummern 20 bis 28 belegt sind.
 7. Oberflächentest „Tabellen“: Kategoriefilter, Zurücksetzen und der Leertext.
-8. Bearbeiten-Formular: Ob „Nur Vorschlag“ bzw. „Ohne Kategorie“ eine bestätigte Kategorie entfernt, ist nicht geprüft.
+8. Bearbeiten-Formular: Der Server setzt bei leerem `bugCategory` den Zustand zurück (Code geprüft). Offen ist nur die Sendung des leeren Werts durch das Formular.
 9. Printscreens aus Abschnitt 9 auf einem Host mit Browser erstellen und in dieses Kapitel einfügen.
