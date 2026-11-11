@@ -34,12 +34,12 @@ export * from './sandbox-base.js';
  * Eigene Agent-Worktrees verlinken node_modules des Hauptordners (agent-workspace.ts). Im Container zeigt der Link auf
  * einen Host-Pfad: Docker hängt das Volume dann dort ein, und npm scheitert an „/workspace/node_modules“ (ENOTDIR).
  * Der Link wird darum durch einen leeren Ordner ersetzt (nur der Link, nie sein Ziel); linkDependencies stellt ihn
- * ohne Sandbox wieder her.
+ * ohne Sandbox wieder her. Nur in einem Git-Worktree (.git ist eine Datei): Projektordner der Menschen bleiben unberührt.
  */
 export function replaceLinkedModules(worktree: string): void {
   const path = join(worktree, 'node_modules');
   try {
-    if (!lstatSync(path).isSymbolicLink()) return;
+    if (!lstatSync(join(worktree, '.git')).isFile() || !lstatSync(path).isSymbolicLink()) return;
     rmSync(path);
     mkdirSync(path);
   } catch {
