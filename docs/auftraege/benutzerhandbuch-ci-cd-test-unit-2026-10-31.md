@@ -39,6 +39,12 @@ Der Stand unten stammt aus dem Entwicklerbericht. Ich (der Handbuch-Autor) habe 
 
 Vor dem Fix scheiterte genau ein Test (der `git-guard`-Test oben). Ein grüner Lauf in GitHub Actions fehlt noch.
 
+### Nachtrag 11.11.2026: Merge in den Sprint
+
+Der Merge war an einem Konflikt in `src/core/sandbox.ts` gescheitert. Sprint 30 hat Konstanten und Hilfen nach `src/core/sandbox-base.ts` verschoben. Es gilt jetzt diese Seite. Der Kommentar, warum der npm-Cache in `/tmp` liegt (`npm_config_cache`), steht in `sandbox-base.ts`. Für Anwender ändert sich nichts.
+
+Laut Entwicklerbericht: `npm run test:unit` mit 2096 Tests, 2086 bestanden, 0 fehlgeschlagen, 10 übersprungen (nur Docker, macOS und Windows). Typecheck, Lint (0 Fehler) und Format waren in Ordnung. Auch diese Zahlen habe ich nicht nachgeprüft.
+
 ## Printscreens
 
 Entfallen. Die Änderung berührt keine Seite der Oberfläche, es gibt also nichts zu zeigen.
