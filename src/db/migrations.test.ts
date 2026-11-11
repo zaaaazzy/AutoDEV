@@ -190,7 +190,8 @@ test('Migration 29: Bug-Kategorie auf PostgreSQL – nur die acht Werte, Zustand
       client.query(`INSERT INTO bugs (project_slug, title, category) VALUES ('shop', 'Bereich', 'git-sync')`),
       /bugs_category_check/,
     );
-    assert.deepEqual(await runMigrations(client), []);
+    // Danach bleibt nur noch die Folgevorschlag-Migration (30) offen.
+    assert.deepEqual(await runMigrations(client), [30]);
   } finally {
     client.release();
     await pool.end();
@@ -213,8 +214,8 @@ test('Migrationen: Gegenprobe je Auftrag kommt per Migration, nicht über das ei
   assert.doesNotMatch(SCHEMA, /counter_check/);
 });
 
-test('Migration 29: Folgevorschläge idempotent, CHECKs erlauben alle Werte, die der Code schreibt', () => {
-  const migration = MIGRATIONS.find((step) => step.version === 29);
+test('Migration 30: Folgevorschläge idempotent, CHECKs erlauben alle Werte, die der Code schreibt', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 30);
   assert.equal(migration?.name, 'folgevorschlaege-aus-doku');
   const sql = migration?.sql ?? '';
   assert.match(sql, /CREATE TABLE IF NOT EXISTS follow_up_proposals/);

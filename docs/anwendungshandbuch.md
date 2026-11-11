@@ -4,7 +4,7 @@ Das Handbuch von A bis Z: Zweck, Bedienung, Architektur, Konfiguration und Betri
 und verweist für Details auf sie: [Installation](installation.md), [Betrieb](betrieb.md), [Workflows](workflows.md),
 [Agents und Rechte](agents-und-rechte.md), [Laufzeit](laufzeit.md), [Bug-Kategorien](bug-kategorien.md).
 
-**Stand:** 11.11.2026. Abgeglichen mit `src/` (Migrationen bis Version 29) und den Fachdokumenten. Wo sie sich
+**Stand:** 11.11.2026. Abgeglichen mit `src/` (Migrationen bis Version 30) und den Fachdokumenten. Wo sie sich
 widersprechen, gilt der Code; die Abweichung steht in Anhang B.
 
 ## Inhalt
@@ -106,7 +106,7 @@ Privilegien) führt die Tests und Agents aus. Die Container dürfen nur zu Anthr
 (Egress-Proxy), nicht zur Datenbank oder ins LAN.
 
 Die Datenbank-Migrationen laufen beim Start von API und Worker unter einer gemeinsamen Sperre. Bestehende Schritte
-werden nie geändert; neue kommen hinten an (`src/db/migrations.ts`, Version 29 ist der aktuelle Stand).
+werden nie geändert; neue kommen hinten an (`src/db/migrations.ts`, Version 30 ist der aktuelle Stand).
 
 ## 4. Bugs und Kategorien
 
@@ -665,17 +665,16 @@ Statuswerte (Werte aus `src/core/status.ts`):
 
 - **Datei fehlte:** `docs/anwendungshandbuch.md` war im Workspace nicht vorhanden. Das Handbuch wurde neu angelegt, nicht
   fortgeschrieben. Der Abschnitt „Bugs und Kategorien“ enthält nur, was der Code belegt.
-- **Migrationsnummer:** Die Kategorie-Migration ist **nicht** Version 29. Version 26 ist `bug-kategorien-nachtragen`
-  (der Wartungsjob), Version 29 ist `folgevorschlaege-aus-doku`.
-- **Feld `bug_category`:** Im Code gibt es kein Feld `bug_category` und keinen CHECK mit acht Werten. Gültig sind die
-  sechs Werte aus `BUG_CATEGORIES`. Der Vorlauf nannte den Zustand „vorgeschlagen/bestätigt“ und die Sicherheitsregeln;
-  dafür fand sich im Code keine Grundlage, deshalb stehen sie nicht im Handbuch.
+- **Migrationsnummern:** Version 26 ist `bug-kategorien-nachtragen` (der Wartungsjob für den Bereich `category`),
+  Version 29 ist `bug-kategorie-fest` (das Feld `bug_category`, Abschnitt 4.1) und Version 30 ist
+  `folgevorschlaege-aus-doku`. Beide Aufträge kamen im selben Sprint, darum wurden sie beim Zusammenführen hintereinander
+  nummeriert.
 - **`src/core/bug-category-values.ts`:** existiert nicht. Die Werte stehen in `src/core/bug-category.ts`.
 - **Mermaid:** Die Diagramme sind Syntax-geprüft nur durch Lesen, nicht gerendert.
 
 ### B.3 Offene Punkte
 
-- **Folgevorschläge aus Doku-Abschnitten** (Auftrag 2150f8c0): Abschnitt 6.4 beschreibt den Code (Migration 29,
+- **Folgevorschläge aus Doku-Abschnitten** (Auftrag 2150f8c0): Abschnitt 6.4 beschreibt den Code (Migration 30,
   `src/runner/follow-up-proposals.ts`, `src/api/follow-up-proposals.ts`). Verhalten ist nur per Lesen des Codes geprüft,
   nicht im Browser oder mit Tests. Die Abnahme steht aus.
 - **Dokumentierer-Prompt:** Befunde in den Doku-Texten werden nur erkannt, wenn sie als eigene Abschnitte stehen. Die

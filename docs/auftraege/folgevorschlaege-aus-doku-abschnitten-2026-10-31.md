@@ -27,7 +27,7 @@ Nach einem erfolgreichen Dokumentierer-Schritt liest AIdeation die neue Auftrags
 
 ## Datenbank
 
-Migration 29 `folgevorschlaege-aus-doku` (`src/db/migrations.ts`; zuerst als 27 geplant, 27 und 28 belegte Sprint 30). Das Basisschema ist per Prüfsumme gesperrt, darum steht die Tabelle dort nicht. Spalten: `project_slug`, `development_id`, `doc_id`, `kind` (`bug`/`idea`), `section`, `title`, `description`, `status` (`proposed`/`accepted`/`dismissed`), `result_id`, `decided_by`, `decided_at`, `created_at`. Die CHECKs erlauben genau die Werte, die der Code schreibt (`FOLLOW_UP_STATUS`, `FOLLOW_UP_KIND` in `src/core/status.ts`). Die Migration ist idempotent (`IF NOT EXISTS`).
+Migration 30 `folgevorschlaege-aus-doku` (`src/db/migrations.ts`; zuerst als 27 geplant, 27–29 belegte Sprint 30). Das Basisschema ist per Prüfsumme gesperrt, darum steht die Tabelle dort nicht. Spalten: `project_slug`, `development_id`, `doc_id`, `kind` (`bug`/`idea`), `section`, `title`, `description`, `status` (`proposed`/`accepted`/`dismissed`), `result_id`, `decided_by`, `decided_at`, `created_at`. Die CHECKs erlauben genau die Werte, die der Code schreibt (`FOLLOW_UP_STATUS`, `FOLLOW_UP_KIND` in `src/core/status.ts`). Die Migration ist idempotent (`IF NOT EXISTS`).
 
 `bugs.development_id` wird bei angenommenen Bugs bewusst nicht gesetzt. Sonst käme der Bug per Trigger auf den Friedhof, sobald der Auftrag erledigt ist. Die Verbindung läuft über `follow_up_proposals.result_id`.
 

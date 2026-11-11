@@ -96,7 +96,7 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 - `test_evidence` (`id` UUID, `development_id` → `development_items`, `position`, `datei`, `befehl`, `grund` `nicht_freigegeben`/`gegenprobe_fehlt`, `status` `open`/`passed`/`failed`/`nicht_freigegeben`, `run_id` → `test_runs`, `checked_at`). Eindeutig je `(development_id, befehl)`.
 - `test_requests.evidence_id` → `test_evidence`; `test_requests.scope` zusätzlich `befehl` (alle bisherigen Werte bleiben erlaubt).
 
-## Erweiterung: Vorschläge aus der Doku (Migration 29)
+## Erweiterung: Vorschläge aus der Doku (Migration 30)
 
 - `follow_up_proposals` (`id` UUID, `project_slug` → `projects` (Mandant), `development_id` → `development_items`, `doc_id` → `docs`, `kind` `bug`/`idea`, `section`, `title`, `description`, `status` `proposed`/`accepted`/`dismissed`, `result_id` (angelegter Bug bzw. angelegte Idee, ohne Fremdschlüssel, da je nach `kind` auf `bugs` oder `ideation_items`), `decided_by`, `decided_at`, `created_at`). Eindeutig je `(development_id, title)`. Angenommene Bugs tragen kein `development_id` und keinen Sprint; die Verbindung läuft nur über `result_id`.
 
