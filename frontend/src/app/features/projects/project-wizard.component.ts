@@ -58,9 +58,10 @@ export const PROVIDERS: { id: Provider; label: string; paid: boolean; models: { 
     label: 'Claude',
     paid: true,
     models: [
-      { id: 'haiku', label: 'Claude Haiku – schnell, günstig' },
-      { id: 'sonnet', label: 'Claude Sonnet – ausgewogen' },
-      { id: 'opus', label: 'Claude Opus – am stärksten' },
+      { id: 'haiku', label: 'Claude Haiku 5.5 – schnell, günstig' },
+      { id: 'sonnet', label: 'Claude Sonnet 5.5 – ausgewogen' },
+      { id: 'opus', label: 'Claude Opus 5.5 – stark' },
+      { id: 'fable', label: 'Claude Fable 5.1 – am stärksten, am teuersten' },
     ],
   },
   { id: 'copilot', label: 'GitHub Copilot', paid: true, models: [{ id: '', label: 'Standardmodell' }] },
