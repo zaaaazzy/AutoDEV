@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "rootDir": "..",
     "outDir": "../out-tsc/app",
     "target": "ES2022",
     "module": "preserve",
