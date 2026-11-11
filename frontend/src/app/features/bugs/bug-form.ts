@@ -25,12 +25,14 @@ export function selectableSprints(sprints: Sprint[], currentId: string | null = 
   return sprints.filter((sprint) => sprint.id === currentId || isAssignableSprintStatus(sprint.status));
 }
 
-type BugChanges = Partial<Pick<Bug, 'title' | 'description' | 'severity' | 'sprintId' | 'fixNotes' | 'category'>>;
+type BugChanges = Partial<
+  Pick<Bug, 'title' | 'description' | 'severity' | 'sprintId' | 'fixNotes' | 'category' | 'bugCategory'>
+>;
 
 /**
  * Nur die geänderten Felder des Bearbeiten-Formulars, normalisiert wie in der API (Texte getrimmt, leere Auswahl =
  * null). Unveränderte Felder gehen nicht mit, damit Speichern keine Änderung eines Agents an anderen Feldern
- * überschreibt.
+ * überschreibt. Die Bug-Kategorie vergleicht mit der bestätigten: Ein offener Vorschlag bleibt bei leerer Auswahl.
  */
 export function bugChanges(bug: Bug, values: FormValues): BugChanges {
   const text = (key: string): string => String(values[key] ?? '');
@@ -42,6 +44,7 @@ export function bugChanges(bug: Bug, values: FormValues): BugChanges {
     sprintId: choice('sprintId'),
     fixNotes: text('fixNotes').trim(),
     category: choice('category') as Bug['category'],
+    bugCategory: choice('bugCategory') as Bug['bugCategory'],
   };
   const current: BugChanges = {
     title: bug.title,
@@ -50,6 +53,7 @@ export function bugChanges(bug: Bug, values: FormValues): BugChanges {
     sprintId: bug.sprintId ?? null,
     fixNotes: bug.fixNotes ?? '',
     category: bug.category ?? null,
+    bugCategory: bug.bugCategory ?? null,
   };
   return Object.fromEntries(
     Object.entries(next).filter(([key, value]) => value !== current[key as keyof BugChanges]),

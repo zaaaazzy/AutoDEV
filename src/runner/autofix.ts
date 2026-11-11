@@ -9,6 +9,7 @@ import type { Pool } from 'pg';
 import { reportAgentBug } from '../db/bugs-repository.js';
 import { afterBugCreated } from '../agent/bug-classifier.js';
 import { categoryFromBug } from '../core/bug-category.js';
+import type { BugCategoryValue } from '../core/bug-category-values.js';
 import { UNTRUSTED_START } from './hoster.js';
 
 import { USAGE_LIMIT } from '../core/provider-limits.js';
@@ -70,6 +71,15 @@ const TRANSIENT_PATTERNS = [
 export function isTransientFailure(output: string): boolean {
   const tail = output.slice(-1500);
   return TRANSIENT_PATTERNS.some((pattern) => pattern.test(tail));
+}
+
+/**
+ * Feste Bug-Kategorie, die der Fehlerausgabe sicher anzusehen ist: Eine Sperre des Agent-Wächters ist „agent-guard“.
+ * Sonst null – dann schlägt das lokale Modell nach dem Anlegen nur vor (blockiert und wiederholt nichts).
+ */
+const GUARD_BLOCK = /AIdeation-Wächter:/;
+export function failureBugCategory(output: string): BugCategoryValue | null {
+  return GUARD_BLOCK.test(output.slice(-3000)) ? 'agent-guard' : null;
 }
 
 export function isAgentFailure(output: string): boolean {
@@ -208,14 +218,16 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
   // Pfaden, sonst stuft das lokale Modell im Hintergrund ein (ohne Einfluss auf den Auto-Fix-Ablauf).
   const bugTitle = `${agentName}: ${shortTitle(item.title)}`;
   const category = categoryFromBug({ title: bugTitle, description: detail });
+  const bugCategory = failureBugCategory(output);
   const bugId = await reportAgentBug(pool, {
     projectSlug: item.projectSlug,
     title: bugTitle,
     description: detail,
     developmentId: item.id,
     category,
+    bugCategory,
   });
-  afterBugCreated(pool, bugId, category, { title: bugTitle, description: detail });
+  afterBugCreated(pool, bugId, category, { title: bugTitle, description: detail }, bugCategory);
   // Bevor ein Behebungsauftrag entsteht, prüft die Problemanalyse (ein zweiter Agent), ob die Diagnose stimmt.
   await pool.query(
     `UPDATE development_items SET failure = $2, failure_bug_id = $3, auto_run = FALSE,

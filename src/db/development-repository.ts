@@ -196,6 +196,16 @@ export async function findOrderSprintStatus(
   return result.rows[0]?.sprintStatus;
 }
 
+/** Gehört der Sprint zum Projekt des Auftrags (unabhängig vom Status)? */
+export async function sprintInOrderProject(pool: Pool, orderId: string, sprintId: string): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM sprints s JOIN development_items d ON d.project_slug = s.project_slug
+      WHERE d.id = $1 AND s.id = $2`,
+    [orderId, sprintId],
+  );
+  return Boolean(result.rowCount);
+}
+
 export async function agentInOrderProject(pool: Pool, agentId: string, orderId: string): Promise<boolean> {
   const result = await pool.query(
     `SELECT 1 FROM agents a JOIN development_items d ON d.project_slug = a.project_slug
@@ -365,6 +375,38 @@ export async function deleteOrder(pool: Pool, id: string): Promise<boolean> {
     }
     return Boolean(row);
   });
+}
+
+/** Projekt eines Sprints (für den Git-Guard der Sammelabnahme). */
+export async function findSprintProject(pool: Pool, sprintId: string): Promise<string | undefined> {
+  const result = await pool.query<{ slug: string }>('SELECT project_slug AS slug FROM sprints WHERE id = $1', [
+    sprintId,
+  ]);
+  return result.rows[0]?.slug;
+}
+
+/** Welche Umsetzungen die Sammelabnahme trifft: alle eines Sprints oder die angezeigten eines Projekts. */
+export type ApprovalScope = { sprintId: string } | { projectSlug: string; ids: readonly string[] };
+
+/**
+ * Sammelabnahme: alle Umsetzungen im Status Freigabe ohne bisherige Abnahme in einem UPDATE. Das WHERE fängt
+ * Umsetzungen ab, die sich seit der Anzeige geändert haben; sie fehlen im Ergebnis und zählen nicht mit.
+ */
+export async function approveWaitingOrders(
+  pool: Pool,
+  scope: ApprovalScope,
+): Promise<{ id: string; title: string; projectSlug: string }[]> {
+  const [filter, values] =
+    'sprintId' in scope
+      ? ['sprint_id = $1', [scope.sprintId]]
+      : ['project_slug = $1 AND id = ANY($2::uuid[])', [scope.projectSlug, [...scope.ids]]];
+  const result = await pool.query<{ id: string; title: string; projectSlug: string }>(
+    `UPDATE development_items SET review_approved_at = NOW(), updated_at = NOW()
+      WHERE ${filter} AND status = '${DEVELOPMENT_STATUS.approval}' AND review_approved_at IS NULL
+      RETURNING id, title, project_slug AS "projectSlug"`,
+    values,
+  );
+  return result.rows;
 }
 
 /** Vom Tester gemeldete Punkte „von dir zu prüfen“ als geprüft bestätigen; gibt die Anzahl zurück. */

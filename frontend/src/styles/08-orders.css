@@ -1187,6 +1187,38 @@
   margin-bottom: 0;
 }
 
+/* Vorschläge aus der Doku: Bestätigungsliste mit Annehmen und Verwerfen. */
+.proposal-list {
+  display: grid;
+  gap: 8px;
+}
+.proposal-item {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+.proposal-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+.proposal-title .tag-bug {
+  color: var(--danger);
+}
+.order-panel .proposal-text.markdown {
+  padding: 0;
+  font-size: 13px;
+}
+.proposal-item .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* Geänderte Dateien eines Auftrags: kompakte Liste in Monospace. */
 .changed-file-list {
   margin: 6px 0 0;

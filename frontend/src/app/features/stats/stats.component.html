@@ -136,6 +136,16 @@
     </article>
   </section>
 
+  <section class="panel" data-testid="stats-bug-categories">
+    <div class="section-heading">
+      <div>
+        <h2>Bugs je Kategorie und Sprint</h2>
+        <p class="muted">Häufungen erkennen: offene und begrabene Bugs; Bugs ohne Sprint unter „Kein Sprint“</p>
+      </div>
+    </div>
+    <app-bug-category-matrix [pairs]="bugCategorySprints()" />
+  </section>
+
   <section class="view-grid">
     <article class="panel">
       <div class="section-heading">

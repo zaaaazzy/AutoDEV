@@ -75,6 +75,13 @@ Die Meldungen stammen aus der Schnittstelle (`src/api/development.ts`, `src/api/
   - Leerer Titel: Hinweis zu Titel und Beschreibung (400)
   - Sprint abgebrochen oder abgeschlossen: „Folgeaufträge nur in geplante oder aktive Sprints.“ (409)
 
+### 3.7 Alle abnehmen
+
+- **Erlaubt:** Mit „✓ Alle abnehmen (n)“ alle wartenden Umsetzungen in einem Schritt freigeben. Auf der Seite „Aktionen“ die angezeigten, im Sprintmenü nur die des Sprints. Nötig sind das Recht „Ausführen“ und mindestens eine Umsetzung in Freigabe.
+- **Nicht erlaubt:** Ohne Recht „Ausführen“ oder ohne wartende Umsetzung ist der Knopf nicht sichtbar. Der Server prüft das Recht ebenfalls (403).
+- **Git-Befund:** Liegen fremde Änderungen im Projektordner, verlangt der Dialog „Trotzdem alle abnehmen“ mit Pflichtbegründung. Ohne Bestätigung wird nichts abgenommen.
+- Ausführlich mit Dialog, Register „Anfragen“ und Fehlermeldungen: [Benutzerhandbuch Alle abnehmen](benutzerhandbuch-alle-abnehmen-2026-10-31.md).
+
 ---
 
 ## 4. Sprint-Status ändern

@@ -4,14 +4,24 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = join(import.meta.dirname, '..');
-const readJson = (name: string) => JSON.parse(readFileSync(join(root, name), 'utf8'));
+const readJson = <T>(name: string): T => JSON.parse(readFileSync(join(root, name), 'utf8')) as T;
 
-interface AngularWorkspace {
+interface AngularJson {
   projects: Record<string, { architect?: Record<string, { builder: string }> }>;
 }
 
+interface PackageJson {
+  engines?: { node?: string };
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+}
+
+interface PackageLock {
+  packages: Record<string, { version?: string }>;
+}
+
 test('angular.json: alle Builder stammen aus @angular/build', () => {
-  const angular = readJson('angular.json') as AngularWorkspace;
+  const angular = readJson<AngularJson>('angular.json');
   const builders: string[] = [];
   for (const project of Object.values(angular.projects)) {
     for (const target of Object.values(project.architect ?? {})) builders.push(target.builder);
@@ -25,14 +35,14 @@ test('angular.json: alle Builder stammen aus @angular/build', () => {
 });
 
 test('package.json: @angular/build deklariert, alter Builder entfernt', () => {
-  const pkg = readJson('package.json');
+  const pkg = readJson<PackageJson>('package.json');
   const all = { ...pkg.dependencies, ...pkg.devDependencies };
   assert.ok(all['@angular/build']);
   assert.equal(all['@angular-devkit/build-angular'], undefined);
 });
 
 test('package.json: engines verlangt Node >= 22.12', () => {
-  assert.equal(readJson('package.json').engines?.node, '>=22.12');
+  assert.equal(readJson<PackageJson>('package.json').engines?.node, '>=22.12');
 });
 
 test('Startskripte prüfen die Nebenversion 22.12', () => {
@@ -44,13 +54,12 @@ test('Startskripte prüfen die Nebenversion 22.12', () => {
 
 // Von @angular/cdk gibt es keine 20.3.x (letzte 20er-Version: 20.2.14), daher gilt Hauptversion 20 mit Caret.
 test('package.json: @angular/cdk ist nicht mehr fest gepinnt und gehört zu Angular 20', () => {
-  const pkg = readJson('package.json');
-  const cdk: string = pkg.devDependencies['@angular/cdk'];
+  const cdk = readJson<PackageJson>('package.json').devDependencies?.['@angular/cdk'] ?? '';
   assert.match(cdk, /^\^20\./, `cdk ist ${cdk}`);
 });
 
 test('package-lock.json: Webpack-Kette entfernt, cdk in Hauptversion 20', () => {
-  const packages: Record<string, { version?: string }> = readJson('package-lock.json').packages;
+  const { packages } = readJson<PackageLock>('package-lock.json');
   const stale = Object.keys(packages).filter((path) =>
     /node_modules\/(@angular-devkit\/build-(angular|webpack)|@ngtools\/webpack|webpack(-dev-server|-dev-middleware)?)$/.test(path),
   );

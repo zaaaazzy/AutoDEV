@@ -38,13 +38,12 @@ async function repository(): Promise<{ dir: string; plain: (...args: string[]) =
 
 /** Konfiguration, deren Filter beim nächsten `git add` eine Marker-Datei schreibt. */
 async function plantFilter(configDir: string, workTree: string, marker: string): Promise<void> {
-  execFileSync('git', [
-    'config',
-    '--file',
-    join(configDir, 'config'),
-    'filter.x.clean',
-    `sh -c 'touch ${marker}; cat'`,
-  ]);
+  // cwd im Test-Repo: Im Agent-Container zeigt das .git des Worktrees auf einen Host-Pfad, git bräche dort ab.
+  execFileSync(
+    'git',
+    ['config', '--file', join(configDir, 'config'), 'filter.x.clean', `sh -c 'touch ${marker}; cat'`],
+    { cwd: workTree, env: PLAIN_ENV, stdio: 'pipe' },
+  );
   await writeFile(join(workTree, '.gitattributes'), '* filter=x\n');
   await writeFile(join(workTree, 'b.txt'), 'b\n');
 }

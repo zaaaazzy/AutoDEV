@@ -62,9 +62,13 @@ COPY --from=guard /out/agent-guard.mjs /out/egress-proxy.mjs /out/visual-capture
 # ESM-Bündel lösen „playwright“ über node_modules neben sich auf: dort liegen die global installierten Pakete.
 RUN ln -s /usr/local/lib/node_modules /opt/aideation/node_modules
 # Ohne root: Der Container läuft mit der UID des Worker-Benutzers (--user), die hier keinen Eintrag hat. Home und
-# Arbeitsordner sind darum für alle beschreibbar. Nichts darin darf root gehören (der globale npm install oben legte
-# sonst ~/.npm als root an, und jedes npm der Agents scheiterte mit EACCES).
-RUN mkdir -p /home/agent /workspace && chmod 1777 /home/agent /workspace
+# Arbeitsordner sind darum für alle beschreibbar; der Container ist kurzlebig (--rm), nichts bleibt liegen. Nichts
+# darin darf root gehören (ein root-eigenes ~/.npm liess jedes npm der Agents mit EACCES scheitern).
+RUN rm -rf /home/agent/.npm && mkdir -p /home/agent /workspace && chmod 1777 /home/agent /workspace
+# npm-Cache in /tmp wie in sandboxRunArgs (npm_config_cache): greift auch, wenn ein Worker mit älterem Code den
+# Container ohne -e npm_config_cache startet (Tester: EACCES auf /home/agent/.npm/_cacache). Erst nach „npm install -g“
+# gesetzt, damit root dort kein Cache anlegt.
+ENV npm_config_cache=/tmp/npm-cache
 USER pwuser
 WORKDIR /workspace
 ENTRYPOINT ["/usr/bin/tini", "--"]
