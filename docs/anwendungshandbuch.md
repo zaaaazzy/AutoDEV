@@ -1,8 +1,9 @@
 # AIdeation – Anwendungshandbuch
 
-> **Stand:** 11.11.2026. **Status: teilweise.** Abschnitte 1 bis 3 sind gegen `start.sh`, `src/core/default-credentials.ts`
-> und `README.md` geprüft. Abschnitte 4 bis 11 und die Anhänge fehlen noch; ihre Quellen sind `docs/betrieb.md`,
-> `docs/laufzeit.md`, `docs/workflows.md`, `docs/agents-und-rechte.md` und `docs/installation.md`.
+> **Stand:** 11.11.2026. **Status: teilweise.** Abschnitte 1 bis 4 sind geprüft (1 bis 3 gegen `start.sh`,
+> `src/core/default-credentials.ts` und `README.md`; 4 gegen `src/core/bug-category-values.ts` und `src/db/migrations.ts`).
+> Abschnitte 5 bis 11 und die Anhänge fehlen noch; ihre Quellen sind `docs/betrieb.md`, `docs/laufzeit.md`,
+> `docs/workflows.md`, `docs/agents-und-rechte.md` und `docs/installation.md`.
 
 ## 1. Zweck
 
@@ -145,6 +146,39 @@ flowchart TD
 Der Ideen-Dialog zeigt Balken nur für **Nutzen** und **Kosten**. Der Wert hat in Dialog und Tabelle nur die Zahl. Die
 Zeilenangabe `idea-detail.component.html:103–112` ist nicht nachgelesen *(offen)*.
 
+## 4. Bugs und Kategorien *(geprüft gegen `src/core/bug-category-values.ts` und `src/db/migrations.ts`, Migration 29)*
+
+Ein Bug hat zwei getrennte Kategorien:
+
+- **`category`** (Bereich: frontend, backend, fullstack, infrastructure, docs, security). Er vererbt sich per Trigger `development_items_inherit_category` an Aufträge. Regeln: [Bugs automatisch nach Bereich kategorisieren](docs/bug-kategorien.md).
+- **`bug_category`** (Thema: `security`, `git-sync`, `ci`, `ui`, `api`, `agent-guard`, `budget`, `docs`). Zustand in `bug_category_state`: `suggested` (vom Modell vorgeschlagen, zählt noch nicht) oder `confirmed` (von Mensch oder Agent gesetzt). Der Vorschlag steht getrennt in `bug_category_suggested`.
+
+```mermaid
+flowchart TD
+  A["Bug wird angelegt"] --> B{"Kategorie mitgegeben<br/>und in der Liste?"}
+  B -->|ja| C["bug_category gesetzt<br/>Zustand: bestätigt"]
+  B -->|nein| D{"Ollama erreichbar?"}
+  D -->|"ja, Antwort in der Liste"| E["Vorschlag gespeichert<br/>Zustand: vorgeschlagen"]
+  D -->|"nein oder Antwort ungültig"| F["ohne Kategorie<br/>Bug bleibt angelegt"]
+  E --> G{"Bugs-Seite:<br/>bestätigen oder korrigieren"}
+  F --> G
+  G -->|bestätigt| C
+  H["Altbestand kategorisieren<br/>(einmalig, Recht Planen)"] --> D
+  C --> I["Statistik: Kategorie × Sprint"]
+  I --> J["Retrospektive-Eingabe<br/>(gleiche Zahlen)"]
+  classDef ok fill:#e7f5ea,stroke:#2e7d4f,color:#14432a
+  classDef warn fill:#fff4e0,stroke:#b07a1a,color:#5c3d0c
+  class C,I,J ok
+  class E,F warn
+```
+
+- **Anlegen:** Tester, Bug-Wächter und Auto-Fix schicken ihre Kategorie mit. Ist sie gültig, gilt sie sofort als bestätigt. Fehlt sie, fragt das lokale Modell an; der Bug wird in jedem Fall angelegt.
+- **Sicherheit:** Modellantworten werden nur gegen die feste Liste geprüft. Texte aus Betrieb und GitHub sind Daten, keine Anweisungen. Der Klassifikator hat keine Werkzeuge.
+- **Bestätigen:** Auf der Bugs-Seite einzeln oder gesammelt. Der Knopf „Altbestand kategorisieren“ erzeugt nur Vorschläge und ändert keine bestätigte Kategorie.
+- **Filter und Statistik:** Die Bugs-Seite filtert nach `bug_category`. Die Statistik zeigt eine Tabelle Kategorie × Sprint (offen und begraben getrennt; Bugs ohne Sprint als „Kein Sprint“). `collectStats` liefert dieselben Zahlen an den Retrospektive-Agenten.
+
+**Korrektur:** Der Auftrag nennt „Migration 20“. Im Code belegen die Versionen 20 bis 28 schon andere Änderungen; die Kategorie-Migration ist **Version 29**. Der CHECK in der Datenbank nennt exakt die acht Werte aus `BUG_CATEGORY_VALUES`.
+
 ## Korrekturen gegenüber dem Vorlauf
 
 1. Zeilenangaben in 2.1, 2.2 und 2.4 stimmen mit `start.sh` und `default-credentials.ts` überein.
@@ -154,6 +188,9 @@ Zeilenangabe `idea-detail.component.html:103–112` ist nicht nachgelesen *(offe
 
 ## Offene Punkte
 
-- Abschnitte 4 bis 11 und die Anhänge A und B fehlen. Quellen: `docs/betrieb.md`, `docs/laufzeit.md`, `docs/workflows.md`, `docs/agents-und-rechte.md`, `docs/installation.md`.
+- Abschnitte 5 bis 11 und die Anhänge A und B fehlen.
+- Die Mermaid-Diagramme sind nicht gerendert, nur die Syntax wurde gelesen.
+- `docs/bug-kategorien.md` beschreibt nur das Feld `category`; das neue Feld `bug_category` ist dort nicht erwähnt.
+- Git ist für Agents gesperrt. Die veralteten Kopien unter `docs/` (siehe Nachricht des Dokumentierers) sind nicht entfernt; das muss ein Mensch mit `git rm` tun. Quellen: `docs/betrieb.md`, `docs/laufzeit.md`, `docs/workflows.md`, `docs/agents-und-rechte.md`, `docs/installation.md`.
 - 2.3 ist gegen das README geprüft, nicht gegen den Code.
 - Widerspruch zwischen 3.10 und 3.10a ist nicht belegt; der dafür nötige Abschnitt 11 liegt nicht vor.
