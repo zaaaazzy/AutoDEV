@@ -99,34 +99,27 @@ export function parseCommand(text: string): string[] | null {
 export interface ModelPreset {
   id: string;
   label: string;
-  /** 0 = kostenlos, 1–3 = $ bis $$$ (grobe Richtwerte, Abrechnung beim jeweiligen Anbieter). */
-  tier: 0 | 1 | 2 | 3;
+  /** 0 = kostenlos, 1–4 = $ bis $$$$ (grobe Richtwerte, Abrechnung beim jeweiligen Anbieter). */
+  tier: 0 | 1 | 2 | 3 | 4;
   command: string;
 }
+
+/**
+ * Die Claude-CLI nimmt für die Aliase haiku/sonnet/opus/fable immer die neueste Version der Reihe. Die
+ * Versionsnummer im Label ist der Stand vom 2026-11-11 (Haiku 5.5, Sonnet 5.5, Opus 5.5, Fable 5.1) und wird
+ * nachgezogen, sobald die CLI eine neuere Generation liefert; der Befehl bleibt gleich.
+ */
+const claudeCommand = (alias: string): string => `claude --model ${alias} --permission-mode acceptEdits -p {prompt}`;
 
 const PROVIDER_ORDER = ['local', 'claude', 'copilot', 'gemini'];
 
 export const MODEL_PRESETS: ModelPreset[] = (
   [
     { id: 'local', label: 'Lokal (Ollama qwen3.5:9b)', tier: 0, command: '' },
-    {
-      id: 'claude-haiku',
-      label: 'Claude Haiku',
-      tier: 1,
-      command: 'claude --model haiku --permission-mode acceptEdits -p {prompt}',
-    },
-    {
-      id: 'claude-sonnet',
-      label: 'Claude Sonnet',
-      tier: 2,
-      command: 'claude --model sonnet --permission-mode acceptEdits -p {prompt}',
-    },
-    {
-      id: 'claude-opus',
-      label: 'Claude Opus',
-      tier: 3,
-      command: 'claude --model opus --permission-mode acceptEdits -p {prompt}',
-    },
+    { id: 'claude-haiku', label: 'Claude Haiku 5.5', tier: 1, command: claudeCommand('haiku') },
+    { id: 'claude-sonnet', label: 'Claude Sonnet 5.5', tier: 2, command: claudeCommand('sonnet') },
+    { id: 'claude-opus', label: 'Claude Opus 5.5', tier: 3, command: claudeCommand('opus') },
+    { id: 'claude-fable', label: 'Claude Fable 5.1 (stärkstes Modell)', tier: 4, command: claudeCommand('fable') },
     {
       id: 'copilot',
       label: 'GitHub Copilot (Standardmodell)',
