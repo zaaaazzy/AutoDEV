@@ -78,3 +78,13 @@ Prüfung im Arbeitscontainer am 11.11.2026:
 
 Weiter nicht belegt: der grüne GitHub-Actions-Lauf und der Neubau des Images `aideation-agent`. Für beides fehlt Agents
 die Berechtigung (`gh`, `docker build`).
+
+### Tests und Gegenprobe
+
+Die Gegenprobe des Testers (Stand `d95610b`) zeigte, dass zwei der drei neuen Testfälle auch ohne den Fix bestanden.
+Beide waren Doppel vorhandener Tests und sind entfernt (`src/core/sandbox.test.ts`, `src/runner/agent-workspace.test.ts`;
+der Cache-Fall steht im bestehenden npm-Cache-Test). Neu bleibt nur „Projektordner der Menschen (`.git` als Ordner):
+`node_modules`-Symlink bleibt“; er scheitert auf dem alten Stand wie erwartet.
+
+Zu beachten: Im Agent-Container zeigt `.git` auf einen Host-Pfad, Git-Befehle gehen dort nicht. Tests, die git
+aufrufen, brauchen deshalb immer `cwd` im Test-Repo (siehe `git-guard.test.ts`).
