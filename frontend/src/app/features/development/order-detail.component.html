@@ -320,54 +320,14 @@
           </ul>
         }
       </details>
-      @if (acceptance().todo.length) {
+      <!-- Unter „Aktionen“ steht die Abnahmeliste schon oben in der Zeile; hier nur in der Auftragsansicht. -->
+      @if (acceptance().todo.length && !embedded()) {
         <details class="run-step order-brief acceptance-todo" open>
           <summary>
             <span class="todo-bang" aria-hidden="true">!</span> Noch zu erledigen
             <span class="muted">({{ acceptance().todo.length }})</span>
           </summary>
-          <ul class="todo-list">
-            @for (check of acceptance().todo; track check.kind + check.position) {
-              <li [class.verifying]="isVerifying(check)">
-                <input
-                  type="checkbox"
-                  [checked]="ticks.saving(item.id, check)"
-                  [disabled]="busy() || isVerifying(check) || !auth.can('plan')"
-                  [attr.aria-label]="'Abhaken: ' + check.text"
-                  [title]="auth.can('plan') ? '' : 'Abhaken braucht das Recht „Planung“.'"
-                  (change)="tickPoint($event, item, check)"
-                />
-                <span class="todo-text"
-                  >{{ check.text }}
-                  @if (isVerifying(check)) {
-                    <small class="todo-state">🤖 Tester prüft …</small>
-                  } @else if (check.note) {
-                    <small class="muted">{{ check.note }}</small>
-                  }
-                </span>
-                <button
-                  type="button"
-                  class="todo-verify"
-                  title="Vom Tester automatisch prüfen lassen"
-                  [disabled]="busy() || isVerifying(check)"
-                  (click)="verifyPoints(item, check)"
-                >
-                  🤖 Prüfen
-                </button>
-              </li>
-            }
-          </ul>
-          @if (acceptance().todo.length > 1) {
-            <button
-              class="button secondary small"
-              type="button"
-              [disabled]="busy() || acceptance().verifying"
-              (click)="verifyPoints(item)"
-            >
-              🤖 Alle automatisch prüfen
-            </button>
-          }
-          <p class="muted small">Offen, bis du den Punkt abhakst oder der Tester ihn als erfüllt bestätigt.</p>
+          <app-acceptance-list [order]="item" [checks]="acceptance().todo" />
         </details>
       }
       @if (acceptance().visual.length) {

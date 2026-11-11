@@ -62,10 +62,8 @@ test('Abnahme-Häkchen: Doppelklick sendet nur einmal', async () => {
 });
 
 test('Abnahme-Häkchen: Vorlagen binden Zustand und Recht', () => {
-  for (const file of [
-    '../features/actions/actions.component.html',
-    '../features/development/order-detail.component.html',
-  ]) {
+  // Eine Liste für „Aktionen“ und Auftragsansicht: die Häkchen stehen nur noch in der Abnahmeliste.
+  for (const file of ['../features/development/acceptance-list.component.ts']) {
     const html = readFileSync(new URL(file, import.meta.url), 'utf8');
     const box = html.match(/<input[^>]*'Abhaken: '[^>]*>/)?.[0] ?? '';
     assert.ok(box, `Häkchen in ${file} nicht gefunden`);

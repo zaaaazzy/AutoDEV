@@ -1,4 +1,4 @@
-import type { DevelopmentItem } from '../../core/models.js';
+import type { DevelopmentItem } from '../core/models.js';
 
 /** Reiter „Ansicht“ bei Frontend- und Fullstack-Aufträgen (oder wenn es schon Befunde bzw. eine Freigabe gibt). */
 export function needsVisual(

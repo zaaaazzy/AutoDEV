@@ -7,7 +7,9 @@
           <h2>
             Rückmeldungen der Agents <span class="muted">({{ attention().length }} warten auf dich)</span>
           </h2>
-          <p class="muted">Eine Zeile aufklappen zeigt, warum der Auftrag wartet – und was jetzt zu tun ist.</p>
+          <p class="muted">
+            Die Spalte „Zu tun“ nennt den nächsten Schritt. Eine Zeile aufklappen zeigt, was jetzt zu erledigen ist.
+          </p>
         </div>
         @if (auth.can('run') && waitingApprovals().length) {
           <!-- preventDefault: Der Klick im Kopf soll das Panel nicht zuklappen. -->
@@ -26,6 +28,7 @@
         class="attention-table"
         [items]="items()"
         [initialSort]="[]"
+        [extraColumns]="taskColumns"
         [editable]="false"
         [linkFiltered]="false"
         [bulk]="true"
@@ -34,73 +37,103 @@
         <ng-template appOrderDetail let-item>
           @if (entryOf(item.id); as entry) {
             @let card = entry.card;
-            @let showDetails = detailsOpen(item.id);
+            @let open = entry.acceptance.open;
             <div class="attention-body" [id]="'order-' + item.id">
-              <section class="attention-section">
-                <h3>Warum</h3>
-                <p>{{ card.why }}</p>
-                @if (card.agent && !card.why.startsWith(card.agent)) {
-                  <p class="muted small">Gemeldet von: {{ card.agent }}</p>
-                }
-              </section>
+              <!-- Zone 1: Grund und der eine Hauptknopf. -->
+              <div class="attention-head" [class]="'attention-head tone-' + headTone(entry)">
+                <div class="attention-head-text">
+                  <p class="attention-why">{{ card.why }}</p>
+                  @if (headNote(entry); as note) {
+                    <p class="muted small">{{ note }}</p>
+                  }
+                </div>
+                <div class="attention-head-actions">
+                  @if (card.step === 'approve' && !item.reviewApprovedAt) {
+                    <button
+                      class="button primary"
+                      type="button"
+                      [disabled]="busy()"
+                      [title]="hint('✓ Freigeben')"
+                      (click)="approve(item)"
+                    >
+                      ✓ Freigeben
+                    </button>
+                    <button
+                      class="button secondary"
+                      type="button"
+                      [disabled]="busy()"
+                      [title]="hint('↩ Zurückweisen')"
+                      (click)="reject(item)"
+                    >
+                      ↩ Zurückweisen
+                    </button>
+                  } @else if (primaryLabel(item, card.step); as label) {
+                    <button
+                      class="button primary"
+                      type="button"
+                      [disabled]="busy()"
+                      [title]="hint(label)"
+                      (click)="primary(item, card, label)"
+                    >
+                      {{ label }}
+                    </button>
+                  }
+                </div>
+              </div>
 
-              <section class="attention-section attention-solution">
-                <h3>{{ card.step === 'approve' || card.step === 'question' ? 'Was jetzt' : 'Lösungsvorschlag' }}</h3>
-                @switch (card.step) {
-                  @case ('approve') {
-                    <app-order-approval [order]="item" [withActions]="false" />
-                  }
-                  @case ('question') {
-                    <app-order-question [order]="item" />
-                  }
-                  @case ('check') {
-                    <p>{{ card.next }}</p>
-                    <ul class="todo-list">
-                      @for (check of entry.checks; track check.kind + check.position) {
-                        <li>
-                          <input
-                            type="checkbox"
-                            [checked]="ticks.saving(item.id, check)"
-                            [disabled]="busy() || !auth.can('plan')"
-                            [attr.aria-label]="'Abhaken: ' + check.text"
-                            [title]="auth.can('plan') ? '' : 'Abhaken braucht das Recht „Planung“.'"
-                            (change)="checkPoint($event, item, check)"
-                          />
-                          <span class="todo-text"
-                            >{{ check.text }}
-                            @if (check.note) {
-                              <small class="muted">{{ check.note }}</small>
-                            }
-                          </span>
-                        </li>
-                      }
-                    </ul>
+              <!-- Zone 2: Jetzt zu tun – je Fall ein Arbeitsbereich, die Abnahme zuerst. -->
+              @if (open.length) {
+                <section class="attention-work attention-acceptance" aria-label="Abnahme">
+                  <h3>
+                    Abnahme
+                    <b>{{ open.length }} von {{ open.length + entry.acceptance.met.length }} offen</b>
+                  </h3>
+                  <app-acceptance-list
+                    [order]="item"
+                    [checks]="open"
+                    [met]="entry.acceptance.met"
+                    [confirmable]="entry.acceptance.manual > 0 && card.step !== 'check'"
+                  >
                     @if (item.status !== 'approval' && item.status !== 'in_progress') {
                       <app-acceptance-review [order]="item" />
                     }
-                  }
-                  @case ('suggestion') {
+                  </app-acceptance-list>
+                </section>
+              }
+
+              @switch (card.step) {
+                @case ('approve') {
+                  <section class="attention-work attention-approval" aria-label="Freigabe">
+                    <h3>Freigabe</h3>
+                    <app-order-approval [order]="item" [withActions]="false" />
+                  </section>
+                }
+                @case ('question') {
+                  <section class="attention-work attention-question" aria-label="Rückfrage">
+                    <h3>Rückfrage</h3>
+                    <app-order-question [order]="item" />
+                  </section>
+                }
+                @case ('suggestion') {
+                  <section class="attention-work" aria-label="Lösungsvorschlag">
+                    <h3>Lösungsvorschlag des Assistenten</h3>
                     <p class="attention-suggestion">{{ card.detail }}</p>
-                    <p class="muted small">Vorschlag des Assistenten aus der Problemanalyse.</p>
-                  }
-                  @case ('task') {
-                    @if (card.detail) {
+                  </section>
+                }
+                @case ('task') {
+                  @if (card.detail) {
+                    <section class="attention-work" aria-label="Aufgabe für dich">
+                      <h3>Aufgabe für dich</h3>
                       <p>
                         <strong>{{ card.detail }}</strong>
                       </p>
-                    }
-                    @if (card.next) {
-                      <p>{{ card.next }}</p>
-                    }
-                  }
-                  @default {
-                    <p>{{ card.next }}</p>
+                    </section>
                   }
                 }
-              </section>
+              }
 
               @if (entry.evidence.length) {
-                <section class="attention-section attention-evidence" aria-label="Offene Testnachweise">
+                <section class="attention-work attention-evidence" aria-label="Offene Testnachweise">
                   <h3>Offene Testnachweise</h3>
                   <ul class="todo-list evidence-list">
                     @for (proof of entry.evidence; track proof.id) {
@@ -152,7 +185,7 @@
               }
 
               @if (showVisual(item)) {
-                <section class="attention-section attention-visual">
+                <section class="attention-work attention-visual" aria-label="Optische Abnahme">
                   <app-order-visual [order]="item" [open]="true" />
                 </section>
               }
@@ -170,121 +203,88 @@
                 </label>
               }
 
-              <div class="attention-actions">
-                @if (card.step === 'approve' && !item.reviewApprovedAt) {
-                  <button
-                    class="button primary"
-                    type="button"
-                    [disabled]="busy()"
-                    [title]="hint('✓ Freigeben')"
-                    (click)="approve(item)"
-                  >
-                    ✓ Freigeben
-                  </button>
-                  <button
-                    class="button secondary"
-                    type="button"
-                    [disabled]="busy()"
-                    [title]="hint('↩ Zurückweisen')"
-                    (click)="reject(item)"
-                  >
-                    ↩ Zurückweisen
-                  </button>
-                } @else if (primaryLabel(item, card.step); as label) {
-                  <button
-                    class="button primary"
-                    type="button"
-                    [disabled]="busy()"
-                    [title]="hint(label)"
-                    (click)="primary(item, card, label)"
-                  >
-                    {{ label }}
-                  </button>
-                }
-                <button
-                  class="button secondary attention-details-toggle"
-                  type="button"
-                  [attr.aria-expanded]="showDetails"
-                  [attr.aria-controls]="'attention-details-' + item.id"
-                  [title]="hint(showDetails ? 'Details ausblenden' : 'Details')"
-                  (click)="toggleDetails(item.id)"
-                >
-                  {{ showDetails ? 'Details ausblenden' : 'Details' }}
-                </button>
-                @if (item.status === 'blocked' && item.kind !== 'express' && auth.can('run')) {
-                  <button
-                    class="button secondary"
-                    type="button"
-                    [disabled]="busy() || card.step === 'analyzing'"
-                    [title]="hint('Neu analysieren')"
-                    (click)="analyzeOrder(item)"
-                  >
-                    Neu analysieren
-                  </button>
-                }
-              </div>
-              @if (!auth.can('run') && item.kind !== 'express' && item.status === 'blocked') {
-                <p class="muted small">
-                  Erneut versuchen braucht das Recht, Agents zu starten – frag dafür einen Admin.
-                </p>
-              }
-
-              @if (showDetails) {
-                <div class="attention-detail" [id]="'attention-details-' + item.id">
-                  <h3>Auftragsdetails</h3>
-                  <app-order-detail [order]="item" [embedded]="true" />
-                  @if (entry.failure || item.analysis) {
-                    <details class="attention-tech">
-                      <summary>Meldung, Analyse und Protokoll</summary>
-                      <div class="attention-failure-body">
-                        @if (entry.failure; as failure) {
-                          @if (failure.unmet.length) {
-                            <h4>Nicht erfüllte Abnahmepunkte</h4>
-                            <ul class="attention-unmet">
-                              @for (point of failure.unmet; track $index) {
-                                <li>
-                                  @if (point.label) {
-                                    <strong>{{ point.label }}:</strong>
-                                  }
-                                  {{ point.criterion }}
-                                  @if (point.reason) {
-                                    <small>Grund: {{ point.reason }}</small>
-                                  }
-                                </li>
-                              }
-                            </ul>
-                          }
-                          @if (failure.report && !repeatsWhy(failure.report, card.why)) {
-                            <h4>Meldung{{ failure.agent ? ' des Agents „' + failure.agent + '“' : '' }}</h4>
-                            <article
-                              class="markdown attention-report"
-                              [innerHTML]="failure.report | markdown"
-                            ></article>
-                          }
-                          @if (failure.note) {
-                            <h4>Ergebnis der Problemanalyse</h4>
-                            <p>{{ noteText(item, failure.note) }}</p>
-                          }
-                        }
-                        @if (item.analysis) {
-                          <h4>Problemanalyse des Assistenten</h4>
-                          <article class="markdown attention-analysis" [innerHTML]="item.analysis | markdown"></article>
-                        }
-                        @if (entry.failure?.log) {
-                          <h4>Testprotokoll</h4>
-                          <pre class="attention-log">{{ entry.failure?.log }}</pre>
-                        }
-                        @if (item.failureBugId) {
-                          <p class="muted small">
-                            Dazu gibt es einen
-                            <a href="#bugs" (click)="$event.preventDefault(); openBug(item.failureBugId)">Bug-Bericht</a
-                            >.
-                          </p>
-                        }
-                      </div>
-                    </details>
+              <!-- Zone 3: Nebenaktionen und die eingeklappten Details. -->
+              @if (item.status === 'blocked' && item.kind !== 'express') {
+                <div class="attention-actions">
+                  @if (auth.can('run')) {
+                    <button
+                      class="button secondary"
+                      type="button"
+                      [disabled]="busy() || card.step === 'analyzing'"
+                      [title]="hint('Neu analysieren')"
+                      (click)="analyzeOrder(item)"
+                    >
+                      Neu analysieren
+                    </button>
+                  } @else {
+                    <p class="muted small">
+                      Erneut versuchen braucht das Recht, Agents zu starten – frag dafür einen Admin.
+                    </p>
                   }
                 </div>
+              }
+
+              <details
+                class="attention-fold"
+                [id]="'attention-details-' + item.id"
+                [open]="detailsOpen(item.id)"
+                (toggle)="setDetails(item.id, $any($event.target).open)"
+              >
+                <summary [title]="'Beschreibung, Kennzahlen, Agents und Dateien von „' + item.title + '“'">
+                  Auftragsdetails
+                </summary>
+                @if (detailsOpen(item.id)) {
+                  <div class="attention-fold-body">
+                    <app-order-detail [order]="item" [embedded]="true" />
+                  </div>
+                }
+              </details>
+              @if (entry.failure || item.analysis) {
+                <details class="attention-fold attention-tech">
+                  <summary>Meldung, Analyse und Protokoll</summary>
+                  <div class="attention-failure-body">
+                    @if (entry.failure; as failure) {
+                      @if (failure.unmet.length && !open.length) {
+                        <h4>Nicht erfüllte Abnahmepunkte</h4>
+                        <ul class="attention-unmet">
+                          @for (point of failure.unmet; track $index) {
+                            <li>
+                              @if (point.label) {
+                                <strong>{{ point.label }}:</strong>
+                              }
+                              {{ point.criterion }}
+                              @if (point.reason) {
+                                <small>Grund: {{ point.reason }}</small>
+                              }
+                            </li>
+                          }
+                        </ul>
+                      }
+                      @if (failure.report && !repeatsWhy(failure.report, card.why)) {
+                        <h4>Meldung{{ failure.agent ? ' des Agents „' + failure.agent + '“' : '' }}</h4>
+                        <article class="markdown attention-report" [innerHTML]="failure.report | markdown"></article>
+                      }
+                      @if (failure.note) {
+                        <h4>Ergebnis der Problemanalyse</h4>
+                        <p>{{ noteText(item, failure.note) }}</p>
+                      }
+                    }
+                    @if (item.analysis) {
+                      <h4>Problemanalyse des Assistenten</h4>
+                      <article class="markdown attention-analysis" [innerHTML]="item.analysis | markdown"></article>
+                    }
+                    @if (entry.failure?.log) {
+                      <h4>Testprotokoll</h4>
+                      <pre class="attention-log">{{ entry.failure?.log }}</pre>
+                    }
+                    @if (item.failureBugId) {
+                      <p class="muted small">
+                        Dazu gibt es einen
+                        <a href="#bugs" (click)="$event.preventDefault(); openBug(item.failureBugId)">Bug-Bericht</a>.
+                      </p>
+                    }
+                  </div>
+                </details>
               }
             </div>
           }

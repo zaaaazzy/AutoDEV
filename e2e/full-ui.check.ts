@@ -460,8 +460,9 @@ test('Auftrag: anlegen, Status ändern, erneut versuchen, analysieren, löschen'
   await expect(row.locator('b')).toHaveCount(0);
 
   await open(page, 'actions');
-  // Rückmeldungen als Auftragstabelle wie unter „Aufträge“: aufklappen zeigt Warum, Lösungsvorschlag, Ergänzung und
-  // Aktionen; die Auftragsdetails erst über „Details“. Jede Aktion fragt im Dialog nach.
+  // Rückmeldungen als Auftragstabelle wie unter „Aufträge“: aufklappen zeigt das Kopfband (Grund und Hauptknopf),
+  // den Arbeitsbereich, die Ergänzung; die Auftragsdetails erst über die Falte „Auftragsdetails“. Jede Aktion fragt
+  // im Dialog nach.
   const rows = page.locator('.attention-table tbody tr:not(.closed-detail)');
   const blocked = rows.filter({ hasText: 'Warenkorb blocked' });
   await expect(blocked.first()).toBeVisible();
@@ -478,9 +479,9 @@ test('Auftrag: anlegen, Status ändern, erneut versuchen, analysieren, löschen'
   const firstTitle = await titleOf(first);
   await expect(panelOf(first)).toHaveCount(0);
   const firstPanel = await expand(first);
-  await expect(firstPanel.locator('.attention-section').first()).not.toBeEmpty();
+  await expect(firstPanel.locator('.attention-head .attention-why')).not.toBeEmpty();
   await expect(firstPanel.locator('app-order-detail')).toHaveCount(0);
-  await button(firstPanel, 'Details').click();
+  await firstPanel.locator('details.attention-fold > summary', { hasText: 'Auftragsdetails' }).click();
   await expect(firstPanel.locator('app-order-detail')).toBeVisible();
   await snap(page, info, 'Auftrag Details', false);
   // Unter „Aktionen“ keine Status-/Sprint-/Agent-Zeile mehr: den Status ändert man auf der Seite „Aufträge“.

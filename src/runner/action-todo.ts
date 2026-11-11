@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { generateSprintReport } from '../api/reports.js';
 import { defined } from '../core/defined.js';
 import { OVERRUN_TODO_PREFIX } from '../core/estimate-overrun.js';
+import { MANUAL_TODO_PREFIX } from '../core/shared-types.js';
 
 /**
  * „Aktion notwendig“: Aufträge, die nicht an einem Code-Fehler scheitern, sondern auf einen Menschen warten
@@ -37,8 +38,7 @@ export function humanActionFor(text: string): string | null {
   return HUMAN_ACTIONS.find(([pattern]) => pattern.test(tail))?.[1] ?? null;
 }
 
-/** Beginn der Aktion aus den manuellen Abnahmepunkten: ein Hinweis zu einem bestandenen Test, kein Grund zu warten. */
-export const MANUAL_TODO_PREFIX = 'Selbst prüfen: ';
+export { MANUAL_TODO_PREFIX };
 
 /** Kurzform aus den manuellen Abnahmepunkten des Testers. */
 export function manualTodo(checks: string[]): string | null {

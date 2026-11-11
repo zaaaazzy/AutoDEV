@@ -67,7 +67,7 @@ function attentionRow(page: Page, title: string): Locator {
   return page.locator('.attention-table tbody tr:not(.closed-detail)').filter({ hasText: title });
 }
 
-/** Zeile unter „Aktionen“ aufklappen und den Bereich darunter liefern (Warum, Lösungsvorschlag, Aktionen). */
+/** Zeile unter „Aktionen“ aufklappen und den Bereich darunter liefern (Kopfband, Arbeitsbereich, Aktionen). */
 async function attentionPanel(page: Page, title: string): Promise<Locator> {
   const row = attentionRow(page, title).first();
   const toggle = row.locator('.dt-expand');

@@ -414,6 +414,18 @@ Jeder dieser Knöpfe (und „Erneut versuchen“, „Sprintvorschlag übernehmen
 | Dashboard → Git-Hinweis → Lösung ausführen         | `git_fix_requests`                       | Heartbeat 15 s (`processGitFix`)                                                        |
 | Aktionen → Routine mit Zeitplan                    | `agent_tasks.next_run_at`                | Routinen-Planer 1 min → Chat-Spur mit Rolle `routine`                                   |
 
+### Rückmeldungen der Agents (Seite „Aktionen“)
+
+Die Tabelle „Rückmeldungen der Agents“ listet Aufträge, die auf einen Menschen warten (`orderAttention` in `frontend/src/app/shared/order-attention.ts`): Rückfragen, Freigaben, blockierte und abgelehnte Aufträge, aus dem Sprint genommene, offene Abnahmepunkte und offene Testnachweise. Die Spalte **„Zu tun“** nennt vor dem Aufklappen die Art der Aufgabe (eine je Auftrag, in dieser Rangfolge): Rückfrage, Freigabe, Abnahme, Testnachweis, Abgelehnt, Einplanen, Aufgabe für dich, Erneut versuchen, Läuft. Sie ist filterbar.
+
+Jede aufgeklappte Zeile hat denselben Aufbau in drei Zonen:
+
+1. **Kopfband:** der Grund in einem Satz (`attentionCard`), darunter der nächste Schritt und der meldende Agent; rechts der eine Hauptknopf („Erneut versuchen“, „So umsetzen lassen“, „Geprüft – alles in Ordnung“, „Wieder einplanen“, „✓ Freigeben“ mit „↩ Zurückweisen“).
+2. **Arbeitsbereich:** je Fall ein Block. Sind Abnahmepunkte offen (nur von Hand prüfbar, vom Tester als nicht erfüllt gemeldet oder noch offen), steht die **Abnahmeliste zuerst**: Häkchen je Punkt, „🤖 Prüfen“ je Punkt, „🤖 Alle automatisch prüfen“, bei manuellen Punkten „Geprüft – alles in Ordnung“ und der Review-Container; erfüllte Punkte stehen eingeklappt dahinter. Danach folgen Freigabe, Rückfrage, Lösungsvorschlag bzw. Aufgabe, offene Testnachweise, optische Abnahme und das Ergänzungsfeld für die Agents. Die Liste (`app-acceptance-list`) ist dieselbe wie unter „Aufträge“ → „Noch zu erledigen“.
+3. **Nebenaktionen und Falten:** „Neu analysieren“ bei blockierten Aufträgen, darunter die eingeklappten Falten „Auftragsdetails“ (Kennzahlen, Beschreibung, Agents, Dateien, Risiken – erst beim Öffnen gerendert) und „Meldung, Analyse und Protokoll“.
+
+Der Abnahmehinweis `action_todo = „Selbst prüfen: …“` (`MANUAL_TODO_PREFIX` in `src/core/shared-types.ts`) zählt dort nicht als eigene Aktion: Die Punkte selbst stehen in der Abnahmeliste, und ein erledigter Auftrag mit manuellen Punkten bleibt so lange gelistet, bis sie abgehakt sind. Einen eigenen Datenbank-Status „Abnahme“ gibt es bewusst nicht: Manuelle Punkte entstehen nach dem Merge, ein Status davor hiesse, den Merge aufzuhalten; die Art „Abnahme“ in der Spalte „Zu tun“ macht den Fall sichtbar, ohne Übergänge zu ändern.
+
 Der Komplettlauf prüft im Agent-Worktree immer `main` (losgelöst ausgecheckt). Hat der Worktree offene Änderungen, etwa weil ein Auftrag nach dem Nutzungslimit mit halbfertigem Stand wartet, startet kein Test und es werden keine Bugs angelegt. Die Anforderung steht dann auf „fehlgeschlagen“ mit dem Grund „Offene Änderungen im Agent-Worktree … – Test auf main nicht möglich“.
 
 ## 9 · Rechte je Agent
