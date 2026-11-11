@@ -103,6 +103,8 @@ export class DataTableComponent<T> {
   readonly groupBy = input<string | null>(null);
   /** Geöffnete Zeile; mit [(expanded)] von außen steuerbar. */
   readonly expanded = model<string | null>(null);
+  /** Statt Aufklappen: Klick in die Zeile führt woandershin (z. B. Register „Anfragen“ zur Seite „Aktionen“). */
+  readonly rowLink = input<((id: string) => void) | null>(null);
   /** Aktive Filter als Chips über der Tabelle zeigen (der Filter selbst wirkt auch ohne Chips). */
   readonly showFilterChips = input(true);
   /**
@@ -370,12 +372,14 @@ export class DataTableComponent<T> {
 
   /** Klick irgendwo in die Zeile öffnet die Details – außer auf Bedienelemente oder beim Markieren von Text. */
   protected rowClick(id: string, event: MouseEvent): void {
-    if (!this.detail()) return;
+    const link = this.rowLink();
+    if (!this.detail() && !link) return;
     const target = event.target as HTMLElement | null;
     if (target?.closest('button, a, input, select, textarea, label, summary, [role="button"], [contenteditable]'))
       return;
     if (globalThis.getSelection?.()?.toString()) return;
-    this.toggleRow(id);
+    if (link) link(id);
+    else this.toggleRow(id);
   }
 
   /** Knopf, der das Filtermenü geöffnet hat: nach Escape erhält er den Fokus zurück. */

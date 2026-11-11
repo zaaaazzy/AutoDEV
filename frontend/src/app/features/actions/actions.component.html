@@ -9,6 +9,18 @@
           </h2>
           <p class="muted">Eine Zeile aufklappen zeigt, warum der Auftrag wartet – und was jetzt zu tun ist.</p>
         </div>
+        @if (auth.can('run') && waitingApprovals().length) {
+          <!-- preventDefault: Der Klick im Kopf soll das Panel nicht zuklappen. -->
+          <button
+            class="button primary approve-all"
+            type="button"
+            [disabled]="busy() || approving()"
+            [title]="'Alle ' + waitingApprovals().length + ' Umsetzungen in Freigabe mit einem Klick abnehmen'"
+            (click)="$event.preventDefault(); approveAll()"
+          >
+            ✓ Alle abnehmen ({{ waitingApprovals().length }})
+          </button>
+        }
       </summary>
       <app-order-table
         class="attention-table"

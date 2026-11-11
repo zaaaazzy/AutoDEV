@@ -180,6 +180,11 @@
   background: linear-gradient(180deg, #fffaf3, var(--surface) 120px);
 }
 
+.attention-panel .approve-all {
+  flex-shrink: 0;
+  align-self: center;
+}
+
 .attention-actions {
   display: flex;
   flex-wrap: wrap;

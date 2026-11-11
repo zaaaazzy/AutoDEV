@@ -35,6 +35,13 @@ flowchart TB
 - **Erfolg** heisst: alle Schritte bestanden, Merge in den Sprint-Branch (ohne Sprint: in `main`). Ist eine
   Review-Freigabe eingestellt (`review_mode` `ui` oder `always`), wartet der Auftrag vorher auf einen Menschen
   (Status „Wartet auf Freigabe“).
+- **Alle abnehmen:** Statt jede Umsetzung einzeln mit „✓ Freigeben“ abzunehmen, nimmt „Alle abnehmen“ alle wartenden
+  in einer Anfrage ab: auf der Seite „Aktionen“ die angezeigten (`POST /api/projects/:slug/approve` mit `ids`), im
+  Sprintmenü die des Sprints (`POST /api/sprints/:id/approve`). Beide brauchen das Recht „Ausführen“. Der Server prüft
+  den Git-Zustand einmal (`guardGit`, Aktion `approve`), setzt `review_approved_at` in einem UPDATE nur für Aufträge im
+  Status Freigabe ohne bisherige Abnahme und weckt den Worker einmal. Der Worker mergt sie danach nacheinander;
+  Konflikte gehen wie bei der Einzelfreigabe an die Agents zurück. Inzwischen geänderte Aufträge zählen nicht mit.
+  Das Register „Anfragen“ unter jedem Sprint listet dessen Aufträge in Freigabe, abgenommene mit „wird gemergt“.
 - **Fehler** heisst: Auftrag blockiert, Bug-Bericht, Problemanalyse. Ein Behebungsauftrag entsteht nur, wenn die
   Analyse einen Code-Fehler bestätigt und `auto_bugfix` am Projekt an ist (Abschnitt 5).
 - Phasen je Auftrag: `pre_task` → `while_task` → `after_task`, dazu `pre_sprint` einmal je Sprint und

@@ -78,7 +78,42 @@
 .sprint-orders-section {
   margin-bottom: 14px;
 }
-.sprint-orders-section > summary,
+/* Register „Aufträge“ / „Anfragen“ */
+.sprint-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.sprint-tabs [role='tab'] {
+  margin-bottom: -1px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sprint-tabs [role='tab'].active {
+  border-color: var(--line);
+  border-bottom-color: var(--surface);
+  background: var(--surface);
+  color: var(--ink);
+}
+.sprint-tabs .tab-count {
+  display: inline-block;
+  min-width: 20px;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--line);
+  color: var(--ink);
+  font-size: 12px;
+  text-align: center;
+}
 .sprint-pool > summary {
   margin-bottom: 8px;
   font-weight: 700;
