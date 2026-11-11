@@ -126,11 +126,22 @@ export function exitCause(logs: string): string | null {
     .split('\n')
     .map((entry) => entry.trim())
     .find((entry) =>
-      /startup failed|^error\b|^npm (?:error|ERR!)|^\w*Error:|fehlgeschlagen|failed to|cannot find module|EADDRINUSE|exited with/i.test(
+      /startup failed|^error\b|^npm (?:error|ERR!)|^\w*Error:|fehlgeschlagen|failed(?: to|:)|cannot find module|EADDRINUSE|exited with/i.test(
         entry,
       ),
     );
   return line ? line.slice(0, 240) : null;
+}
+
+/**
+ * Sieht die Ursache nach der Datenbank aus (Migration, Schema, fehlende Tabelle oder Spalte)? Dann passt die Kopie
+ * der Projektdatenbank vermutlich nicht zum gestarteten Stand – etwa ein Sprint-Zweig, der die Migrationen von `main`
+ * noch nicht kennt – und ein zweiter Start mit leerer Datenbank lohnt sich. Andere Ursachen (npm, Port, Code) nicht.
+ */
+export function databaseRelatedCause(cause: string | null): boolean {
+  return Boolean(
+    cause && /migrat|database|datenbank|schema|relation .* does not exist|column .* does not exist/i.test(cause),
+  );
 }
 
 export function containerEnvProblem(env: string[], mainUrl: string | null): string | null {
@@ -183,6 +194,16 @@ export const DATABASE_COPY_SCRIPT = [
   'psql -q -v ON_ERROR_STOP=1 -d "$T_DB" -f "$DUMP" > /dev/null',
 ].join(' && ');
 
+/**
+ * Leere Datenbank statt der Kopie (zweiter Start, wenn die Kopie nicht zum Stand passt): dieselben Zugänge wie die
+ * Kopie, damit der Review-Befehl des Projekts sie wie gewohnt migriert.
+ */
+export const DATABASE_EMPTY_SCRIPT = [
+  'export PGHOST=$S_HOST PGPORT=$S_PORT PGUSER=$S_USER PGPASSWORD=$S_PASSWORD',
+  'dropdb --if-exists --force "$T_DB"',
+  'createdb "$T_DB"',
+].join(' && ');
+
 async function update(pool: Pool, slot: number, fields: Record<string, unknown>): Promise<void> {
   const keys = Object.keys(fields);
   await pool.query(
@@ -203,8 +224,18 @@ const CLEARED = {
   started_at: null,
 };
 
+/** Zweiter Start mit leerer Datenbank: je Container einmal je Stand, damit kein Container endlos neu startet. */
+interface EmptyRetry {
+  commit: string;
+  cause: string;
+}
+
+const emptyDatabaseNote = (cause: string): string =>
+  `Leere Datenbank: die Kopie der Projektdatenbank passte nicht zu diesem Stand (${cause}).`;
+
 export class ReviewSlots {
   private imageReady = false;
+  private readonly emptyRetries = new Map<number, EmptyRetry>();
 
   constructor(
     private readonly pool: Pool,
@@ -216,6 +247,11 @@ export class ReviewSlots {
         .catch(() => false),
     private readonly databases: ReviewDatabaseConfig = { reviewUrl: null, mainUrl: null },
   ) {}
+
+  private async clear(slot: number): Promise<void> {
+    this.emptyRetries.delete(slot);
+    await update(this.pool, slot, CLEARED);
+  }
 
   private docker(args: string[], timeoutMs = 60_000) {
     return this.execute(['docker', ...args], this.installRoot, { timeoutMs });
@@ -338,7 +374,7 @@ export class ReviewSlots {
     if (!slot.enabled || slot.status === 'stopping') {
       if (slot.status !== 'idle') {
         await this.docker(['rm', '-f', name]);
-        await update(this.pool, slot.slot, CLEARED);
+        await this.clear(slot.slot);
       }
       return;
     }
@@ -346,7 +382,7 @@ export class ReviewSlots {
     const project = slot.projectSlug ? await this.project(slot.projectSlug) : null;
     if (!project) {
       await this.docker(['rm', '-f', name]);
-      await update(this.pool, slot.slot, CLEARED);
+      await this.clear(slot.slot);
       return;
     }
     // Freigabe-Container: endet mit der Freigabe; nach einer Nachbesserung (neuer Commit) neu starten.
@@ -354,7 +390,7 @@ export class ReviewSlots {
       const commit = await this.approvalCommit(slot, project.folder);
       if (!commit) {
         await this.docker(['rm', '-f', name]);
-        await update(this.pool, slot.slot, CLEARED);
+        await this.clear(slot.slot);
         return;
       }
       if (slot.status !== 'requested' && slot.commit !== commit) {
@@ -376,6 +412,22 @@ export class ReviewSlots {
       if (state.output.trim() !== 'true') {
         const logs = await this.docker(['logs', '--tail', '40', name], 15_000);
         const cause = exitCause(logs.output);
+        // Kopie der Projektdatenbank passt nicht zum Stand (z. B. Migrationen von main, die der Zweig nicht kennt):
+        // einmal je Stand mit leerer Datenbank neu starten, statt den Review nur als gescheitert zu melden.
+        if (
+          slot.status === 'starting' &&
+          cause &&
+          project.databaseUrl &&
+          this.emptyRetries.get(slot.slot)?.commit !== slot.commit &&
+          databaseRelatedCause(cause)
+        ) {
+          this.emptyRetries.set(slot.slot, { commit: slot.commit ?? '', cause });
+          console.info(
+            `[${slot.projectSlug}] Review-Container ${slot.slot}: ${cause} – zweiter Start mit leerer Datenbank.`,
+          );
+          await this.start(slot, project, cause);
+          return;
+        }
         await update(this.pool, slot.slot, {
           status: 'failed',
           message: `Container beendet${cause ? `: ${cause}` : '.'}\n${logs.output.trim().slice(-800)}`,
@@ -383,12 +435,20 @@ export class ReviewSlots {
         return;
       }
       if (slot.status === 'starting' && (await this.fetchUrl(reviewUrl(slot.slot)))) {
-        await update(this.pool, slot.slot, { status: 'running', message: null });
+        const retry = this.emptyRetries.get(slot.slot);
+        await update(this.pool, slot.slot, {
+          status: 'running',
+          message: retry && retry.commit === slot.commit ? emptyDatabaseNote(retry.cause) : null,
+        });
       }
     }
   }
 
-  private async start(slot: ReviewSlot, project: ProjectInfo): Promise<void> {
+  /**
+   * Container für den Stand starten. `emptyDatabaseCause`: zweiter Start mit leerer statt kopierter Projektdatenbank,
+   * weil der erste an der Kopie scheiterte (die Ursache steht dann in der Meldung).
+   */
+  private async start(slot: ReviewSlot, project: ProjectInfo, emptyDatabaseCause: string | null = null): Promise<void> {
     const name = reviewContainer(slot.slot);
     if (!project.command.length) {
       await update(this.pool, slot.slot, {
@@ -438,11 +498,15 @@ export class ReviewSlots {
     await update(this.pool, slot.slot, {
       status: 'starting',
       commit_sha: slot.commit,
-      message: 'Container wird vorbereitet …',
+      message: emptyDatabaseCause
+        ? `Kopie der Projektdatenbank passte nicht zu diesem Stand (${emptyDatabaseCause}) – zweiter Start mit leerer Datenbank …`
+        : 'Container wird vorbereitet …',
     });
     await this.docker(['rm', '-f', name]);
     const prepared = database
-      ? await this.copyDatabase(database.source, database.target)
+      ? emptyDatabaseCause
+        ? await this.emptyDatabase(database.source, database.target)
+        : await this.copyDatabase(database.source, database.target)
       : slotDatabase
         ? await this.createSlotDatabase(slotDatabase.base, slotDatabase.target)
         : null;
@@ -477,7 +541,11 @@ export class ReviewSlots {
       this.pool,
       slot.slot,
       run.exitCode === 0
-        ? { status: 'starting', started_at: new Date(), message: 'Installiert Abhängigkeiten und startet …' }
+        ? {
+            status: 'starting',
+            started_at: new Date(),
+            message: `Installiert Abhängigkeiten und startet …${emptyDatabaseCause ? ' (leere Datenbank)' : ''}`,
+          }
         : { status: 'failed', message: `docker run fehlgeschlagen: ${maskSecrets(run.output.slice(-400))}` },
     );
   }
@@ -510,6 +578,17 @@ export class ReviewSlots {
 
   /** Kopie der Projektdatenbank (pg_dump | psql) in einem kurzlebigen Postgres-Container. */
   private async copyDatabase(source: URL, target: URL): Promise<string | null> {
+    const result = await this.databaseScript(source, target, DATABASE_COPY_SCRIPT);
+    return result.exitCode === 0 ? null : `Datenbank-Kopie fehlgeschlagen: ${maskSecrets(result.output.slice(-400))}`;
+  }
+
+  /** Leere Datenbank mit den Zugängen der Projektdatenbank (zweiter Start, wenn die Kopie nicht zum Stand passt). */
+  private async emptyDatabase(source: URL, target: URL): Promise<string | null> {
+    const result = await this.databaseScript(source, target, DATABASE_EMPTY_SCRIPT);
+    return result.exitCode === 0 ? null : `Leere Datenbank nicht angelegt: ${maskSecrets(result.output.slice(-400))}`;
+  }
+
+  private databaseScript(source: URL, target: URL, script: string) {
     const env = (url: URL, prefix: string) => [
       `${prefix}HOST=${url.hostname}`,
       `${prefix}PORT=${url.port || '5432'}`,
@@ -517,7 +596,7 @@ export class ReviewSlots {
       `${prefix}PASSWORD=${decodeURIComponent(url.password)}`,
       `${prefix}DB=${url.pathname.slice(1)}`,
     ];
-    const result = await this.docker(
+    return this.docker(
       [
         'run',
         '--rm',
@@ -527,10 +606,9 @@ export class ReviewSlots {
         'postgres:17-alpine',
         'sh',
         '-c',
-        DATABASE_COPY_SCRIPT,
+        script,
       ],
       5 * 60_000,
     );
-    return result.exitCode === 0 ? null : `Datenbank-Kopie fehlgeschlagen: ${maskSecrets(result.output.slice(-400))}`;
   }
 }

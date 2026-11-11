@@ -11,12 +11,15 @@ const STATUS_TEXT: Record<ReviewSlot['status'], string> = {
   stopping: 'wird beendet …',
 };
 
-/** Statustext eines Review-Containers; bei einem Fehler mit der ersten Zeile der Meldung des Servers. */
+/**
+ * Statustext eines Review-Containers; bei einem Fehler mit der ersten Zeile der Meldung des Servers, bei einem
+ * laufenden Container mit dem Hinweis des Workers (z. B. leere Datenbank, weil die Kopie nicht zum Stand passte).
+ */
 export function reviewStatusText(slot: Pick<ReviewSlot, 'status' | 'message'>): string {
-  if (slot.status === 'failed') {
-    const line = slot.message?.trim().split('\n')[0]?.trim();
-    if (line) return `Fehler: ${line.length > 160 ? `${line.slice(0, 159)}…` : line}`;
-  }
+  const line = slot.message?.trim().split('\n')[0]?.trim();
+  const short = line && line.length > 160 ? `${line.slice(0, 159)}…` : line;
+  if (slot.status === 'failed' && short) return `Fehler: ${short}`;
+  if (slot.status === 'running' && short) return `${STATUS_TEXT.running} – ${short}`;
   return STATUS_TEXT[slot.status];
 }
 

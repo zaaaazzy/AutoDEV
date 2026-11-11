@@ -59,6 +59,23 @@ test('Fehlgeschlagener Start zeigt die erste Zeile der Meldung des Servers', () 
   assert.equal(reviewStatusText({ status: 'failed', message: '  ' }), 'Fehler: Start fehlgeschlagen');
 });
 
+test('Laufender Container zeigt den Hinweis des Workers, etwa die leere Datenbank nach einer unpassenden Kopie', () => {
+  assert.equal(
+    reviewStatusText({
+      status: 'running',
+      message:
+        'Leere Datenbank: die Kopie der Projektdatenbank passte nicht zu diesem Stand (Database migration failed).',
+    }),
+    'Review läuft – Leere Datenbank: die Kopie der Projektdatenbank passte nicht zu diesem Stand (Database migration failed).',
+  );
+  assert.equal(reviewStatusText({ status: 'running', message: '  ' }), 'Review läuft');
+  // Beim Start steht die Vorbereitung in der Meldung; der Text bleibt der feste Status.
+  assert.equal(
+    reviewStatusText({ status: 'starting', message: 'Container wird vorbereitet …' }),
+    'Container startet (Abhängigkeiten, Datenbank-Kopie) …',
+  );
+});
+
 test('Ladeanimation nur, solange der Container angefordert ist oder startet', () => {
   assert.equal(reviewStarting(slot({ status: 'requested' })), true);
   assert.equal(reviewStarting(slot({ status: 'starting' })), true);

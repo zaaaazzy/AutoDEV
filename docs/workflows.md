@@ -531,6 +531,10 @@ Pro Projekt lassen sich in den Einstellungen Deploy-Befehle hinterlegen (z. B. `
 5. **Vorschau:** In der Sprint-Ansicht jeden Stand wählen und mit ▶ im Review-Container starten (eigener Port,
    eigene Datenbank-Kopie). Dasselbe geht im Sprint-Popover der Kopfzeile (Desktop): Es zeigt Fortschritt und die
    nächsten offenen Aufträge, startet den gewählten Stand und öffnet den Container in einem neuen Tab, sobald er läuft.
+   Passt die Kopie nicht zum Stand (der Container endet beim Start mit einem Datenbank- oder Migrationsfehler, etwa
+   weil `main` inzwischen Migrationen hat, die der Sprint-Zweig noch nicht kennt), startet der Worker den Stand einmal
+   mit leerer Datenbank neu; der Hinweis steht dann am laufenden Container. Besser ist, wenn der Review-Befehl des
+   Projekts eine neuere Kopie selbst verträgt (Beispiel Mainty: `migrate-cli --review`).
 6. **Sprint-Review:** Sind alle Aufträge durch, wartet der Sprint auf dein Go (Push-Nachricht, Hinweis im Sprint).
    Der Autopilot schaltet nur mit „Autopilot schaltet selbst live“ (innerhalb der Arbeitszeiten) selbst live.
 7. **Live schalten:** Tests und CI laufen, der Sprint wird nach `main` gemergt, der Projektordner (z. B. mit dev-live)
