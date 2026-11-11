@@ -136,3 +136,73 @@ test('Schon freigegeben: kein Eintrag mehr unter „Rückmeldungen“ (wartet nu
     ['y'],
   );
 });
+
+const check = (values: Partial<AcceptanceCheck>): AcceptanceCheck => ({
+  developmentId: 'a',
+  kind: 'criterion',
+  position: 1,
+  text: 'Punkt',
+  status: 'unmet',
+  note: null,
+  checkedAt: null,
+  ...values,
+});
+
+test('Abnahme zuerst: blockierter Auftrag mit nicht erfüllten Punkten zeigt die Liste, „Zu tun“ heisst Abnahme', () => {
+  const blocked = order({ id: 'a', status: 'blocked', failure: 'Agent „Tester“ scheiterte: Abnahme nicht bestanden' });
+  const checks = [
+    check({ position: 2, status: 'met' }),
+    check({ position: 3, status: 'open' }),
+    check({ position: 1, status: 'unmet' }),
+    check({ kind: 'done', position: 1, status: 'manual' }),
+    check({ kind: 'visual', position: 1, status: 'unmet' }),
+  ];
+  const [entry] = orderAttention([blocked], checks);
+  // Reihenfolge: manuell, nicht erfüllt, offen; erfüllte eingeklappt dahinter; visuelle Befunde gehören zur Ansicht.
+  assert.deepEqual(
+    entry!.acceptance.open.map((item) => `${item.kind}:${item.status}`),
+    ['done:manual', 'criterion:unmet', 'criterion:open'],
+  );
+  assert.equal(entry!.acceptance.met.length, 1);
+  assert.equal(entry!.acceptance.manual, 1);
+  assert.deepEqual(entry!.task, { kind: 'acceptance', label: 'Abnahme' });
+  // Der Hauptknopf bleibt „Erneut versuchen“: die Agents sollen die Punkte erfüllen.
+  assert.equal(entry!.card.step, 'retry');
+});
+
+test('Abnahmeliste nur, wo der Tester geurteilt hat: aus dem Sprint genommen ohne Liste', () => {
+  const removed = order({ id: 'a', status: 'backlog', removedFromSprintAt: '2026-01-01', removedFromSprint: 'S1' });
+  const [entry] = orderAttention([removed], [check({})]);
+  assert.deepEqual(entry!.acceptance, { open: [], met: [], manual: 0 });
+  assert.equal(entry!.task.label, 'Einplanen');
+});
+
+test('Erledigt mit Abnahmehinweis „Selbst prüfen: …“ wartet weiter auf die manuelle Abnahme', () => {
+  const done = order({ id: 'a', status: 'done', actionTodo: 'Selbst prüfen: Mail kommt an; Handy' });
+  const [entry] = orderAttention([done], [manualCheck('a', 1), manualCheck('a', 2)]);
+  assert.ok(entry, 'steht unter „Aktionen“');
+  assert.equal(entry!.reasons[0]!.label, '2 Punkte von dir zu prüfen');
+  assert.equal(entry!.card.step, 'check');
+  assert.equal(entry!.task.kind, 'acceptance');
+  assert.equal(entry!.acceptance.open.length, 2);
+});
+
+test('Spalte „Zu tun“: Rückfrage vor Freigabe vor Abnahme vor Testnachweis', () => {
+  const pick = (values: Partial<DevelopmentItem>, checks: AcceptanceCheck[] = [], evidence: TestEvidence[] = []) =>
+    orderAttention([order({ id: 'a', ...values })], checks, evidence)[0]?.task.label;
+  assert.equal(pick({ status: 'blocked', kind: 'express', actionTodo: 'Welche Farbe?' }), 'Rückfrage');
+  assert.equal(pick({ status: 'approval' }, [manualCheck('a', 1)]), 'Freigabe');
+  assert.equal(pick({ status: 'done', category: 'frontend' }, [manualCheck('a', 1)]), 'Abnahme');
+  assert.equal(pick({ status: 'done' }, [], [proof({})]), 'Testnachweis');
+  assert.equal(pick({ status: 'blocked', category: 'frontend' }), 'Erneut versuchen');
+  assert.equal(pick({ status: 'rejected' }), 'Abgelehnt');
+  assert.equal(
+    pick({
+      status: 'blocked',
+      failure: 'x',
+      actionTodo: 'Projektordner bzw. Laufwerk nicht erreichbar – anschliessen',
+    }),
+    'Aufgabe für dich',
+  );
+  assert.equal(pick({ status: 'blocked', analysisStatus: 'running' }), 'Läuft');
+});

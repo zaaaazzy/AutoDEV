@@ -2,21 +2,22 @@ import { Component, computed, effect, inject, signal, untracked } from '@angular
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import { FocusOnce } from '../../core/focus-once.js';
-import type { AcceptanceCheck, DevelopmentItem, TestEvidence } from '../../core/models.js';
+import type { DevelopmentItem, TestEvidence } from '../../core/models.js';
 import { SettingsGroups } from '../settings/settings-group.js';
 import { DEVELOPMENT_STATUS } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
-import { AcceptanceTicks } from '../../shared/acceptance-ticks.js';
 import type { AttentionCard, CardStep } from '../../shared/attention-card.js';
-import type { AttentionEntry } from '../../shared/order-attention.js';
+import type { DataColumn } from '../../shared/data-table/data-table.component.js';
+import { type AttentionEntry, TASK_FILTER_OPTIONS, TASK_LABELS } from '../../shared/order-attention.js';
 import { isFinished } from '../../shared/labels.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { OrderQuestionComponent } from '../../shared/order-question.component.js';
+import { AcceptanceListComponent } from '../development/acceptance-list.component.js';
 import { OrderApprovalComponent } from '../development/order-approval.component.js';
 import { OrderDetailComponent } from '../development/order-detail.component.js';
 import { OrderVisualComponent } from '../development/order-visual.component.js';
 import { actionHint } from './action-hints.js';
-import { needsVisual } from '../development/needs-visual.js';
+import { needsVisual } from '../../shared/needs-visual.js';
 import { OrderDetailSlotDirective, OrderTableComponent } from '../development/order-table.component.js';
 import { OrderService } from '../development/order.service.js';
 import { AcceptanceReviewComponent } from './acceptance-review.component.js';
@@ -27,16 +28,34 @@ const EVIDENCE_REASON_LABELS: Record<TestEvidence['grund'], string> = {
   gegenprobe_fehlt: 'Gegenprobe fehlt',
 };
 
+/** Ton des Kopfbands je Art der Aufgabe: Freigabe grün, Prüfen und Einplanen blau, Regelverstoss rot, sonst gelb. */
+const HEAD_TONES: Record<AttentionEntry['task']['kind'], 'ok' | 'info' | 'warn' | 'error'> = {
+  approve: 'ok',
+  question: 'info',
+  acceptance: 'info',
+  replan: 'info',
+  wait: 'info',
+  rule: 'error',
+  evidence: 'warn',
+  human: 'warn',
+  retry: 'warn',
+};
+
+/** Rang der Arten in der Spalte „Zu tun“ (Sortierung): wie `TASK_LABELS`. */
+const TASK_RANK = Object.keys(TASK_LABELS);
+
 /**
  * Seite „Aktionen“: Rückmeldungen der Agents und alles, was auf dich wartet – Rückfragen, blockierte oder
  * abgelehnte Aufträge, Freigaben, aus dem Sprint genommene Aufträge, Punkte, die nur ein Mensch prüfen kann, und
- * offene Testnachweise.
+ * offene Testnachweise. Jede Zeile hat denselben Aufbau: oben der Grund mit dem einen Hauptknopf, darunter der
+ * Arbeitsbereich (Abnahme zuerst), zuletzt Nebenaktionen und die eingeklappten Auftragsdetails.
  * Diese Aufträge stehen nicht mehr in der Liste unter „Aufträge“.
  */
 @Component({
   selector: 'app-actions',
   standalone: true,
   imports: [
+    AcceptanceListComponent,
     RunningPanelComponent,
     OrderVisualComponent,
     AcceptanceReviewComponent,
@@ -63,12 +82,25 @@ export class ActionsComponent {
   /** Zeilen der Tabelle – dieselbe Darstellung wie unter „Aufträge“. */
   protected readonly items = computed(() => this.attention().map((entry) => entry.item));
   private readonly entries = computed(() => new Map(this.attention().map((entry) => [entry.item.id, entry])));
-  /** Aufträge mit eingeblendeten Auftragsdetails (Knopf „Details“); zu ist der Normalfall. */
+  /**
+   * Aufträge mit aufgeklappter Falte „Auftragsdetails“: Die Auftragsansicht wird erst dann gerendert – sie lädt
+   * Umgebungen und Zeitleiste nach, was für zugeklappte Falten verschwendet wäre.
+   */
   private readonly detailsShown = signal<ReadonlySet<string>>(new Set());
   /** Antwort bzw. Hinweis an die Agents je Auftrag, bis „Erneut versuchen“ ihn mitschickt. */
   private readonly notes = signal<Record<string, string>>({});
-  /** Häkchen der offenen Abnahmepunkte: gesetzt nur während des Speicherns, nach Fehler wieder leer. */
-  protected readonly ticks = new AcceptanceTicks();
+  /** Spalte „Zu tun“ vor dem Titel: die Art der Aufgabe, filterbar, mit eigener Farbe. */
+  protected readonly taskColumns: DataColumn<DevelopmentItem>[] = [
+    {
+      id: 'task',
+      header: 'Zu tun',
+      value: (item) => this.entryOf(item.id)?.task.label ?? '',
+      sortValue: (item) => TASK_RANK.indexOf(this.entryOf(item.id)?.task.kind ?? 'wait'),
+      filter: 'select',
+      options: TASK_FILTER_OPTIONS,
+      badge: (item) => `task task-${this.entryOf(item.id)?.task.kind ?? 'wait'}`,
+    },
+  ];
 
   constructor() {
     // Aus einem Link (#actions/<id> oder umgeleitet von #development/<id>): Die Tabelle klappt die Zeile auf,
@@ -143,12 +175,6 @@ export class ActionsComponent {
     return this.orders.confirmChecks(item);
   }
 
-  protected checkPoint(event: Event, item: DevelopmentItem, check: AcceptanceCheck): Promise<void> {
-    return this.ticks.tick(event.target as HTMLInputElement, item.id, check, () =>
-      this.orders.checkPoint(item, check, true),
-    );
-  }
-
   /** „Ansicht“ samt „Optisch freigeben“ oben in der Karte (dieselbe Regel wie in der Auftragsansicht). */
   protected showVisual(item: DevelopmentItem): boolean {
     const visual = this.data().acceptance.filter((check) => check.developmentId === item.id && check.kind === 'visual');
@@ -176,13 +202,25 @@ export class ActionsComponent {
     return this.detailsShown().has(id);
   }
 
-  protected toggleDetails(id: string): void {
+  protected setDetails(id: string, open: boolean): void {
     this.detailsShown.update((shown) => {
       const next = new Set(shown);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (open) next.add(id);
+      else next.delete(id);
       return next;
     });
+  }
+
+  protected headTone(entry: AttentionEntry): string {
+    return HEAD_TONES[entry.task.kind];
+  }
+
+  /** Zweite Zeile des Kopfbands: der nächste Schritt und, falls bekannt, der meldende Agent. */
+  protected headNote(entry: AttentionEntry): string {
+    const { card } = entry;
+    const parts = [card.step === 'approve' || card.step === 'question' ? '' : card.next];
+    if (card.agent && !card.why.startsWith(card.agent)) parts.push(`Gemeldet von: ${card.agent}`);
+    return parts.filter(Boolean).join(' · ');
   }
 
   protected approve(item: DevelopmentItem): Promise<void> {

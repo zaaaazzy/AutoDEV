@@ -71,12 +71,12 @@ test('Aufklappbereiche bleiben offen, während Agent-Läufe nachladen (Aktionen,
     await page.getByLabel('Passwort').fill(password);
     await page.getByRole('button', { name: 'Anmelden' }).click();
 
-    // 1) Aktionen: Zeile aufklappen, „Details“ (Auftragsdetails) einblenden
+    // 1) Aktionen: Zeile aufklappen, Falte „Auftragsdetails“ öffnen
     await page.goto('/#actions?project=zz-aufklappen');
     const row = page.locator('.attention-table tbody tr:not(.closed-detail)').first();
     await row.locator('.dt-expand').click();
     const panel = page.locator('.attention-table .closed-detail').first();
-    await panel.getByRole('button', { name: 'Details', exact: true }).click();
+    await panel.locator('details.attention-fold > summary', { hasText: 'Auftragsdetails' }).click();
     await page.waitForTimeout(8_000);
     await expect(panel.locator('.attention-body')).toBeVisible();
     await expect(panel.locator('app-order-detail')).toBeVisible();
