@@ -399,9 +399,28 @@ function documentReport(results: StepResult[], allOk: boolean, runId: string): s
   ].join('\n');
 }
 
+/**
+ * Mitschrift in AIdeation nur, wo ihre Datenbank erreichbar ist. Im Testcontainer (Sandbox) zeigt DEV_LOG_DATABASE_URL
+ * auf die leere Workbench-Datenbank ohne Tabelle `projects` (42P01), oder es gibt gar keinen Dienst: Dann läuft der
+ * Komplettlauf ohne Mitschrift weiter, statt vor dem ersten Test abzubrechen (so scheiterte der Push von Sprint 30).
+ */
+async function openRecorder(slug: string): Promise<Recorder | null> {
+  try {
+    return await Recorder.open(slug);
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    const unreachable = code === '42P01' || code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === '28P01';
+    if (!unreachable) throw error;
+    console.warn(
+      `Keine Mitschrift in AIdeation: Datenbank nicht erreichbar oder ohne Schema (${code}) – der Lauf läuft ohne Testlauf-Eintrag weiter.`,
+    );
+    return null;
+  }
+}
+
 async function main(): Promise<void> {
   await mkdir(TEMP, { recursive: true });
-  const recorder = project ? await Recorder.open(project) : null;
+  const recorder = project ? await openRecorder(project) : null;
   // Nur Oberfläche: vorher die App bauen, sonst prüft der Test einen veralteten Stand (z. B. im Agenten-Worktree).
   const steps = onlyUi ? [UI_BUILD_STEP, USER_STEP] : [...STEPS, USER_STEP];
   const results: StepResult[] = [];
