@@ -40,15 +40,15 @@
     "web-push": "3.6.7"
   },
   "devDependencies": {
-    "@angular/build": "^20.3.40",
-    "@angular/cdk": "^20.2.14",
-    "@angular/cli": "^20.3.40",
-    "@angular/common": "^20.3.34",
-    "@angular/compiler": "^20.3.34",
-    "@angular/compiler-cli": "^20.3.34",
-    "@angular/core": "^20.3.34",
-    "@angular/forms": "^20.3.34",
-    "@angular/platform-browser": "^20.3.34",
+    "@angular/build": "^22.2.6",
+    "@angular/cdk": "^22.2.6",
+    "@angular/cli": "^22.2.6",
+    "@angular/common": "^22.2.5",
+    "@angular/compiler": "^22.2.5",
+    "@angular/compiler-cli": "^22.2.5",
+    "@angular/core": "^22.2.5",
+    "@angular/forms": "^22.2.5",
+    "@angular/platform-browser": "^22.2.5",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "1.64.1",
     "@types/express": "^5.0.3",
@@ -62,7 +62,7 @@
     "prettier": "^3.9.10",
     "rxjs": "^7.8.2",
     "tsx": "^4.20.6",
-    "typescript": "~5.9.3",
+    "typescript": "~6.0.3",
     "typescript-eslint": "^8.72.1",
     "zone.js": "~0.15.1"
   }
