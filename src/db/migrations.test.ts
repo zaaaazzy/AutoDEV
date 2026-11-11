@@ -95,6 +95,16 @@ test('Migration 26: legt nur den Wartungsjob bug_categories an und ändert keine
   assert.doesNotMatch(migration?.sql ?? '', /\bbugs\b/);
 });
 
+test('Migration 16: holt agent_processes nach, bevor sie die Spalte worker_id ergänzt', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 16);
+  const sql = migration?.sql ?? '';
+  const created = sql.indexOf('CREATE TABLE IF NOT EXISTS agent_processes');
+  const altered = sql.indexOf('ALTER TABLE agent_processes ADD COLUMN IF NOT EXISTS worker_id');
+  assert.ok(created >= 0, 'Tabelle wird nachgeholt');
+  assert.ok(altered > created, 'erst die Tabelle, dann die Spalte');
+  assert.match(sql, /CREATE INDEX IF NOT EXISTS agent_processes_pid_idx/);
+});
+
 test('Migration 29: CHECK nennt genau die Werte aus BUG_CATEGORY_VALUES; Bereich und Vererbung bleiben unberührt', () => {
   const migration = MIGRATIONS.find((step) => step.version === 29);
   assert.equal(migration?.name, 'bug-kategorie-fest');
