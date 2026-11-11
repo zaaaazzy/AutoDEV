@@ -60,3 +60,75 @@ Migration 29 `folgevorschlaege-aus-doku` (`src/db/migrations.ts`; zuerst als 27 
 ## Offen
 
 - **Offen:** Zwei der drei Belege aus der Idee (`docs/agents-loeschen-und-umbenennen-git-rm-mv-2026-10-28.md`, `docs/agenten-per-drag-and-drop-zwischen-phasen-2026-10-28.md`) stehen nur im Fliesstext. Der Parser erkennt sie bewusst nicht. Ob der Dokumentierer-Prompt Befunde künftig als eigene Abschnitte schreiben soll, ist noch zu entscheiden.
+
+## Benutzerhandbuch: Vorschläge aus der Doku
+
+### Wo es steht
+
+Im Auftrag gibt es den aufklappbaren Bereich „Vorschläge aus der Doku“. Er erscheint bei erledigten Aufträgen, bei
+Aufträgen in der Freigabe und sobald offene Vorschläge vorliegen. Neben dem Titel steht die Anzahl der offenen
+Vorschläge. Ist der Bereich aufgeklappt, liegt mindestens ein Vorschlag vor.
+
+### Was ein Vorschlag ist
+
+Nach einem erfolgreichen Dokumentierer-Schritt liest AIdeation die neue Auftragsdoku. Jeder Eintrag aus den Abschnitten
+„Offen“, „TODO“, „Bekannter Befund“ und „Folgeauftrag“ wird ein Vorschlag. Jeder Vorschlag zeigt:
+
+- **Art:** „Bug“ oder „Idee“. Ein Eintrag aus „Bekannter Befund“ wird immer ein Bug. Ein Eintrag aus den anderen
+  Abschnitten wird ein Bug, wenn sein Titel ein Fehlerwort nennt (Fehler, Bug, scheitert, bricht, falsch, kaputt,
+  Absturz, stürzt). Sonst wird er eine Idee.
+- **Titel:** der erste Satz des Eintrags, ohne Markdown, höchstens 80 Zeichen.
+- **Abschnitt:** „aus „…““, damit man sieht, woher der Vorschlag stammt.
+- **Beschreibung:** der ganze Eintrag, aufklappbar im Text.
+
+Erkannt wird ein Abschnitt nur, wenn er als Überschrift (`#` bis `######`) oder als Zeile mit einem fetten Label steht,
+etwa `**Offen:**` oder `- **TODO:**`. Dieselben Wörter mitten in einem Satz zählen nicht. Dazu gelten diese Regeln:
+
+- Ein Label mit „geklärt“, „erledigt“ oder „behoben“ (ohne „nicht“ davor) ist erledigt und ergibt keinen Vorschlag.
+  „**Bekannter Befund, nicht behoben:**“ dagegen ergibt einen.
+- Platzhalter wie „Keine.“ oder „Nichts offen.“ ergeben keinen Vorschlag.
+- Einträge in Codeblöcken werden übersprungen.
+- Gleiche Titel innerhalb einer Doku ergeben nur einen Vorschlag.
+
+**Bekannte Lücke:** Befunde, die nur im Fließtext stehen und keinen eigenen Abschnitt haben, erkennt AIdeation nicht.
+Zwei der drei Belege aus der Idee sind so geschrieben. Der Dokumentierer-Prompt bleibt in diesem Auftrag unverändert.
+
+### Dubletten
+
+Ein Vorschlag wird nicht gespeichert, wenn sein Titel zu einem offenen Bug oder einer offenen Idee mindestens
+0,55 Ähnlichkeit hat. Als offen gelten Bugs mit Status `open` oder `in_progress` und Ideen mit jedem Status außer `accepted` und `rejected`.
+Ein Treffer mit einem angenommenen oder abgelehnten Eintrag zählt nicht als Dublette. Dann entsteht der Vorschlag.
+
+### Annehmen und Verwerfen
+
+- **Annehmen als Bug** legt genau einen Bug an. Er hat die Quelle „Agent“ und keinen Sprint. Danach wird er wie jeder
+  andere Bug eingeordnet (Kategorie, siehe Abschnitt 4 im Anwendungshandbuch).
+- **Annehmen als Idee** legt genau eine Idee an.
+- **Verwerfen** legt nichts an. Der Vorschlag verschwindet aus der Liste.
+- **Doppelklick:** Der zweite Klick legt nichts mehr an. Er bekommt die Meldung „Der Vorschlag wurde bereits angenommen
+  oder verworfen.“, und die Liste lädt neu.
+- **Rechte:** Die Knöpfe sieht nur, wer das Recht „Planung“ hat. Alle anderen sehen den Hinweis „Annehmen und Verwerfen
+  braucht das Recht „Planung“.“ Die API lehnt Nutzer ohne dieses Recht ebenfalls ab (403).
+- **Leere Liste:** „Keine offenen Vorschläge.“ Das heißt: Der Dokumentierer hat keine passenden Abschnitte gefunden,
+  oder die Vorschläge sind schon entschieden.
+
+### Was nicht passiert
+
+- AIdeation legt nie selbst einen Bug oder eine Idee an. Das geschieht nur nach „Annehmen“.
+- Scheitert der Dokumentierer-Schritt, entsteht kein Vorschlag. Scheitert der Erkennungsschritt selbst, bleibt der
+  Auftrag unverändert, und der Fehler steht im Worker-Log. Auf der Oberfläche erscheint er nicht.
+- Ein angenommener Bug entsteht ohne Sprint. Die Vorschläge selbst haben keine Sprint-Zuordnung.
+
+### Printscreens
+
+**Nicht erstellt.** In dieser Sitzung habe ich keine Aufnahmen gemacht. Die Oberfläche braucht eine laufende App mit
+Datenbank und einen Browser. Für einen Menschen auf einem Host mit laufender App sind diese Aufnahmen nötig:
+
+1. Auftrag nach dem Dokumentierer: aufgeklappter Bereich „Vorschläge aus der Doku“ mit Bug- und Idee-Eintrag, Knöpfe
+   „Annehmen als …“ und „Verwerfen“ (Recht „Planung“).
+2. Gleicher Auftrag mit einem Nutzer ohne Recht „Planung“: Hinweis statt Knöpfe.
+3. Auftrag ohne offene Vorschläge: „Keine offenen Vorschläge.“
+4. Nach „Annehmen als Bug“: Liste ohne den angenommenen Vorschlag.
+5. Bug-Liste: neuer Bug, Quelle „Agent“, ohne Sprint.
+6. Ideation: neue Idee aus einem Vorschlag.
+7. Zweiter Klick auf „Annehmen“ nach einer Aktualisierung: Meldung „bereits angenommen oder verworfen“.
