@@ -1,5 +1,5 @@
 # aideation_frontend_angular: Angular-Oberfläche bauen und mit nginx ausliefern.
-FROM node:22.22.3-bookworm-slim AS build
+FROM node:26.13.0-bookworm-slim AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
