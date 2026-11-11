@@ -280,7 +280,7 @@ test('Gegenprobe-Auftrag: Fix belegt – alle neuen Fälle scheitern auf dem alt
     execute: runCommand,
     testExecutor: host,
   });
-  assert.equal(check.error, undefined, check.error);
+  assert.equal(check.error, undefined, check.error ?? 'kein Fehler erwartet');
   assert.equal(check.base, git('rev-parse', 'main'), 'Basis = merge-base mit main, vor dem ersten Auftrags-Commit');
   assert.deepEqual(
     check.cases?.map(({ file, name, result }) => ({ file, name, result })),
