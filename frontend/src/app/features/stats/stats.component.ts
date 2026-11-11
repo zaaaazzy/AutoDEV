@@ -17,6 +17,7 @@ import { DateTimePipe, HoursPipe, LocaleNumberPipe } from '../../shared/pipes.js
 import { CHART_HEIGHT, CHART_WIDTH, chartY, COVERAGE_TARGET, coverageSeries } from './coverage-history.js';
 import { QualityPanelComponent } from './quality-panel.component.js';
 import { CoverageTrendComponent } from './coverage-trend.component.js';
+import { BugCategoryMatrixComponent } from '../bugs/bug-category-matrix.component.js';
 import { calibrationText, hitRateText } from './stats-text.js';
 
 interface Usage {
@@ -113,6 +114,7 @@ type SprintVelocity = ProjectStats['velocity'][number];
     CoverageTrendComponent,
     BudgetMeterComponent,
     DateTimePipe,
+    BugCategoryMatrixComponent,
   ],
   templateUrl: './stats.component.html',
   host: { style: 'display: contents' },
@@ -131,6 +133,8 @@ export class StatsComponent {
   protected readonly shortRatio = shortRatio;
   protected readonly errorText = errorText;
   protected readonly estimateTrend = computed(() => estimateTrend(this.store.data().stats?.velocity ?? []));
+  /** Dieselben Zahlen wie die Retrospektive-Eingabe (`bugsByCategorySprint` aus collectStats). */
+  protected readonly bugCategorySprints = computed(() => this.store.data().stats?.bugsByCategorySprint ?? []);
   protected readonly kindLabel = (key: string): string => KIND_LABELS[key] ?? key;
   protected readonly categoryLabel = (key: string): string => (key === 'none' ? 'Ohne Bereich' : categoryLabel(key));
 

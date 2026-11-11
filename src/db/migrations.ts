@@ -612,6 +612,33 @@ export const MIGRATIONS: readonly Migration[] = [
         CHECK (counter_check IS NULL OR jsonb_typeof(counter_check) = 'object');
     `,
   },
+  // Auftrag „Bug-Kategorien mit Vorschlag, Filter und Statistik“ (geplant als Version 20; 20–28 waren belegt): feste
+  // Bug-Kategorie neben dem Bereich `category`. bug_category zählt erst, wenn bestätigt; der Vorschlag des lokalen
+  // Modells steht getrennt in bug_category_suggested. `category` und development_items_inherit_category bleiben.
+  // Die Werte im CHECK = BUG_CATEGORY_VALUES (src/core/bug-category-values.ts). Zustand: ohne (state und bug_category
+  // leer), vorgeschlagen (nur bug_category_suggested) oder bestätigt (bug_category gesetzt).
+  {
+    version: 29,
+    name: 'bug-kategorie-fest',
+    sql: `
+      ALTER TABLE bugs ADD COLUMN IF NOT EXISTS bug_category TEXT;
+      ALTER TABLE bugs ADD COLUMN IF NOT EXISTS bug_category_suggested TEXT;
+      ALTER TABLE bugs ADD COLUMN IF NOT EXISTS bug_category_state TEXT;
+      ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_bug_category_check;
+      ALTER TABLE bugs ADD CONSTRAINT bugs_bug_category_check
+        CHECK (bug_category IN ('security', 'git-sync', 'ci', 'ui', 'api', 'agent-guard', 'budget', 'docs'));
+      ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_bug_category_suggested_check;
+      ALTER TABLE bugs ADD CONSTRAINT bugs_bug_category_suggested_check
+        CHECK (bug_category_suggested IN ('security', 'git-sync', 'ci', 'ui', 'api', 'agent-guard', 'budget', 'docs'));
+      ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_bug_category_state_check;
+      ALTER TABLE bugs ADD CONSTRAINT bugs_bug_category_state_check
+        CHECK (bug_category_state IS NOT NULL AND bug_category_state IN ('suggested', 'confirmed')
+               AND (bug_category_state = 'confirmed') = (bug_category IS NOT NULL)
+               AND (bug_category_state = 'confirmed' OR bug_category_suggested IS NOT NULL)
+               OR bug_category_state IS NULL AND bug_category IS NULL);
+      CREATE INDEX IF NOT EXISTS bugs_bug_category_idx ON bugs (project_slug, bug_category);
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

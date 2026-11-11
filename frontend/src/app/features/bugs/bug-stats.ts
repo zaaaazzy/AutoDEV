@@ -1,7 +1,8 @@
-import type { Bug } from '../../core/models.js';
+import type { Bug, Sprint } from '../../core/models.js';
 import { BUG_STATUS } from '../../core/models.js';
 import { NAVIGATION } from '../../core/navigation.js';
-import { categoryLabel } from '../../shared/labels.js';
+import { BUG_CATEGORIES, bugCategoryLabel, categoryLabel } from '../../shared/labels.js';
+import type { BugCategoryValue } from '../../../../../src/core/bug-category-values.js';
 import { defined } from '../../../../../src/core/defined.js';
 
 /** Begraben: behoben, nicht behoben (kein Fix) oder abgelehnt – liegt auf dem Bug-Friedhof. */
@@ -25,8 +26,35 @@ export interface BugStats {
   places: BugStatRow[];
   /** In welchen Tests: Testname (mit Gerät) und genannte Testdateien. */
   tests: BugStatRow[];
-  /** Verteilung nach dem Feld `category` (ohne Pfad-Fallback); leere Kategorie als „Ohne Kategorie“. */
+  /**
+   * Verteilung nach der bestätigten Bug-Kategorie (`bugCategory`, security, git-sync, …); ohne oder nur vorgeschlagen
+   * als „Ohne Kategorie“. Der Bereich (Frontend, Backend, …) steckt in „Wo“.
+   */
   categories: BugStatRow[];
+}
+
+/** Zahl je Kategorie und Sprint wie in `GET /projects/:slug/stats` (bugsByCategorySprint). */
+export interface BugCategorySprintPair {
+  category: BugCategoryValue | null;
+  sprintId: string | null;
+  sprintName: string | null;
+  open: number;
+  buried: number;
+}
+
+export interface BugCategoryMatrixCell {
+  open: number;
+  buried: number;
+}
+
+/** Tabelle Kategorie × Sprint: Zeilen die acht Kategorien und „Ohne Kategorie“, Spalten Sprints und „Kein Sprint“. */
+export interface BugCategoryMatrix {
+  sprints: { id: string | null; name: string }[];
+  rows: { category: BugCategoryValue | null; label: string; cells: BugCategoryMatrixCell[]; total: number }[];
+  /** Summe je Spalte (Sprint). */
+  totals: BugCategoryMatrixCell[];
+  /** Summe aller Zellen = Zahl aller Bugs. */
+  total: number;
 }
 
 const PAGE_LABELS = new Map(NAVIGATION.map((item) => [item.id as string, item.label]));
@@ -99,6 +127,73 @@ export function bugStats(bugs: Bug[]): BugStats {
     finders: tally(bugs, (bug) => [finder(bug)]),
     places: tally(bugs, places),
     tests: tally(bugs, tests),
-    categories: tally(bugs, (bug) => [categoryLabel(bug.category)]),
+    categories: tally(bugs, (bug) => [bugCategoryLabel(bug.bugCategory)]),
   };
+}
+
+/** Paare Kategorie × Sprint aus der Bug-Liste, gezählt wie in der API (nur bestätigte Kategorie). */
+export function bugCategoryPairs(bugs: Bug[], sprints: Pick<Sprint, 'id' | 'name'>[]): BugCategorySprintPair[] {
+  const names = new Map(sprints.map((sprint) => [sprint.id, sprint.name]));
+  const pairs = new Map<string, BugCategorySprintPair>();
+  for (const bug of bugs) {
+    const category = bug.bugCategory ?? null;
+    const sprintId = bug.sprintId ?? null;
+    const key = `${category ?? ''}|${sprintId ?? ''}`;
+    const pair = pairs.get(key) ?? {
+      category,
+      sprintId,
+      sprintName: sprintId ? (names.get(sprintId) ?? null) : null,
+      open: 0,
+      buried: 0,
+    };
+    if (isBuried(bug)) pair.buried += 1;
+    else pair.open += 1;
+    pairs.set(key, pair);
+  }
+  // Sprints in der Reihenfolge der Sprint-Liste, „Kein Sprint“ zuletzt.
+  const order = new Map(sprints.map((sprint, index) => [sprint.id, index]));
+  const rank = (pair: BugCategorySprintPair): number =>
+    pair.sprintId === null ? sprints.length + 1 : (order.get(pair.sprintId) ?? sprints.length);
+  return [...pairs.values()].sort((a, b) => rank(a) - rank(b));
+}
+
+/**
+ * Tabelle Kategorie × Sprint aus den Paaren: Sprints in der Reihenfolge der Paare (die API liefert sie nach Anlage),
+ * „Kein Sprint“ zuletzt. Alle acht Kategorien erscheinen, „Ohne Kategorie“ nur, wenn es solche Bugs gibt.
+ */
+export function bugCategoryMatrix(pairs: BugCategorySprintPair[]): BugCategoryMatrix {
+  const sprintIds = [...new Set(pairs.map((pair) => pair.sprintId))].sort(
+    (a, b) => Number(a === null) - Number(b === null),
+  );
+  const sprints = sprintIds.map((id) => ({
+    id,
+    name:
+      id === null ? 'Kein Sprint' : (pairs.find((pair) => pair.sprintId === id)?.sprintName ?? 'Unbekannter Sprint'),
+  }));
+  const categories: (BugCategoryValue | null)[] = [...BUG_CATEGORIES];
+  if (pairs.some((pair) => pair.category === null)) categories.push(null);
+  const cell = (category: BugCategoryValue | null, sprintId: string | null): BugCategoryMatrixCell => {
+    const matching = pairs.filter((pair) => pair.category === category && pair.sprintId === sprintId);
+    return {
+      open: matching.reduce((sum, pair) => sum + pair.open, 0),
+      buried: matching.reduce((sum, pair) => sum + pair.buried, 0),
+    };
+  };
+  const rows = categories.map((category) => {
+    const cells = sprintIds.map((sprintId) => cell(category, sprintId));
+    return {
+      category,
+      label: bugCategoryLabel(category),
+      cells,
+      total: cells.reduce((sum, entry) => sum + entry.open + entry.buried, 0),
+    };
+  });
+  const totals = sprintIds.map((sprintId) => {
+    const column = categories.map((category) => cell(category, sprintId));
+    return {
+      open: column.reduce((sum, entry) => sum + entry.open, 0),
+      buried: column.reduce((sum, entry) => sum + entry.buried, 0),
+    };
+  });
+  return { sprints, rows, totals, total: rows.reduce((sum, row) => sum + row.total, 0) };
 }

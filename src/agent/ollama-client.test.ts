@@ -18,6 +18,12 @@ test('resolveModel: Rollenmodell vor globalem Modell vor Standard', () => {
   );
   // Sonderzeichen der Rolle werden zu „_“; leere Werte zählen nicht.
   assert.equal(resolveModel('pre-sprint', { DEV_LOG_OLLAMA_MODEL_PRE_SPRINT: 'c' }), 'c');
+  // Klassifikator der Bug-Kategorien: eigene Rolle, sonst wie alle anderen.
+  assert.equal(
+    resolveModel('bug_category', { DEV_LOG_OLLAMA_MODEL_BUG_CATEGORY: 'd', DEV_LOG_OLLAMA_MODEL: 'a' }),
+    'd',
+  );
+  assert.equal(resolveModel('bug_category', {}), DEFAULT_OLLAMA_MODEL);
   assert.equal(
     resolveModel('author', { DEV_LOG_OLLAMA_MODEL_AUTHOR: '  ', DEV_LOG_OLLAMA_MODEL: '' }),
     DEFAULT_OLLAMA_MODEL,

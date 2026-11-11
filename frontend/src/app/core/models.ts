@@ -22,6 +22,7 @@ export type { BugStatus, DevelopmentStatus, SprintStatus } from '../../../../src
 export { BUG_STATUS, DEVELOPMENT_STATUS, IDEATION_STATUS, SPRINT_STATUS } from '../../../../src/core/status.js';
 
 import type { CoverageAreaKey } from '../../../../src/core/coverage-areas.js';
+import type { BugCategoryValue } from '../../../../src/core/bug-category-values.js';
 
 export type { CoverageAreaKey };
 export type Priority = 'low' | 'medium' | 'high';
@@ -318,6 +319,23 @@ export interface Bug {
   approvedBy?: string | null;
   /** Betriebs-Bugs: Vorkommen der letzten 24 Stunden. */
   productionCount?: number | null;
+  /** Feste Bug-Kategorie (security, git-sync, …); gesetzt nur, wenn bestätigt. Getrennt vom Bereich `category`. */
+  bugCategory?: BugCategoryValue | null;
+  /** Vorschlag des lokalen Modells, bis ein Mensch ihn bestätigt oder korrigiert. */
+  bugCategorySuggested?: BugCategoryValue | null;
+  /** suggested = nur Vorschlag, confirmed = bestätigt, null = weder Kategorie noch Vorschlag. */
+  bugCategoryState?: 'suggested' | 'confirmed' | null;
+}
+
+/** Stand des einmaligen Laufs „Altbestand kategorisieren“. */
+export interface BugCategoryBacklog {
+  running: boolean;
+  /** Ein Lauf (auch eines anderen Projekts) belegt das lokale Modell. */
+  busy: boolean;
+  total: number;
+  done: number;
+  suggested: number;
+  cancelled: boolean;
 }
 
 /** Produktions-Rückkanal: Zustand fürs Dashboard und die Einstellungen. */
@@ -541,11 +559,22 @@ export interface SprintReport {
   generatedAt: string;
 }
 
+export interface BugCategoryCount {
+  category: BugCategoryValue | null;
+  open: number;
+  buried: number;
+  total: number;
+}
+
 export interface ProjectStats {
   orders: Record<string, number>;
   ideas: Record<string, number>;
   bugs: Record<string, number>;
   openBugsBySeverity: Record<string, number>;
+  /** Bugs je bestätigter Bug-Kategorie (null = ohne); Summe = alle Bugs. Ältere Server liefern das Feld nicht. */
+  bugsByCategory?: BugCategoryCount[];
+  /** Nur vorhandene Paare Kategorie × Sprint; sprintId null = „Kein Sprint“. */
+  bugsByCategorySprint?: (BugCategoryCount & { sprintId: string | null; sprintName: string | null })[];
   effort: { plannedHours: number; doneHours: number; tokens: number };
   /** Tatsächlich von den Agents verbraucht (Laufzeit, Tokens, API-Kosten). */
   actual?: { tokens: number; hours: number; costUsd: number };

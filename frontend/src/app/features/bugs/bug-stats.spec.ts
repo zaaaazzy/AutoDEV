@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Bug } from '../../core/models.js';
-import { bugStats, isBuried } from './bug-stats.js';
+import { BUG_CATEGORIES, bugCategoryLabel } from '../../shared/labels.js';
+import { bugCategoryMatrix, bugCategoryPairs, bugStats, isBuried } from './bug-stats.js';
 
 const bug = (fields: Partial<Bug>): Bug => ({
   id: crypto.randomUUID(),
@@ -71,29 +72,79 @@ test('Statistik: wer, wo und in welchen Tests – offen und begraben getrennt ge
     'list.spec.ts',
     'speichert Punkte',
   ]);
-  // Kategorie nur aus dem Feld: Pfade in der Beschreibung (frontend/…) zählen hier nicht.
+  // „Nach Kategorie“ zählt die Bug-Kategorie, nicht den Bereich (Backend steht unter „Wo“).
   assert.deepEqual(
     stats.categories.map((row) => [row.label, row.open, row.buried]),
-    [
-      ['Ohne Kategorie', 2, 2],
-      ['Backend', 1, 0],
-    ],
+    [['Ohne Kategorie', 3, 2]],
   );
 });
 
-test('Statistik nach Kategorie: je Kategorie offen und begraben, leere Kategorie als „Ohne Kategorie“', () => {
+test('Statistik nach Kategorie: nur bestätigte Bug-Kategorie, Vorschläge und Bereich zählen nicht', () => {
   const stats = bugStats([
-    bug({ category: 'frontend' }),
-    bug({ category: 'frontend', status: 'fixed' }),
-    bug({ category: 'security', status: 'rejected' }),
-    bug({ category: null, description: 'in src/api/bugs.ts' }),
+    bug({ bugCategory: 'ui', bugCategoryState: 'confirmed' }),
+    bug({ bugCategory: 'ui', bugCategoryState: 'confirmed', status: 'fixed' }),
+    bug({ bugCategory: 'git-sync', bugCategoryState: 'confirmed', status: 'rejected' }),
+    bug({ bugCategorySuggested: 'api', bugCategoryState: 'suggested', category: 'backend' }),
   ]);
   assert.deepEqual(
     stats.categories.map((row) => [row.label, row.open, row.buried, row.total]),
     [
-      ['Frontend', 1, 1, 2],
+      ['Oberfläche', 1, 1, 2],
       ['Ohne Kategorie', 1, 0, 1],
-      ['Sicherheit', 0, 1, 1],
+      ['Git-Abgleich', 0, 1, 1],
     ],
   );
+});
+
+test('Kategorie × Sprint: alle acht Kategorien, „Kein Sprint“ zuletzt, Summe = alle Bugs', () => {
+  const sprints = [
+    { id: 's1', name: 'Sprint 1' },
+    { id: 's2', name: 'Sprint 2' },
+  ];
+  const bugs = [
+    bug({ bugCategory: 'ui', bugCategoryState: 'confirmed', sprintId: 's2' }),
+    bug({ bugCategory: 'ui', bugCategoryState: 'confirmed', sprintId: 's2', status: 'fixed' }),
+    bug({ bugCategory: 'ci', bugCategoryState: 'confirmed', sprintId: null }),
+    bug({ bugCategory: 'api', bugCategoryState: 'confirmed', sprintId: 's1', status: 'wontfix' }),
+    bug({ bugCategorySuggested: 'docs', bugCategoryState: 'suggested', sprintId: 's1' }),
+  ];
+  const pairs = bugCategoryPairs(bugs, sprints);
+  assert.deepEqual(
+    pairs.map((pair) => [pair.category, pair.sprintName, pair.open, pair.buried]),
+    [
+      ['api', 'Sprint 1', 0, 1],
+      [null, 'Sprint 1', 1, 0],
+      ['ui', 'Sprint 2', 1, 1],
+      ['ci', null, 1, 0],
+    ],
+  );
+  const matrix = bugCategoryMatrix(pairs);
+  assert.deepEqual(
+    matrix.sprints.map((sprint) => sprint.name),
+    ['Sprint 1', 'Sprint 2', 'Kein Sprint'],
+  );
+  assert.deepEqual(
+    matrix.rows.map((row) => row.label),
+    [...BUG_CATEGORIES.map(bugCategoryLabel), 'Ohne Kategorie'],
+  );
+  const ui = matrix.rows.find((row) => row.category === 'ui')!;
+  assert.deepEqual(ui.cells, [
+    { open: 0, buried: 0 },
+    { open: 1, buried: 1 },
+    { open: 0, buried: 0 },
+  ]);
+  assert.deepEqual(matrix.totals, [
+    { open: 1, buried: 1 },
+    { open: 1, buried: 1 },
+    { open: 1, buried: 0 },
+  ]);
+  assert.equal(matrix.total, bugs.length, 'Summe der Tabelle = Zahl aller Bugs');
+});
+
+test('Kategorie × Sprint: ohne Bugs leer, ohne unkategorisierte Bugs keine Zeile „Ohne Kategorie“', () => {
+  assert.equal(bugCategoryMatrix([]).total, 0);
+  const matrix = bugCategoryMatrix([{ category: 'budget', sprintId: null, sprintName: null, open: 2, buried: 0 }]);
+  assert.equal(matrix.rows.length, BUG_CATEGORIES.length);
+  assert.deepEqual(matrix.sprints, [{ id: null, name: 'Kein Sprint' }]);
+  assert.equal(matrix.total, 2);
 });

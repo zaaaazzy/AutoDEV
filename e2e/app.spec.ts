@@ -1227,6 +1227,13 @@ test('Bugs: Wer nur lesen darf, sieht keine Bearbeiten- und Löschknöpfe', asyn
   await expect(panel.getByText('Bug bearbeiten')).toHaveCount(0);
   await expect(panel.getByLabel('Status')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Neuer Bug' })).toHaveCount(0);
+  // Bug-Kategorie: weder Bestätigen noch Altbestandslauf sichtbar, und die API lehnt beides ab.
+  await expect(panel.getByRole('button', { name: /Kategorie (bestätigen|setzen)/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Altbestand kategorisieren' })).toHaveCount(0);
+  expect((await page.request.post(`/api/bugs/${id}/category/confirm`, { data: { category: 'ui' } })).status()).toBe(
+    403,
+  );
+  expect((await page.request.post('/api/projects/e2e/bugs/categorize-backlog', { data: {} })).status()).toBe(403);
   expect((await page.request.delete(`/api/bugs/${id}`)).status()).toBe(403);
   await context.close();
   await request.delete(`/api/bugs/${id}`, { headers: admin });

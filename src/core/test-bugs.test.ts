@@ -49,7 +49,10 @@ test('Testbefunde: fileBugs schreibt die Kategorie aus den Pfaden in den INSERT'
   const inserts: unknown[][] = [];
   const pool = {
     query: async (sql: string, values: unknown[]) => {
-      assert.match(sql, /INSERT INTO bugs \(project_slug, title, description, severity, source, category\)/);
+      assert.match(
+        sql,
+        /INSERT INTO bugs \(project_slug, title, description, severity, source, category, bug_category, bug_category_state\)/,
+      );
       inserts.push(values);
       return { rowCount: 1, rows: [{ id: `bug-${inserts.length}` }] };
     },
@@ -63,6 +66,21 @@ test('Testbefunde: fileBugs schreibt die Kategorie aus den Pfaden in den INSERT'
   assert.deepEqual(
     inserts.map((values) => values[4]),
     ['backend', 'frontend', 'infrastructure'],
+  );
+  // Ohne gewählte Bug-Kategorie bleibt sie leer (nur Vorschlag); eine gewählte aus der Liste wird übernommen.
+  assert.deepEqual(
+    inserts.map((values) => values[5]),
+    [null, null, null],
+  );
+  inserts.length = 0;
+  const chosen = { ...stepBug('npm run lint', 'Fehler', 'r'), title: 'gewählt' };
+  await fileBugs(pool, 'shop', [
+    { ...chosen, bugCategory: 'ci' },
+    { ...chosen, title: 'fremd', bugCategory: 'quatsch' as never },
+  ]);
+  assert.deepEqual(
+    inserts.map((values) => values[5]),
+    ['ci', null],
   );
 });
 
