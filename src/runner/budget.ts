@@ -4,6 +4,7 @@ import type { BudgetPeriod } from '../core/shared-types.js';
 import { sendPush } from '../core/push.js';
 import { localDay, localTimeZone } from '../core/time-zone.js';
 import { budgetActionTodo, setActionTodo } from './action-todo.js';
+import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
 
 export { BUDGET_PERIODS } from '../core/shared-types.js';
 export type { BudgetPeriod } from '../core/shared-types.js';
@@ -249,7 +250,7 @@ export async function sprintStart(
     (
       await pool.query<{ id: string; since: string }>(
         `SELECT id, COALESCE(start_date::timestamp AT TIME ZONE $3::text, created_at)::text AS since FROM sprints
-          WHERE project_slug = $1 AND status = 'active' AND ($2::uuid IS NULL OR id = $2::uuid)
+          WHERE project_slug = $1 AND status = '${SPRINT_STATUS.active}' AND ($2::uuid IS NULL OR id = $2::uuid)
           ORDER BY created_at LIMIT 1`,
         [project, sprintId ?? null, localTimeZone()],
       )
@@ -436,10 +437,10 @@ export async function holdForBudget(
 ): Promise<boolean> {
   const todo = budgetTodo(state);
   const held = await pool.query(
-    `UPDATE development_items d SET status = 'blocked', failure = $2, budget_blocked = $3, budget_blocked_role = NULL,
+    `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.blocked}', failure = $2, budget_blocked = $3, budget_blocked_role = NULL,
             updated_at = NOW()
       WHERE d.id = $1 AND NOT EXISTS (
-        SELECT 1 FROM development_items o WHERE o.project_slug = d.project_slug AND o.status = 'blocked'
+        SELECT 1 FROM development_items o WHERE o.project_slug = d.project_slug AND o.status = '${DEVELOPMENT_STATUS.blocked}'
            AND o.budget_blocked IN ('day', 'sprint'))
       RETURNING d.id`,
     [item.id, todo, state.period],
@@ -470,7 +471,7 @@ export async function releaseBudgetBlocks(pool: Pool, project: string): Promise<
     await pool.query<{ id: string; sprintId: string | null; period: BudgetPeriod; role: string | null }>(
       `SELECT id, sprint_id AS "sprintId", budget_blocked AS period, budget_blocked_role AS role
          FROM development_items
-        WHERE project_slug = $1 AND status = 'blocked' AND budget_blocked IS NOT NULL`,
+        WHERE project_slug = $1 AND status = '${DEVELOPMENT_STATUS.blocked}' AND budget_blocked IS NOT NULL`,
       [project],
     )
   ).rows;
@@ -483,9 +484,9 @@ export async function releaseBudgetBlocks(pool: Pool, project: string): Promise<
     const states = await budgetStates(pool, project, { itemId: item.id, sprintId: item.sprintId }, ownLimits);
     if (exceededState(states)) continue;
     const result = await pool.query(
-      `UPDATE development_items SET status = 'planned', auto_run = TRUE, failure = NULL, budget_blocked = NULL,
+      `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE, failure = NULL, budget_blocked = NULL,
               updated_at = NOW()
-        WHERE id = $1 AND status = 'blocked' AND budget_blocked IS NOT NULL`,
+        WHERE id = $1 AND status = '${DEVELOPMENT_STATUS.blocked}' AND budget_blocked IS NOT NULL`,
       [item.id],
     );
     if (!result.rowCount) continue;

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import type { CommandExecutor } from '../core/command.js';
 import { buildChatPrompt } from './chat.js';
-import { PERMISSION_GROUPS, commandHelp } from './permission-rules.js';
+import { PERMISSION_GROUPS, commandHelp } from '../core/permission-rules.js';
 import {
   composeFileFor,
   runServiceAction,
@@ -227,7 +227,7 @@ test('Marker der Claude-CLI: Worker führt sie aus, das Ergebnis steht im Chat',
 });
 
 test('launchctl steht in keiner Standard-Rechteregel und keinem Prompt (permission-rules.ts, chat.ts)', async () => {
-  for (const file of ['permission-rules.ts', 'chat.ts', 'ollama-prompts.ts']) {
+  for (const file of ['../core/permission-rules.ts', 'chat.ts', 'ollama-prompts.ts']) {
     const source = await readFile(new URL(`./${file}`, import.meta.url), 'utf8');
     assert.doesNotMatch(source, /launchctl|kickstart/, file);
   }

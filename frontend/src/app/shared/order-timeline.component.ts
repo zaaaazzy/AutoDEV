@@ -2,6 +2,7 @@ import { DatePipe } from '@angular/common';
 import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { ApiService } from '../core/api.service.js';
 import type { DevelopmentItem } from '../core/models.js';
+import { DEVELOPMENT_STATUS } from '../core/models.js';
 import { visibleInterval } from '../core/visible-interval.js';
 import { visibleTimelineEntries, type OrderTimeline, type TimelineEntry } from './timeline-entries.js';
 
@@ -75,7 +76,8 @@ export class OrderTimelineComponent {
       void item.actionTodo;
       void this.load(item.id);
       this.stopPolling();
-      if (item.status === 'in_progress') this.stopTimer = visibleInterval(() => void this.load(item.id), 10_000);
+      if (item.status === DEVELOPMENT_STATUS.inProgress)
+        this.stopTimer = visibleInterval(() => void this.load(item.id), 10_000);
     });
   }
 

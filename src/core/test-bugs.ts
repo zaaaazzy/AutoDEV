@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
-import { afterBugCreated } from '../agent/bug-classifier.js';
 import { categoryFromBug } from './bug-category.js';
 import type { TestCaseResult } from './test-results.js';
+import { BUG_STATUS } from './status.js';
 
 /**
  * Bugs aus Testbefunden: je fehlgeschlagenem Test (bzw. Prüfschritt ohne Einzeltests) ein Bug mit Quelle „test“.
@@ -70,7 +70,14 @@ export function stepBug(command: string, output: string, runId: string): BugDraf
  * Legt die Bugs an (ohne Dubletten zu offenen Bugs) und liefert die Zahl der neuen. Die Kategorie kommt aus Testdatei
  * und genannten Pfaden; ohne Treffer stuft das lokale Modell danach im Hintergrund ein.
  */
-export async function fileBugs(pool: Pool, project: string, drafts: BugDraft[]): Promise<number> {
+export async function fileBugs(
+  pool: Pool,
+  project: string,
+  drafts: BugDraft[],
+  // Nachträgliche Einstufung (src/agent/bug-classifier.ts): Der Aufrufer reicht sie herein, damit core nicht nach
+  // oben in agent importiert (Schichtenregel).
+  onCreated: (bugId: string | undefined, category: string | null, draft: BugDraft) => void = () => undefined,
+): Promise<number> {
   let created = 0;
   for (const draft of drafts) {
     const category = categoryFromBug(draft);
@@ -78,12 +85,12 @@ export async function fileBugs(pool: Pool, project: string, drafts: BugDraft[]):
       `INSERT INTO bugs (project_slug, title, description, severity, source, category)
        SELECT $1, $2, $3, $4, 'test', $5
         WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2
-                            AND status IN ('open', 'in_progress'))
+                            AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}'))
        RETURNING id`,
       [project, draft.title, draft.description, draft.severity, category],
     );
     created += result.rowCount ?? 0;
-    afterBugCreated(pool, result.rows[0]?.id, category, draft);
+    onCreated(result.rows[0]?.id, category, draft);
   }
   return created;
 }

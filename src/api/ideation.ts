@@ -23,8 +23,11 @@ import type { Principal } from './roles.js';
 
 export const IDEA_COLUMNS = `id, title, description, status, priority, created_at AS "createdAt",
   effort_hours AS "effortHours", token_estimate AS "tokenEstimate", estimate_source AS "estimateSource", benefit, cost,
-  agent_note AS "agentNote", category, source, rejection_reason AS "rejectionReason",
+  agent_note AS "agentNote", category, COALESCE(kind, 'feature') AS kind, source, rejection_reason AS "rejectionReason",
   external_ref AS "externalRef"`;
+
+/** Art einer Idee: wie beim Auftrag `feature` oder `bug` (Vergleichsgruppe der Schätzung). */
+export const IDEA_KINDS = new Set(['feature', 'bug']);
 
 /** Herkunft einer Idee; `github` stammt aus dem Issue-Import, `routine` und `production` sind vorgesehen. */
 export const IDEA_SOURCES = new Set(['human', 'visionary', 'routine', 'production', 'github']);
@@ -37,6 +40,7 @@ export const IDEA_FIELDS = {
   status: { column: 'status', parse: parseOption(EDITABLE_IDEATION_STATUSES) },
   priority: { column: 'priority', parse: parseOption(PRIORITIES) },
   category: { column: 'category', parse: parseCategory },
+  kind: { column: 'kind', parse: parseOption(IDEA_KINDS) },
   ...ESTIMATE_FIELDS,
 };
 
@@ -59,9 +63,9 @@ export function registerIdeationRoutes(app: Router, pool: Pool): void {
     const values = new Map(fields.map((field) => [field.column, field.value]));
     const result = await pool.query(
       `INSERT INTO ideation_items (project_slug, title, description, status, priority,
-                                   effort_hours, token_estimate, benefit, cost, category, estimate_source)
+                                   effort_hours, token_estimate, benefit, cost, category, estimate_source, kind)
        VALUES ($1, $2, $3, COALESCE($4, 'idea'), COALESCE($5, 'medium'), $6, $7, $8, $9, $10,
-               CASE WHEN $6::float8 IS NOT NULL OR $7::bigint IS NOT NULL THEN 'manual' END)
+               CASE WHEN $6::float8 IS NOT NULL OR $7::bigint IS NOT NULL THEN 'manual' END, COALESCE($11, 'feature'))
        RETURNING ${IDEA_COLUMNS}`,
       [
         slug,
@@ -74,6 +78,7 @@ export function registerIdeationRoutes(app: Router, pool: Pool): void {
         values.get('benefit') ?? null,
         values.get('cost') ?? null,
         values.get('category') ?? null,
+        values.get('kind') ?? null,
       ],
     );
     response.status(201).json({ item: result.rows[0] });

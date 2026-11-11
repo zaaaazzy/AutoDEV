@@ -2,6 +2,7 @@ import { logged } from '../core/log.js';
 import type { Pool } from 'pg';
 import { generateSprintReport } from '../api/reports.js';
 import { defined } from '../core/defined.js';
+import { OVERRUN_TODO_PREFIX } from '../core/estimate-overrun.js';
 
 /**
  * „Aktion notwendig“: Aufträge, die nicht an einem Code-Fehler scheitern, sondern auf einen Menschen warten
@@ -78,6 +79,16 @@ export async function clearManualTodo(pool: Pool, itemId: string): Promise<void>
 /** „Budget erreicht“: Limit erhöhen oder warten (beim Tageslimit bis zum Folgetag); `detail` nennt Limit und Stand. */
 export function budgetActionTodo(daily: boolean, detail: string): string {
   return shorten(`Budget erreicht: erhöhen oder ${daily ? 'bis morgen ' : ''}warten (${detail})`);
+}
+
+export { OVERRUN_TODO_PREFIX };
+
+/**
+ * „Schätzung überschritten“: Ist und kalibrierte Schätzung nennen; „Erneut versuchen“ gibt den Auftrag frei.
+ * `actual` und `estimate` sind schon lesbar formatiert („1,6 h / 9,2 Mio. Tokens“).
+ */
+export function overrunActionTodo(actual: string, estimate: string): string {
+  return shorten(`${OVERRUN_TODO_PREFIX}Ist ${actual}, Schätzung ${estimate} – prüfen, dann „Erneut versuchen“`);
 }
 
 /**

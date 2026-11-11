@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { orderBranch, sprintBranchOf } from './git-sync.js';
 import { gitEnvironment } from './project-command.js';
+import { SPRINT_STATUS } from '../core/status.js';
 
 /** Ein startbarer Stand eines Sprints: ein gemergter Auftrag im Sprint-Branch oder ein noch offener Auftrags-Branch. */
 export interface SprintCommit {
@@ -56,8 +57,8 @@ export async function syncSprintCommits(
   // den aktiven Sprint aus dem Fenster und seine Auswahl bleibt auf einem alten Stand stehen.
   const sprints = (
     await pool.query<{ id: string; name: string; branch: string | null }>(
-      `SELECT id, name, branch FROM sprints WHERE project_slug = $1 AND status <> 'planned'
-        ORDER BY (status IN ('active', 'review')) DESC, created_at DESC LIMIT ${SPRINTS}`,
+      `SELECT id, name, branch FROM sprints WHERE project_slug = $1 AND status <> '${SPRINT_STATUS.planned}'
+        ORDER BY (status IN ('${SPRINT_STATUS.active}', '${SPRINT_STATUS.review}')) DESC, created_at DESC LIMIT ${SPRINTS}`,
       [project],
     )
   ).rows;

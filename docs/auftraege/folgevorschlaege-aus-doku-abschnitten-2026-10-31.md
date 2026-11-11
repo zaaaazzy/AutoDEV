@@ -27,7 +27,7 @@ Nach einem erfolgreichen Dokumentierer-Schritt liest AIdeation die neue Auftrags
 
 ## Datenbank
 
-Migration 27 `folgevorschlaege-aus-doku` (`src/db/migrations.ts`). Das Basisschema ist per Prüfsumme gesperrt, darum steht die Tabelle dort nicht. Spalten: `project_slug`, `development_id`, `doc_id`, `kind` (`bug`/`idea`), `section`, `title`, `description`, `status` (`proposed`/`accepted`/`dismissed`), `result_id`, `decided_by`, `decided_at`, `created_at`. Die CHECKs erlauben genau die Werte, die der Code schreibt (`FOLLOW_UP_STATUS`, `FOLLOW_UP_KIND` in `src/core/status.ts`). Die Migration ist idempotent (`IF NOT EXISTS`).
+Migration 29 `folgevorschlaege-aus-doku` (`src/db/migrations.ts`; zuerst als 27 geplant, 27 und 28 belegte Sprint 30). Das Basisschema ist per Prüfsumme gesperrt, darum steht die Tabelle dort nicht. Spalten: `project_slug`, `development_id`, `doc_id`, `kind` (`bug`/`idea`), `section`, `title`, `description`, `status` (`proposed`/`accepted`/`dismissed`), `result_id`, `decided_by`, `decided_at`, `created_at`. Die CHECKs erlauben genau die Werte, die der Code schreibt (`FOLLOW_UP_STATUS`, `FOLLOW_UP_KIND` in `src/core/status.ts`). Die Migration ist idempotent (`IF NOT EXISTS`).
 
 `bugs.development_id` wird bei angenommenen Bugs bewusst nicht gesetzt. Sonst käme der Bug per Trigger auf den Friedhof, sobald der Auftrag erledigt ist. Die Verbindung läuft über `follow_up_proposals.result_id`.
 
@@ -36,7 +36,7 @@ Migration 27 `folgevorschlaege-aus-doku` (`src/db/migrations.ts`). Das Basissche
 `src/api/follow-up-proposals.ts`, Datenzugriff in `src/db/follow-up-proposal-repository.ts`:
 
 - `GET /api/development/:id/follow-up-proposals` liefert nur Vorschläge mit Status `proposed` (Mandant `development`).
-- `POST /api/follow-up-proposals/:id/accept` braucht das Recht „Planung“ (Mandant `follow-up-proposals`, neu in `tenancy.ts`). In einer Transaktion: `UPDATE … WHERE status = 'proposed'`, dann Bug (`insertProposalBug` in `src/api/bugs.ts`: `INSERT INTO bugs`, `source = 'agent'`, ohne Sprint) bzw. Idee (`insertProposalIdea`), dann `result_id`. Ein zweiter oder gleichzeitiger Klick bekommt 409 und legt nichts an. Die Kategorie stuft `afterBugCreated` nach dem Commit ein.
+- `POST /api/follow-up-proposals/:id/accept` braucht das Recht „Planung“ (Mandant `follow-up-proposals`, neu in `tenancy.ts`). In einer Transaktion: `UPDATE … WHERE status = 'proposed'`, dann Bug (`insertProposalBug` in `src/db/bugs-repository.ts`: `INSERT INTO bugs`, `source = 'agent'`, ohne Sprint) bzw. Idee (`insertProposalIdea`), dann `result_id`. Ein zweiter oder gleichzeitiger Klick bekommt 409 und legt nichts an. Die Kategorie stuft `afterBugCreated` nach dem Commit ein.
 - `POST /api/follow-up-proposals/:id/dismiss` braucht ebenfalls „Planung“ und setzt `dismissed`. Ein schon entschiedener Vorschlag ergibt 409, ein unbekannter 404.
 
 ## Oberfläche

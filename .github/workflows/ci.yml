@@ -81,7 +81,7 @@ jobs:
       # Fehler stehen im Log (Reporter list) und als Annotation (Reporter github), Traces zusätzlich im Artefakt.
       - run: npm run test:e2e
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-traces
           path: |

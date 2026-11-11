@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import { loadProposal } from '../api/sprint-planning.js';
 import type { PlannedItem } from '../core/sprint-planner.js';
 import type { CommandExecutor } from '../core/command.js';
-import type { RunnerOptions } from '../runner/runner.js';
+import type { RunnerOptions } from '../runner/runner-types.js';
 import { runAuthorAgent } from './requirements.js';
 
 /**

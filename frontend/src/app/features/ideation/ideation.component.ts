@@ -66,11 +66,17 @@ import {
   sourceLabel,
 } from './idea-options.js';
 import { defined } from '../../../../../src/core/defined.js';
+import { IDEATION_STATUS } from '../../core/models.js';
 
 const VISIONARY_POLL_MS = 3000;
 const OPEN_RUN = new Set(['requested', 'running']);
 
-const DEFAULT_STATUS_FILTER = ['idea', 'considering', 'review', 'requested'].map(statusLabel);
+const DEFAULT_STATUS_FILTER = [
+  IDEATION_STATUS.idea,
+  IDEATION_STATUS.considering,
+  IDEATION_STATUS.review,
+  IDEATION_STATUS.requested,
+].map(statusLabel);
 const PRIORITY_RANK = ['low', 'medium', 'high'];
 const POPOVER_WIDTH = 320;
 const POPOVER_GAP = 6;

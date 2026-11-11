@@ -23,10 +23,15 @@ const TOKEN = 'sk-ant-oat01-geheimer-test-token-1234567890';
 const ok = (output = ''): CommandResult => ({ exitCode: 0, durationMs: 1, output });
 
 interface Service {
+  image?: string;
   privileged?: boolean;
   network_mode?: string;
   volumes?: string[];
   cap_drop?: string[];
+  cap_add?: string[];
+  devices?: string[];
+  security_opt?: string[];
+  command?: string[];
   environment?: Record<string, string>;
   ports?: unknown;
   labels?: Record<string, string>;
@@ -58,7 +63,7 @@ function fakeDocker(answer: (command: string[]) => CommandResult | null = () => 
   return { calls, docker };
 }
 
-test('Arbeitscontainer: nur der Docker-Dienst ist privilegiert, alle teilen den Namensraum der workbench', () => {
+test('Arbeitscontainer: kein Dienst ist privilegiert, Docker läuft rootless, alle teilen den Namensraum der workbench', () => {
   const compose = workbenchCompose('/srv/demo/agent', {
     project: 'Demo',
     platform: 'darwin',
@@ -83,13 +88,26 @@ test('Arbeitscontainer: nur der Docker-Dienst ist privilegiert, alle teilen den 
   assert.equal(workbench.environment?.DEV_LOG_DATABASE_URL, 'postgresql://t:t@127.0.0.1:5433/t');
   assert.equal((workbench as { container_name?: string }).container_name, 'agents_demo_workbench');
   assert.equal((postgres as { container_name?: string }).container_name, 'agents_demo_postgres');
-  assert.equal(docker.privileged, true);
+  assert.equal(docker.image, 'docker:29-dind-rootless');
+  assert.equal(docker.privileged, undefined, 'dind-rootless statt privilegiertem dind (Ausbruch zum Host)');
+  assert.deepEqual(docker.cap_drop, ['ALL']);
+  assert.deepEqual(docker.cap_add, ['SETUID', 'SETGID'], 'nur newuidmap/newgidmap');
+  assert.deepEqual(docker.devices, ['/dev/net/tun:/dev/net/tun'], 'nur das tun-Gerät, keine Block-Geräte');
+  assert.ok(docker.security_opt?.includes('systempaths=unconfined'), 'proc im Benutzer-Namensraum einhängbar');
+  assert.ok(!docker.security_opt?.some((option) => option.startsWith('no-new-privileges')), 'newuidmap ist setuid');
   assert.equal(docker.network_mode, 'service:workbench');
-  assert.ok(
-    !JSON.stringify((compose.services.docker as { command?: string[] }).command).includes('0.0.0.0'),
-    'Docker lauscht nicht im Agent-Netzwerk (nur 127.0.0.1 und Socket)',
+  assert.ok(docker.command?.includes('--host=tcp://127.0.0.1:2375') && !docker.command.join(' ').includes('0.0.0.0'));
+  assert.equal(
+    docker.environment?.DOCKERD_ROOTLESS_ROOTLESSKIT_FLAGS,
+    '-p 127.0.0.1:2375:2375/tcp',
+    'rootlesskit reicht den Port nur an 127.0.0.1 der workbench weiter, nicht ins Agent-Netzwerk',
   );
   assert.ok(docker.volumes?.includes('/srv/demo/agent:/workspace'), 'gleicher Pfad für Bind-Mounts der Agents');
+  assert.ok(
+    docker.volumes?.includes('agents_demo_docker_rootless:/home/rootless/.local/share/docker'),
+    'eigenes Volume: das des früheren dind gehört root',
+  );
+  assert.ok(!JSON.stringify(compose).includes('privileged'), 'nirgends privileged');
   assert.ok(!docker.volumes?.some((volume) => volume.includes('docker.sock')), 'nie der Socket des Hosts');
   assert.equal(postgres.network_mode, 'service:workbench');
   const start = (workbench as { command?: string[] }).command?.join(' ') ?? '';

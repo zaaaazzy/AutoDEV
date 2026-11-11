@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import { afterBugCreated } from '../agent/bug-classifier.js';
 import { FOLLOW_UP_KIND, FOLLOW_UP_STATUS } from '../core/status.js';
 import { isUuid } from '../core/validation.js';
+import { insertProposalBug } from '../db/bugs-repository.js';
 import {
   decideProposal,
   insertProposalIdea,
@@ -14,7 +15,6 @@ import {
 } from '../db/follow-up-proposal-repository.js';
 import { withTransaction } from '../db/transaction.js';
 import { access } from './access.js';
-import { insertProposalBug } from './bugs.js';
 import type { Principal } from './roles.js';
 
 const ALREADY_DECIDED = 'Der Vorschlag wurde bereits angenommen oder verworfen.';

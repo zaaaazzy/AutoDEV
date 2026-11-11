@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import type { CommandExecutor, CommandResult } from '../core/command.js';
-import type { KnownBug } from '../api/bugs.js';
+import type { KnownBug } from '../core/known-bugs.js';
 import type { AgentStepStatus } from '../core/status.js';
 
 export interface WorkItem {
@@ -23,6 +23,8 @@ export interface WorkItem {
    */
   category?: string | null;
   effortHours?: number | null;
+  /** Token-Schätzung (für die Überschreitungsprüfung nach jedem Schritt). */
+  tokenEstimate?: number | null;
   estimateSource?: string | null;
   retryCount?: number;
 }

@@ -15,11 +15,12 @@ import type { Pool } from 'pg';
 import { loadProjectContext, loadProjectRules, withProjectContext } from '../core/project-context.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
-import { loadKnownBugs } from '../api/bugs.js';
+import { loadKnownBugs } from '../db/bugs-repository.js';
 import { isUniqueViolation } from '../db/transaction.js';
 import { knownBugLine } from '../core/known-bugs.js';
 import { type ActualReference, loadAuthorReference, referenceSection, splitEstimate } from './estimation.js';
-import { stepClassOf } from '../core/estimate-overrun.js';
+import { kindOf, stepClassOf } from '../core/estimate-overrun.js';
+import { areaBucket } from '../core/sprint-planner.js';
 import { budgetTodo, checkBudget } from '../runner/budget.js';
 import { runOllamaAgent } from './ollama-agent.js';
 import {
@@ -33,15 +34,19 @@ import {
 import { executeAgentCommand, isClaudeCommand } from './claude-stream.js';
 import { DEFAULT_DEFINITION_OF_READY, loadDefinitions } from '../runner/acceptance.js';
 import { shortTitle, TITLE_MAX } from '../core/validation.js';
-import { containsUntrusted, UNTRUSTED_HINT } from '../runner/hoster.js';
-import {
-  agentEnvironment,
-  buildInvocation,
-  defaultAgentCommand,
-  loadWorkflow,
-  type RunnerOptions,
-} from '../runner/runner.js';
+import { containsUntrusted, UNTRUSTED_HINT } from '../core/bug-trust.js';
+import { agentEnvironment, buildInvocation } from '../runner/runner-prompts.js';
+import { defaultAgentCommand, loadWorkflow } from '../runner/runner-selection.js';
+import type { RunnerOptions } from '../runner/runner-types.js';
 import { defined } from '../core/defined.js';
+import { DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
+
+/** Aufträge, die der Auftragsautor noch überschreiben darf: noch nicht gestartet. */
+const REDRAFTABLE_STATUSES: readonly string[] = [
+  DEVELOPMENT_STATUS.backlog,
+  DEVELOPMENT_STATUS.planned,
+  DEVELOPMENT_STATUS.blocked,
+];
 
 const MIN_REQUIREMENT_CHARS = 80;
 const PROMPT_LOG_CHARS = 30_000;
@@ -54,6 +59,8 @@ interface Idea {
   description: string;
   priority: string;
   category?: string | null;
+  /** Art der Idee (`feature` oder `bug`); ohne Angabe `feature`. */
+  kind?: string | null;
   comments: string[];
   /** Herkunft; `github` heißt: Titel und Text stammen aus einem fremden Issue. */
   source?: string;
@@ -357,11 +364,10 @@ async function assessRisks(
 /** Hält fest, was beim Schreiben eines Auftrags gerade passiert (Anzeige unter „Auftrag → In Entstehung“). */
 async function draftProgress(pool: Pool, ideaId: string, agent: string, message: string): Promise<void> {
   await pool
-    .query(`UPDATE ideation_items SET progress = $3, progress_agent = $2 WHERE id = $1 AND status = 'drafting'`, [
-      ideaId,
-      agent,
-      message.slice(0, 300),
-    ])
+    .query(
+      `UPDATE ideation_items SET progress = $3, progress_agent = $2 WHERE id = $1 AND status = '${IDEATION_STATUS.drafting}'`,
+      [ideaId, agent, message.slice(0, 300)],
+    )
     .catch(logged('requirements'));
 }
 
@@ -402,16 +408,16 @@ export async function draftRequirements(
   execute: CommandExecutor = runCommand,
 ): Promise<number> {
   await pool.query(
-    `UPDATE ideation_items SET status = 'requested', updated_at = NOW()
-      WHERE project_slug = $1 AND status = 'drafting' AND updated_at < NOW() - ($2 || ' minutes')::interval`,
+    `UPDATE ideation_items SET status = '${IDEATION_STATUS.requested}', updated_at = NOW()
+      WHERE project_slug = $1 AND status = '${IDEATION_STATUS.drafting}' AND updated_at < NOW() - ($2 || ' minutes')::interval`,
     [options.project, String(STALE_DRAFT_MINUTES)],
   );
   const claimed = await pool.query<Omit<Idea, 'comments'>>(
-    `UPDATE ideation_items SET status = 'drafting', agent_note = NULL, updated_at = NOW(), drafting_started_at = NOW(),
+    `UPDATE ideation_items SET status = '${IDEATION_STATUS.drafting}', agent_note = NULL, updated_at = NOW(), drafting_started_at = NOW(),
              progress = 'Liest die Idee und den Projektkontext …', progress_agent = 'author'
-      WHERE id = (SELECT id FROM ideation_items WHERE project_slug = $1 AND status = 'requested'
+      WHERE id = (SELECT id FROM ideation_items WHERE project_slug = $1 AND status = '${IDEATION_STATUS.requested}'
                    ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-      RETURNING id, project_slug AS "projectSlug", title, description, priority, source, category`,
+      RETURNING id, project_slug AS "projectSlug", title, description, priority, source, category, kind`,
     [options.project],
   );
   const claimedIdea = claimed.rows[0];
@@ -434,15 +440,21 @@ export async function draftRequirements(
     )
   ).rows[0];
   const definitions = await loadDefinitions(pool, options.project);
-  // Ideen werden zu Feature-Aufträgen; die Schrittklasse schätzt die Länge des Workflows (ein Lauf ohne Wiederholung).
+  // Vergleichsgruppe: Kategorie, Art der Idee (ohne Angabe `feature`), Anzahl betroffener Bereiche (bei Überarbeitung
+  // aus dem Auftrag) und Schrittklasse; diese schätzt die Länge des Workflows (ein Lauf ohne Wiederholung).
   const workflowSteps = await loadWorkflow(pool, options.project)
     .then((steps) => steps.length)
     .catch(logged('requirements', 0));
-  const reference = await loadAuthorReference(pool, options.project, {
-    kind: 'feature',
-    category: idea.category ?? null,
-    stepClass: workflowSteps > 0 ? stepClassOf(workflowSteps) : null,
-  }).catch(logged('requirements', null));
+  const reference = await loadAuthorReference(
+    pool,
+    options.project,
+    {
+      kind: kindOf(idea.kind),
+      category: idea.category ?? null,
+      stepClass: workflowSteps > 0 ? stepClassOf(workflowSteps) : null,
+    },
+    areaBucket(existing?.description ?? idea.description),
+  ).catch(logged('requirements', null));
   console.info(`[idea ${idea.id}] Anforderung erstellen`);
   const { exitCode, output: rawOutput } = await runAuthorAgent(
     pool,
@@ -454,7 +466,7 @@ export async function draftRequirements(
   );
   if (isShuttingDown()) {
     await pool.query(
-      `UPDATE ideation_items SET status = 'requested', progress = NULL, progress_agent = NULL, updated_at = NOW() WHERE id = $1`,
+      `UPDATE ideation_items SET status = '${IDEATION_STATUS.requested}', progress = NULL, progress_agent = NULL, updated_at = NOW() WHERE id = $1`,
       [idea.id],
     );
     return 0;
@@ -463,7 +475,7 @@ export async function draftRequirements(
   const { requirement: output, estimate } = splitEstimate(text);
   if (exitCode !== 0 || output.length < MIN_REQUIREMENT_CHARS) {
     await pool.query(
-      `UPDATE ideation_items SET status = 'considering', agent_note = $2, progress = NULL, progress_agent = NULL, updated_at = NOW() WHERE id = $1`,
+      `UPDATE ideation_items SET status = '${IDEATION_STATUS.considering}', agent_note = $2, progress = NULL, progress_agent = NULL, updated_at = NOW() WHERE id = $1`,
       [idea.id, `Anforderung konnte nicht erstellt werden: ${output.slice(-600) || 'leere Antwort'}`],
     );
     return 0;
@@ -489,15 +501,15 @@ export async function draftRequirements(
   const projectContext = await loadProjectContext(pool, options.project);
   if (isShuttingDown()) {
     await pool.query(
-      `UPDATE ideation_items SET status = 'requested', progress = NULL, progress_agent = NULL, updated_at = NOW() WHERE id = $1`,
+      `UPDATE ideation_items SET status = '${IDEATION_STATUS.requested}', progress = NULL, progress_agent = NULL, updated_at = NOW() WHERE id = $1`,
       [idea.id],
     );
     return 0;
   }
   if (existing) {
-    if (!['backlog', 'planned', 'blocked'].includes(existing.status)) {
+    if (!REDRAFTABLE_STATUSES.includes(existing.status)) {
       await pool.query(
-        `UPDATE ideation_items SET status = 'accepted', progress = NULL, progress_agent = NULL,
+        `UPDATE ideation_items SET status = '${IDEATION_STATUS.accepted}', progress = NULL, progress_agent = NULL,
                 agent_note = 'Der Auftrag ist bereits in Arbeit oder erledigt und wurde nicht überschrieben.', updated_at = NOW() WHERE id = $1`,
         [idea.id],
       );
@@ -509,7 +521,7 @@ export async function draftRequirements(
       .query(
         `INSERT INTO development_items (project_slug, ideation_id, title, description, status, priority,
                                     effort_hours, token_estimate, benefit, cost, risks, project_context, estimate_source)
-     SELECT i.project_slug, i.id, COALESCE($5, i.title), $2, 'backlog', i.priority, i.effort_hours, i.token_estimate, i.benefit, i.cost, $3, $4,
+     SELECT i.project_slug, i.id, COALESCE($5, i.title), $2, '${DEVELOPMENT_STATUS.backlog}', i.priority, i.effort_hours, i.token_estimate, i.benefit, i.cost, $3, $4,
             i.estimate_source
        FROM ideation_items i
       WHERE i.id = $1 AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.ideation_id = i.id)`,
@@ -521,7 +533,7 @@ export async function draftRequirements(
         if (!isUniqueViolation(error)) throw error;
       });
   await pool.query(
-    `UPDATE ideation_items SET status = 'accepted', progress = NULL, progress_agent = NULL,
+    `UPDATE ideation_items SET status = '${IDEATION_STATUS.accepted}', progress = NULL, progress_agent = NULL,
             agent_note = 'Anforderung vom Agenten erstellt – Auftrag liegt im Backlog.',
             updated_at = NOW() WHERE id = $1`,
     [idea.id],

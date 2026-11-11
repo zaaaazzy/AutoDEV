@@ -111,7 +111,7 @@ Die Log-Ordner des Worker-Benutzers werden im Container nicht freigegeben. Die A
 
 **Fortgesetzte Sitzung:** Eine fortgesetzte Claude-Sitzung (`--resume`) gibt es im Container nicht. Der Schritt startet frisch.
 
-**Erster Lauf:** Das `node_modules`-Volume ist leer. Der Agent installiert die Abhängigkeiten mit `npm ci --ignore-scripts`. Das dauert beim ersten Lauf länger. Zurücksetzen mit `docker volume rm aideation-node-modules-<projekt>`.
+**Erster Lauf:** Das `node_modules`-Volume ist leer. Vor dem Lauf füllt der Worker es in einem eigenen Container mit `npm ci --ignore-scripts`. Dieser Container sieht nur `package.json`, das Lockfile und `.npmrc`. Der erste Lauf dauert deshalb länger. Danach wird nur neu installiert, wenn sich `package-lock.json` ändert (Stempel `.aideation-lock` im Volume). Zurücksetzen mit `docker volume rm aideation-node-modules-<projekt>`.
 
 ## 7. Meldungen
 
@@ -126,6 +126,7 @@ Die Meldungen erscheinen im Auftrag und im Worker-Badge. Sie sind so formuliert,
 | „Hinweis: Die Claude-CLI im Container ist nicht angemeldet – CLAUDE_CODE_OAUTH_TOKEN in worker.env prüfen.“ | Die Anmeldung wird abgelehnt. | Token in `worker.env` prüfen und ggf. erneuern. |
 | „Sandbox: Docker konnte den Container nicht starten (Exit-Code 125).“ | Docker-Fehler beim Start. | Docker-Zustand prüfen. Die Meldung zeigt den Docker-Fehlertext. |
 | „Sandbox: node_modules-Volume „…“ liess sich nicht vorbereiten … Der Agent wurde nicht gestartet.“ | Das Volume konnte nicht angelegt werden. | Die angezeigte Ausgabe prüfen. Ggf. `docker volume rm` und neu versuchen. |
+| „Sandbox: npm ci im node_modules-Volume „…“ ist fehlgeschlagen … Der Agent wurde nicht gestartet.“ | Die Abhängigkeiten liessen sich nicht installieren, etwa weil das Lockfile nicht passt oder die npm-Registry nicht erreichbar ist. | Die angezeigte npm-Ausgabe prüfen. Danach `docker volume rm aideation-node-modules-<projekt>` und neu versuchen. |
 
 **Limit-Meldungen sind kein Sandbox-Fehler.** Die Meldung „monthly spend limit“ der Claude-CLI wird als Hinweis gekennzeichnet. Du musst dann nicht an der Sandbox suchen.
 
@@ -135,6 +136,7 @@ Die Meldungen erscheinen im Auftrag und im Worker-Badge. Sie sind so formuliert,
 - **`docker ps --filter label=aideation.run` zeigt nichts, obwohl ein Lauf läuft.** Prüfe, ob der Schalter tatsächlich für dieses Projekt gilt. Läuft der Lauf auf dem Rechner, erscheint kein Container.
 - **Der Abbruch wirkt nicht sofort.** Der Abbruch soll den Container innerhalb von 10 Sekunden beenden. Bleibt er länger aktiv, prüfe `docker ps --filter label=aideation.run` und entferne den Container von Hand mit `docker rm -f <Name>`. Beim nächsten Start des Workers wird er ohnehin entfernt.
 - **Der erste Lauf dauert lange.** Das ist beim leeren `node_modules`-Volume normal (`npm ci`).
+- **`tsc: not found` / `tsx: not found` (Exit-Code 127) im Container.** Meist hängt das Volume nicht dort, wo `/workspace/node_modules` hinzeigt. Läuft der Worker mit altem Code, ist `node_modules` im Worktree noch ein Symlink auf den Hauptordner. Dann den Worker neu starten (ab 30.10.2026 ersetzt er den Link vor jedem Lauf). Gibt es den Stempel `.aideation-lock` im Volume nicht, wurde es nie gefüllt.
 - **Das Verhalten ist beim Git-Befehl im Agent anders.** Git im Container funktioniert nicht (Abschnitt 6). Das ist in Phase 1 so vorgesehen.
 
 ## 9. Noch offen (für Entwickler)
@@ -142,7 +144,7 @@ Die Meldungen erscheinen im Auftrag und im Worker-Badge. Sie sind so formuliert,
 - Das Image `aideation-agent` ist noch nicht gebaut. Vor dem produktiven Einsatz bitte ausführen:
   - `docker build -t aideation-agent -f deploy/agent/Dockerfile .`
   - `DEV_LOG_TEST_REQUIRE_DOCKER=1 npx --no-install tsx --test src/core/sandbox-docker.test.ts`
-- Besonders das Einbinden des `node_modules`-Volumes über den Symlink im Worktree ist noch ungeprüft.
+- Das Einbinden über den Symlink im Worktree funktionierte nicht. Im Container zeigte der Link auf einen leeren Ordner (`tsc: not found`, Exit-Code 127). Seit dem 30.10.2026 ersetzt der Worker vor dem Lauf den `node_modules`-Symlink des Agent-Worktrees durch einen leeren Ordner. Daran hängt das Volume (`prepareModulesMountpoint` in `src/core/sandbox.ts`). Das gilt nur für Git-Worktrees. Projektordner der Menschen bleiben unberührt. Im Host-Modus legt der Worker den Link beim Start wieder an. Mit echtem Docker ist das noch zu prüfen: Image neu bauen, Worker neu starten, `npm run test:unit` im Container.
 - Die Anmeldung steht als Wert in der Umgebung des Docker-Clients. Ob das für den Betrieb genügt, ist eine Entscheidung für den Betreiber.
 - Phase 2 bis 4 des Konzepts erweitern die Sandbox auf weitere Rollen. Dann sind Wächter, Mounts und Git-Zugriff je Rolle neu zu bewerten.
 

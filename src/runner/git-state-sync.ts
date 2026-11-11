@@ -15,6 +15,7 @@ import {
   type ProjectGitState,
   readFolder,
 } from './repo-state.js';
+import { AGENT_RUN_STATUS, AGENT_STEP_STATUS } from '../core/status.js';
 
 /** Wie oft der Worker den Stand von GitHub holt (nur Referenzen, ändert keinen Ordner). */
 const FETCH_INTERVAL_MS = 10 * 60_000;
@@ -31,7 +32,7 @@ const same = (a: string, b: string): boolean => {
 async function agentRunning(pool: Pool, project: string): Promise<boolean> {
   const result = await pool.query(
     `SELECT 1 FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
-      WHERE r.project_slug = $1 AND s.status = 'running' LIMIT 1`,
+      WHERE r.project_slug = $1 AND s.status = '${AGENT_STEP_STATUS.running}' LIMIT 1`,
     [project],
   );
   return Boolean(result.rowCount);
@@ -135,7 +136,7 @@ export async function processGitFix(
       WHERE id = (SELECT id FROM git_fix_requests WHERE project_slug = $1 AND status = 'requested'
                    ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
         -- Nicht neben einem laufenden Auftrag: Commit oder Branch-Wechsel träfe sonst seine Arbeit.
-        AND NOT EXISTS (SELECT 1 FROM agent_runs WHERE project_slug = $1 AND status = 'running')
+        AND NOT EXISTS (SELECT 1 FROM agent_runs WHERE project_slug = $1 AND status = '${AGENT_RUN_STATUS.running}')
       RETURNING id, fix, role`,
     [project],
   );

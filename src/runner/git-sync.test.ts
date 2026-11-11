@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
-import { conflictSection, remainingConflicts } from './runner-steps.js';
+import { conflictSection, remainingConflicts } from './step-evaluation.js';
 import type { HosterAdapter } from './hoster.js';
 import { goLive } from './go-live.js';
 import { syncGitHub } from './github-sync.js';

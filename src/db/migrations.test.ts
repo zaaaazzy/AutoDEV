@@ -6,6 +6,7 @@ import { MIGRATIONS, MIGRATION_LOCK, runMigrations, type Migration } from './mig
 import { SCHEMA } from './schema.js';
 import { coverageHistory, coverageOverview } from '../api/coverage.js';
 import { COVERAGE_AREA_ALIASES, COVERAGE_AREA_KEYS, coverageAreaKey } from '../core/coverage-areas.js';
+import { FOLLOW_UP_KIND, FOLLOW_UP_STATUS } from '../core/status.js';
 import { adminPool, databaseUrl, dropDatabase } from './test-database.test.js';
 
 /** Verbindung, die jede Abfrage mitschreibt; done = bereits vermerkte Versionen, fail = SQL, das scheitert. */
@@ -97,6 +98,25 @@ test('Migrationen: Budget je Rolle kommt per Migration auch in bestehende Datenb
   const migration = MIGRATIONS.find((step) => step.version === 17);
   assert.match(migration?.sql ?? '', /CREATE TABLE IF NOT EXISTS budget_role_limits/);
   assert.match(migration?.sql ?? '', /ADD COLUMN IF NOT EXISTS budget_blocked_role/);
+});
+
+test('Migrationen: Gegenprobe je Auftrag kommt per Migration, nicht über das eingefrorene Basis-Schema', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 28);
+  assert.equal(migration?.name, 'gegenprobe-je-auftrag');
+  assert.match(migration?.sql ?? '', /ALTER TABLE development_items ADD COLUMN IF NOT EXISTS counter_check JSONB/);
+  assert.match(migration?.sql ?? '', /counter_check IS NULL OR/);
+  assert.doesNotMatch(SCHEMA, /counter_check/);
+});
+
+test('Migration 29: Folgevorschläge idempotent, CHECKs erlauben alle Werte, die der Code schreibt', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 29);
+  assert.equal(migration?.name, 'folgevorschlaege-aus-doku');
+  const sql = migration?.sql ?? '';
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS follow_up_proposals/);
+  assert.match(sql, /CREATE INDEX IF NOT EXISTS follow_up_proposals_open_idx/);
+  for (const kind of Object.values(FOLLOW_UP_KIND)) assert.match(sql, new RegExp(`kind IN \\([^)]*'${kind}'`));
+  for (const status of Object.values(FOLLOW_UP_STATUS)) assert.match(sql, new RegExp(`status IN \\([^)]*'${status}'`));
+  assert.doesNotMatch(SCHEMA, /follow_up_proposals/);
 });
 
 test('Migration 25: Zuordnungstabelle enthält genau die Schreibweisen aus COVERAGE_AREA_ALIASES', () => {

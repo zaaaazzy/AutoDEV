@@ -1,7 +1,60 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool } from 'pg';
-import { collectStats } from './stats.js';
+import { collectStats, sprintHitRates } from './stats.js';
+import { calibrationFrom, UNCALIBRATED } from '../core/estimate-calibration.js';
+
+test('Trefferquote je Sprint: Treffer von gemessenen erledigten Aufträgen, mit kalibrierter Schätzung', () => {
+  const row = (sprintId: string, hours: number, tokens: number, estHours: number | null = 1) => ({
+    sprintId,
+    estHours,
+    estTokens: '1000',
+    source: 'author',
+    hours: String(hours),
+    tokens: String(tokens),
+  });
+  const rates = sprintHitRates(
+    [
+      row('s1', 1, 1000),
+      row('s1', 0.4, 1000), // 0,4-mal die Stunden: kein Treffer
+      row('s1', 2, 2000),
+      row('s1', 5, 5000, null), // ohne Stundenschätzung: nicht gemessen
+      row('s2', 9, 1000, null),
+    ],
+    UNCALIBRATED,
+  );
+  assert.deepEqual(rates.get('s1'), { hits: 2, measured: 3, percent: 67 });
+  assert.deepEqual(rates.get('s2'), { hits: 0, measured: 0, percent: null });
+  // Kalibriert: Der Auftragsautor schätzt die Hälfte, Faktor 2 macht aus 1 h eine Schätzung von 2 h.
+  const doubled = calibrationFrom([
+    { own: true, source: 'author', hourSamples: 5, hourRatio: 2, tokenSamples: 5, tokenRatio: 1 },
+  ]);
+  assert.deepEqual(sprintHitRates([row('s1', 0.9, 1000)], doubled).get('s1'), { hits: 0, measured: 1, percent: 0 });
+  assert.deepEqual(sprintHitRates([row('s1', 1.5, 1000)], doubled).get('s1'), { hits: 1, measured: 1, percent: 100 });
+});
+
+test('Statistik: Sprint ohne gemessene Aufträge hat keine Quote (–), dazu Faktor und Messwerte je Herkunft', async () => {
+  const pool = {
+    query: async (sql: string) => {
+      if (sql.includes('FROM sprints s LEFT JOIN development_items d'))
+        return { rows: [{ id: 's1', name: 'S1', status: 'completed', total: '2', done: '2', hours: '1' }] };
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+  const stats = await collectStats(pool, 'mainty');
+  const [sprint] = stats.velocity as { hitRate: unknown }[];
+  assert.deepEqual(sprint?.hitRate, { hits: 0, measured: 0, percent: null });
+  const calibration = stats.calibration as { source: string; samples: number; hours: number }[];
+  assert.deepEqual(
+    calibration.map((entry) => [entry.source, entry.hours, entry.samples]),
+    [
+      ['manual', 1, 0],
+      ['quick', 1, 0],
+      ['author', 1, 0],
+      ['legacy', 1, 0],
+    ],
+  );
+});
 
 test('Burndown rechnet Tage in Ortszeit (DEV_LOG_TIMEZONE), nicht in UTC der Datenbank', async () => {
   const previous = process.env.DEV_LOG_TIMEZONE;

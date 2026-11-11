@@ -3,7 +3,8 @@ import test from 'node:test';
 import type { Pool } from 'pg';
 import type { Principal } from './roles.js';
 import { serveRoutes } from './serve-routes.test.js';
-import { beatHeartbeat, DEFAULT_MAX_AGENTS, readMaxAgents, registerWorkerRoutes } from './worker.js';
+import { registerWorkerRoutes } from './worker.js';
+import { beatHeartbeat, DEFAULT_MAX_AGENTS, readMaxAgents } from '../db/worker-repository.js';
 import { withMigratedDatabase } from '../db/test-database.test.js';
 
 const admin: Principal = { id: null, username: 'admin', displayName: 'Admin', roles: ['admin'] };

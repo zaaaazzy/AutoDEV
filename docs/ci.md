@@ -29,7 +29,7 @@ flowchart TB
 
 Alle `actions/checkout`-Schritte nutzen `persist-credentials: false`: Das `GITHUB_TOKEN` landet nicht in `.git/config`, Projektcode (Tests, Testserver, Docker-Build) kann es nicht lesen. Kein Job nutzt Secrets.
 
-- **`check`**: Postgres 17 als Service (`DEV_LOG_TEST_REQUIRE_DATABASE=1`: Datenbank-Tests dürfen nicht übersprungen werden), `npm ci`, `lint`, `format:check`, `typecheck` (inkl. Tests), `npm run test:unit`. `test:unit` baut die Oberfläche nicht, kein Unit-Test liest `dist/ui`. `npm test` (= `build:ui` + `test:unit`) bleibt der lokale Komplettlauf. Die Oberfläche baut in der CI nur der Job `e2e`.
+- **`check`**: Postgres 17 als Service (`DEV_LOG_TEST_REQUIRE_DATABASE=1`: Datenbank-Tests dürfen nicht übersprungen werden), `npm ci`, `lint` (ESLint und die Schichtenprüfung `scripts/check-layers.ts`), `format:check`, `typecheck` (inkl. Tests), `npm run test:unit`. `test:unit` baut die Oberfläche nicht, kein Unit-Test liest `dist/ui`. `npm test` (= `build:ui` + `test:unit`) bleibt der lokale Komplettlauf. Die Oberfläche baut in der CI nur der Job `e2e`.
 - **`e2e`**: Postgres 17 als Service (Wegwerf-Datenbank, kein Secret), Chromium installieren, `build:ui`, `npm run test:e2e`. Der Playwright-Reporter ist in der CI `list` plus `github`, Fehler stehen also im Log und als Annotation. Bei Fehlern werden die Traces als Artefakt `playwright-traces` (7 Tage) hochgeladen.
 - **`docker`**:
   1. Zufällige, maskierte Werte für `DEV_LOG_PASSWORD` und `DEV_LOG_DB_PASSWORD` (sonst griffe das bekannte Standardpasswort aus compose).
@@ -48,6 +48,15 @@ Im PR-Modus (`issues+pr`) führt der Worker die Prüfschritte aus `.github/workf
 - **Keine Datenbank:** Lokal fehlt oft die Postgres-Instanz der CI. Der Spiegel setzt `DEV_LOG_TEST_REQUIRE_DATABASE` nicht (das Environment filtert `DEV_LOG_*`), Datenbank-Tests werden dann übersprungen. Ist `test:unit` rot und zeigt die Ausgabe eine fehlende Datenbank (`keine PostgreSQL-Datenbank`, `DEV_LOG_TEST_REQUIRE_DATABASE`, `ECONNREFUSED …:543x`), gilt der Schritt als „nicht prüfbar“: Der Log vermerkt das, es entsteht kein Bug und der Pull Request wird geöffnet. Die echte CI prüft ihn dann. Diese Regel gilt nur für `test:unit`.
 - **Liegengebliebene Ausgaben:** Der Spiegel läuft im Worktree, nicht in einem frischen Checkout. Gitignorierte Testausgaben (`test-results/`) schließt `eslint.config.mjs` deshalb aus; sonst wäre `lint` lokal rot, obwohl die echte CI diese Dateien nie sieht.
 - **Laufzeit:** Die vier Schritte verlängern die Sicherung im PR-Modus (Zeitlimit je Schritt wie beim Test-Gate: 45 Minuten).
+
+## Gegenprobe im Tester-Schritt (Bugfix-Aufträge)
+
+Nach einem grünen Tester-Schritt prüft `src/runner/counter-probe.ts` bei `kind = 'bug'`, ob die im Auftrag neuen Testfälle den Fehler belegen. Sie laufen in einem eigenen, detached Worktree auf `merge-base` von HEAD und Basis-Branch, mit den Testdateien des Auftrags und altem Produktivcode. Es laufen nur die neuen Fälle (`--test-name-pattern`), über `runProjectCommand` (gefiltertes Environment) und `gateExecutor` (Testcontainer). Der Worktree wird in `finally` entfernt, Reste älter als zwei Stunden räumt der nächste Lauf ab.
+
+- **Urteil:** `proven` (alle scheitern), `unproven` (mindestens einer besteht, nach einer Wiederholung), `inconclusive` (Import-/Kompilierfehler, Zeitüberschreitung, Filter ohne Treffer; weder Beleg noch Rückgabegrund), `none` (keine neuen Fälle, kein Lauf).
+- **Bei `unproven`:** Tester-Schritt rot mit „Test belegt den Fix nicht“, Rückgabe über den Weg für rote Tests (einmal je Lauf, dann Bug-Bericht).
+- **Ablage:** `development_items.counter_check` (Felder `cases`, `verdict`, `reason`), Abschnitt „## Gegenprobe“ im jüngsten `docs/tests/<Lauf>/bericht.md`, sonst `docs/tests/<Datum_Uhrzeit>_gegenprobe/`.
+- **Grenzen:** nur `node:test`/`tsx --test`; kein E2E. Die Sprint-Prüfung je Datei (`git-sync/counter-check.ts`) bleibt Rückfall für Aufträge ohne Ergebnis. Bericht: `docs/auftraege/gegenprobe-neue-testfaelle-2026-10-31.md`.
 
 ## Typprüfung der Tests
 
@@ -68,7 +77,10 @@ Im PR-Modus (`issues+pr`) führt der Worker die Prüfschritte aus `.github/workf
 
 ## Worauf zu achten ist
 
+- **Noch nicht in GitHub Actions belegt:** Lokal grün sind Typprüfung, Lint, Format, `npm test` (870/870), E2E (58 bestanden, 2 nur auf dem Handy übersprungen) und der Compose-Build von `dev-log`, `frontend`, `https`. Nicht lokal geprüft sind `docker build deploy/review` (der Wächter erlaubt nur `docker compose`) und der Containerstart mit Health-Prüfung (der feste `container_name` würde die Produktiv-Container ersetzen). Den Auftrag erst nach dem ersten grünen CI-Lauf von `e2e` und `docker` als erledigt führen.
 - Die CI misst keine Abdeckung und hat bewusst keine Coverage-Schwelle; der Worker misst sie selbst (`src/runner/measured-coverage.ts`).
+- **Roter Job `check` heisst nicht immer `test:unit`:** `lint` und `format:check` laufen im selben Job. Vor dem Abschluss alle drei lokal ausführen. Prettier prüft nur `src` und `frontend/src`, nicht `scripts/`. Beispiel: [ci-lint-und-format-fehler-788ec856-2026-10-29.md](ci-lint-und-format-fehler-788ec856-2026-10-29.md).
+- **`tsc`/`tsx: not found` im Agent-Container ist kein Testfehler:** Das `node_modules`-Volume des Projekts ist dann leer. Der Worker füllt es vor dem Lauf selbst (`ensureDependencies` in `src/core/sandbox.ts`: `npm install --ignore-scripts` unter `flock`, Stempel `node_modules/.aideation-lock` mit dem Lockfile-Hash). Vorher ersetzt `replaceLinkedModules` im Agent-Worktree den `node_modules`-Symlink auf den Host-Pfad durch einen leeren Ordner (nur im Git-Worktree, das Ziel des Links bleibt unberührt), damit das Volume dort eingebunden wird. Dafür muss der Worker mit dem neuen Code neu gestartet sein. Das Image `aideation-agent` wird beim Neustart neu gebaut. Ein Bug gilt erst nach einem grünen GitHub-Actions-Lauf (Jobs `check` und `docker`) als behoben.
 - Neue Test-Dateien müssen typsicher sein, sonst schlägt `typecheck` in der CI fehl.
 - **Actions noch per Tag statt SHA gepinnt** (`actions/checkout@v4`, `actions/setup-node@v4`, `actions/upload-artifact@v4`). Die Commit-SHAs ließen sich in der Agent-Umgebung nicht ermitteln (kein Netzzugriff), geraten wird nicht. Nachtragen mit `git ls-remote --tags https://github.com/actions/<name>`, dann `uses: actions/<name>@<sha> # v4.x.y`.
 - Die Standard-Testbefehle des Runners (`npm run build` + `npm test`) gelten für alle Projekte und bleiben unverändert, denn andere Projekte haben kein Skript `test:unit`. Für AIdeation selbst in den Projekteinstellungen unter „Testbefehle“ `npm run build` und `npm run test:unit` eintragen, sonst baut der Lauf die Oberfläche zweimal.

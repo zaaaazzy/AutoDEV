@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import { FocusOnce } from '../../core/focus-once.js';
 import type { Priority } from '../../core/models.js';
+import { DEVELOPMENT_STATUS } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { CATEGORIES, isFinished, statusLabel } from '../../shared/labels.js';
 import { CategoryLabelPipe } from '../../shared/pipes.js';
@@ -68,7 +69,8 @@ export class DevelopmentComponent {
       }
       if (!focus.take(id, present)) return;
       untracked(() => {
-        if (this.data().development.find((item) => item.id === id)?.status === 'done') this.showDoneOrders.set(true);
+        if (this.data().development.find((item) => item.id === id)?.status === DEVELOPMENT_STATUS.done)
+          this.showDoneOrders.set(true);
         globalThis.setTimeout(() => {
           const target = document.getElementById(`order-${id}`) ?? document.querySelector('.row-open');
           target?.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -77,7 +79,9 @@ export class DevelopmentComponent {
     });
   }
   protected readonly doneOrders = computed(() =>
-    this.data().development.filter((item) => item.status === 'done' && !this.store.attentionIds().has(item.id)),
+    this.data().development.filter(
+      (item) => item.status === DEVELOPMENT_STATUS.done && !this.store.attentionIds().has(item.id),
+    ),
   );
   protected readonly openOrders = computed(() =>
     this.data().development.filter((item) => !isFinished(item.status) && !this.store.attentionIds().has(item.id)),

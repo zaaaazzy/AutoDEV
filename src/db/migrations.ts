@@ -591,11 +591,33 @@ export const MIGRATIONS: readonly Migration[] = [
       ON CONFLICT (key) DO NOTHING;
     `,
   },
+  {
+    version: 27,
+    name: 'ideen-art',
+    // Art der Idee (wie development_items.kind, ohne 'express'): die Schätzung vergleicht nur Aufträge gleicher Art.
+    // Nullable, Standard 'feature'; NULL gilt im Code ebenfalls als 'feature'.
+    sql: `
+      ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS kind TEXT DEFAULT 'feature'
+        CHECK (kind IN ('feature', 'bug'));
+    `,
+  },
+  // Gegenprobe nach Bugfixes: neue Tests auf dem Stand vor dem Fix (Ergebnis je Testdatei). NULL = keine Gegenprobe;
+  // bestehende Aufträge bleiben unverändert (keine rückwirkende Prüfung). Im Auftrag als Version 19 geplant; 19–27
+  // belegte inzwischen Sprint 30, darum Version 28.
+  {
+    version: 28,
+    name: 'gegenprobe-je-auftrag',
+    sql: `
+      ALTER TABLE development_items ADD COLUMN IF NOT EXISTS counter_check JSONB
+        CHECK (counter_check IS NULL OR jsonb_typeof(counter_check) = 'object');
+    `,
+  },
   // Vorschläge aus den Abschnitten „Offen“, „TODO“, „Bekannter Befund“ und „Folgeauftrag“ der Auftragsdoku
   // (src/runner/follow-up-proposals.ts). Erst ein Mensch macht daraus einen Bug oder eine Idee (result_id).
   // project_slug für die Mandantenprüfung der Routen; gleiche Titel je Doku nur einmal (UNIQUE).
+  // Zuerst als Version 27 geplant; 27 und 28 belegte inzwischen Sprint 30.
   {
-    version: 27,
+    version: 29,
     name: 'folgevorschlaege-aus-doku',
     sql: `
       CREATE TABLE IF NOT EXISTS follow_up_proposals (

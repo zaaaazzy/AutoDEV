@@ -28,6 +28,7 @@ import { TourOverlayComponent } from './features/tour/tour-overlay.component.js'
 import { TourService } from './features/tour/tour.service.js';
 import { WelcomeDialogComponent } from './features/tour/welcome-dialog.component.js';
 import type { DevelopmentItem } from './core/models.js';
+import { DEVELOPMENT_STATUS, SPRINT_STATUS } from './core/models.js';
 import { isFinished, sprintLabel } from './shared/labels.js';
 import { navCount, sprintHealthOf, sprintStateOf, type SprintState } from './core/nav-counts.js';
 import { PageSearchService } from './core/page-search.service.js';
@@ -164,11 +165,11 @@ export class AppComponent {
   /** Laufender Sprint mit erledigten/geplanten Aufgaben für die Kopfzeile. */
   protected readonly activeSprint = computed(() => {
     const data = this.store.data();
-    const sprint = data.sprints.find((candidate) => candidate.status === 'active');
+    const sprint = data.sprints.find((candidate) => candidate.status === SPRINT_STATUS.active);
     if (!sprint) return null;
     const items = data.development.filter((item) => item.sprintId === sprint.id);
-    const done = items.filter((item) => item.status === 'done').length;
-    const running = items.filter((item) => item.status === 'in_progress').length;
+    const done = items.filter((item) => item.status === DEVELOPMENT_STATUS.done).length;
+    const running = items.filter((item) => item.status === DEVELOPMENT_STATUS.inProgress).length;
     const agentBusy = this.worker().agents.some((agent) => agent.active && agent.sprintName === sprint.name);
     // Alles erledigt und kein Agent mehr am Sprint: Haken statt blinkendem Punkt.
     const finished = items.length > 0 && done === items.length && running === 0 && !agentBusy;
@@ -208,13 +209,13 @@ export class AppComponent {
   /** Zustand des laufenden Sprints für die Menü-Bubble: grün läuft, orange Fehler, grau pausiert, rot gestoppt. */
   protected readonly sprintHealth = computed(() => {
     const data = this.store.data();
-    const sprint = data.sprints.find((candidate) => candidate.status === 'active');
+    const sprint = data.sprints.find((candidate) => candidate.status === SPRINT_STATUS.active);
     if (!sprint) return null;
     const items = data.development.filter((item) => item.sprintId === sprint.id);
     const open = items.filter((item) => !isFinished(item.status)).length;
     const failed = items.some(
       (item) =>
-        item.status === 'blocked' ||
+        item.status === DEVELOPMENT_STATUS.blocked ||
         (!isFinished(item.status) &&
           data.agentRuns
             .filter((run) => run.developmentId === item.id)
@@ -227,7 +228,7 @@ export class AppComponent {
   /** Aufträge des laufenden Sprints mit Handlungsbedarf: Problem und Lösung in wenigen Worten (Sprint-Hover). */
   protected readonly sprintAttention = computed(() => {
     const data = this.store.data();
-    const sprint = data.sprints.find((candidate) => candidate.status === 'active');
+    const sprint = data.sprints.find((candidate) => candidate.status === SPRINT_STATUS.active);
     if (!sprint) return [];
     return data.development
       .filter((item) => item.sprintId === sprint.id)
