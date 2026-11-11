@@ -8,8 +8,10 @@ import type { Pool } from 'pg';
 import type { CommandExecutor } from '../core/command.js';
 import {
   containerEnvProblem,
+  databaseRelatedCause,
   exitCause,
   DATABASE_COPY_SCRIPT,
+  DATABASE_EMPTY_SCRIPT,
   REVIEW_DATABASE_SCRIPT,
   ReviewSlots,
   reviewDatabase,
@@ -283,4 +285,194 @@ test('Beendeter Review-Container: die Ursache steht in der ersten Zeile der Meld
   );
   assert.equal(exitCause('npm error code ERESOLVE\nnpm error ERESOLVE could not resolve'), 'npm error code ERESOLVE');
   assert.equal(exitCause('[review] Start\n[review] alles gut'), null);
+});
+
+test('Beendeter Review-Container: ein Migrationsfehler („… failed: …“) ist die Ursache, nicht der Stack davor', () => {
+  const mainty = [
+    '[review] Datenbank-Kopie vom Review-Container übernommen',
+    '[review] Migrationen des Auftrags',
+    'Database migration failed: Error: Applied migration 011_checklist_items_is_required.sql is missing from disk.',
+    '    at runMigrations (/work/backend/src/database/migrations.ts:242:13)',
+  ].join('\n');
+  assert.equal(
+    exitCause(mainty),
+    'Database migration failed: Error: Applied migration 011_checklist_items_is_required.sql is missing from disk.',
+  );
+  assert.equal(databaseRelatedCause(exitCause(mainty)), true);
+  assert.equal(databaseRelatedCause('error: relation "articles" does not exist'), true);
+  assert.equal(databaseRelatedCause('npm error code ERESOLVE'), false);
+  assert.equal(databaseRelatedCause('Error: listen EADDRINUSE: address already in use :::4200'), false);
+  assert.equal(databaseRelatedCause(null), false);
+});
+
+test('Leere Datenbank: dropdb und createdb mit den Zugängen der Kopie, kein pg_dump', async () => {
+  const bin = await mkdtemp(join(tmpdir(), 'review-emptydb-'));
+  const log = join(bin, 'calls.log');
+  for (const tool of ['dropdb', 'createdb', 'pg_dump', 'psql']) {
+    await writeFile(join(bin, tool), `#!/bin/sh\necho "${tool} $PGDATABASE $*" >> '${log}'\nexit 0\n`);
+    await chmod(join(bin, tool), 0o755);
+  }
+  const result = spawnSync('sh', ['-c', DATABASE_EMPTY_SCRIPT], {
+    env: {
+      PATH: `${bin}:${process.env.PATH ?? ''}`,
+      S_HOST: 'h',
+      S_PORT: '5432',
+      S_USER: 'u',
+      S_PASSWORD: 'p',
+      T_DB: 'mainty_review_2',
+    },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0);
+  assert.deepEqual((await readFile(log, 'utf8')).trim().split('\n'), [
+    'dropdb  --if-exists --force mainty_review_2',
+    'createdb  mainty_review_2',
+  ]);
+});
+
+const MIGRATION_LOGS = [
+  '[review] Migrationen des Auftrags',
+  'Database migration failed: Error: Applied migration 011_checklist_items_is_required.sql is missing from disk.',
+].join('\n');
+
+/**
+ * Slot 2 (Mainty, mit Projekt-Datenbank) im Status „starting“, dessen Container beendet ist: Docker-Fakes melden
+ * `running=false` und das Protokoll `logs`. Updates des Workers landen im Slot-Objekt, so lässt sich mehrmals
+ * synchronisieren (zweiter Start, erneutes Scheitern, Erreichbarkeit).
+ */
+function exitedSlot(logs: string, options: { databaseUrl?: string | null } = {}) {
+  const commands: string[][] = [];
+  const updates: Record<string, unknown>[] = [];
+  const state = { running: false, reachable: false, logs };
+  const slot: Record<string, unknown> = {
+    slot: 2,
+    enabled: true,
+    projectSlug: 'mainty',
+    commit: 'a'.repeat(40),
+    label: 'Lagerverwaltung',
+    developmentId: null,
+    kind: 'manual',
+    status: 'starting',
+    startedAt: new Date(),
+  };
+  const columns: Record<string, string> = { commit_sha: 'commit', started_at: 'startedAt' };
+  const pool = {
+    query: async (sql: string, params: unknown[] = []) => {
+      if (sql.startsWith('UPDATE review_slots')) {
+        const fields: Record<string, unknown> = {};
+        for (const [, column, index] of sql.matchAll(/(\w+) = \$(\d+)/g)) {
+          const value = params[Number(index) - 1];
+          fields[column ?? ''] = value;
+          slot[columns[column ?? ''] ?? column ?? ''] = value;
+        }
+        updates.push(fields);
+      }
+      if (sql.includes('FROM review_slots')) return { rows: [{ ...slot }] };
+      if (sql.includes('FROM projects')) {
+        return {
+          rows: [
+            {
+              folder: '/projekte/mainty',
+              command: ['sh', '/work/scripts/review-live.sh'],
+              databaseUrl:
+                options.databaseUrl === undefined
+                  ? 'postgresql://mainty:pw@localhost:5432/mainty'
+                  : options.databaseUrl,
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+  const execute: CommandExecutor = async (command) => {
+    commands.push(command);
+    if (command.includes('--git-common-dir')) return { exitCode: 0, durationMs: 1, output: '/projekte/mainty/.git\n' };
+    if (command[1] === 'inspect') return { exitCode: 0, durationMs: 1, output: `${state.running}\n` };
+    if (command[1] === 'logs') return { exitCode: 0, durationMs: 1, output: state.logs };
+    return { exitCode: 0, durationMs: 1, output: '' };
+  };
+  const slots = new ReviewSlots(pool, '/install', execute, async () => state.reachable, {
+    reviewUrl: REVIEW_URL,
+    mainUrl: MAIN_URL,
+  });
+  const scripts = () =>
+    commands.filter((command) => command.includes('postgres:17-alpine')).map((command) => command.at(-1));
+  const runs = () => commands.filter((command) => command[1] === 'run' && command[2] === '-d');
+  return { slots, slot, state, commands, updates, scripts, runs };
+}
+
+test('Review-Container: Kopie passt nicht zum Stand (Migrationsfehler) → einmal mit leerer Datenbank neu starten', async (t) => {
+  t.mock.method(console, 'info', () => undefined);
+  const box = exitedSlot(MIGRATION_LOGS);
+
+  await box.slots.sync();
+
+  assert.deepEqual(box.scripts(), [DATABASE_EMPTY_SCRIPT], 'leere Datenbank statt Kopie');
+  assert.equal(box.runs().length, 1, 'docker run des zweiten Starts');
+  assert.equal(box.slot.status, 'starting');
+  assert.match(
+    String(box.updates[0]?.message),
+    /passte nicht zu diesem Stand \(Database migration failed: Error: Applied migration 011_checklist_items_is_required\.sql is missing from disk\.\) – zweiter Start mit leerer Datenbank/,
+  );
+  assert.match(String(box.slot.message), /leere Datenbank/);
+  assert.ok(!box.updates.some((fields) => fields.status === 'failed'), 'nicht als gescheitert gemeldet');
+  const script = box.commands.find((command) => command.includes('postgres:17-alpine')) ?? [];
+  assert.ok(script.includes('T_DB=mainty_review_2'));
+  assert.ok(script.includes('S_USER=mainty'));
+
+  // Läuft der zweite Start, bleibt der Hinweis am Container stehen.
+  box.state.running = true;
+  box.state.reachable = true;
+  await box.slots.sync();
+  assert.equal(box.slot.status, 'running');
+  assert.equal(
+    box.slot.message,
+    'Leere Datenbank: die Kopie der Projektdatenbank passte nicht zu diesem Stand (Database migration failed: Error: Applied migration 011_checklist_items_is_required.sql is missing from disk.).',
+  );
+});
+
+test('Review-Container: scheitert auch der Start mit leerer Datenbank, bleibt es bei „failed“ – kein dritter Start', async (t) => {
+  t.mock.method(console, 'info', () => undefined);
+  const box = exitedSlot(MIGRATION_LOGS);
+  await box.slots.sync();
+  box.state.logs = 'Database migration failed: Error: syntax error at or near "KAPUTT"';
+
+  await box.slots.sync();
+
+  assert.equal(box.slot.status, 'failed');
+  assert.match(String(box.slot.message), /^Container beendet: Database migration failed: Error: syntax error/);
+  assert.equal(box.runs().length, 1);
+  assert.deepEqual(box.scripts(), [DATABASE_EMPTY_SCRIPT]);
+
+  // Ein neuer Stand im selben Container bekommt wieder die Kopie und bei Bedarf seinen eigenen zweiten Start.
+  box.slot.status = 'requested';
+  box.slot.commit = 'b'.repeat(40);
+  await box.slots.sync();
+  assert.deepEqual(box.scripts(), [DATABASE_EMPTY_SCRIPT, DATABASE_COPY_SCRIPT]);
+  box.state.logs = MIGRATION_LOGS;
+  await box.slots.sync();
+  assert.deepEqual(box.scripts(), [DATABASE_EMPTY_SCRIPT, DATABASE_COPY_SCRIPT, DATABASE_EMPTY_SCRIPT]);
+  assert.equal(box.slot.status, 'starting');
+});
+
+test('Review-Container: andere Ursachen (npm, Port) und Projekte ohne Datenbank-Kopie werden nicht neu gestartet', async () => {
+  const npm = exitedSlot('npm error code ERESOLVE\nnpm error ERESOLVE could not resolve');
+  await npm.slots.sync();
+  assert.equal(npm.slot.status, 'failed');
+  assert.deepEqual(npm.scripts(), []);
+  assert.equal(npm.runs().length, 0);
+
+  const withoutDatabase = exitedSlot(MIGRATION_LOGS, { databaseUrl: null });
+  await withoutDatabase.slots.sync();
+  assert.equal(withoutDatabase.slot.status, 'failed');
+  assert.match(String(withoutDatabase.slot.message), /^Container beendet: Database migration failed/);
+  assert.equal(withoutDatabase.runs().length, 0);
+
+  // Ein laufender Container, der später stirbt, wird nicht mit leerer Datenbank neu gestartet (kein Startproblem).
+  const died = exitedSlot(MIGRATION_LOGS);
+  died.slot.status = 'running';
+  await died.slots.sync();
+  assert.equal(died.slot.status, 'failed');
+  assert.equal(died.runs().length, 0);
 });
