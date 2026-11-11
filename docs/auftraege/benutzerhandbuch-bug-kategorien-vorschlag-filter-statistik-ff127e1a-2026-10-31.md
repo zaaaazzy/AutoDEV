@@ -4,7 +4,7 @@ Auftrag ff127e1a-6b7d-4358-a136-f9be1f6ca313 (Feature). Dieses Kapitel beschreib
 
 > **Abgrenzung:** Die Bug-Kategorie ist **nicht** der Bereich (Frontend, Backend, Fullstack, Infrastructure, Docs, Security). Der Bereich steht im Feld `category` und wird an Aufträge vererbt. Er bleibt unverändert. In der Bugliste heißt diese Spalte jetzt „Bereich“. Zum Bereich siehe `docs/bug-kategorien.md`.
 
-> **Printscreens:** keine in dieser Fassung. Die Oberfläche ist in dieser Sitzung nicht gestartet, und es wurden keine Aufnahmen gemacht. Die nötigen Aufnahmen stehen in Abschnitt 9 als Liste mit dem Zustand, den sie zeigen sollen. Die Beschreibungen stammen aus dem Code, geprüft gegen (`src/api/bugs.ts`, `src/agent/bug-category.ts`, `src/agent/bug-classifier.ts`, `src/api/stats.ts`, `frontend/src/app/features/bugs/bugs.component.html` und `.ts`, `bug-stats.ts`, `bug-category-matrix.component.ts`, `frontend/src/app/features/stats/stats.component.html`).
+> **Printscreens:** keine in dieser Fassung. Die Oberfläche ist in dieser Sitzung nicht gestartet, und es wurden keine Aufnahmen gemacht. Die nötigen Aufnahmen stehen in Abschnitt 9 als Liste mit dem Zustand, den sie zeigen sollen. Die Beschreibungen stammen aus dem Code, geprüft in `src/api/bugs.ts`, `src/agent/bug-category.ts`, `src/agent/bug-classifier.ts`, `src/api/stats.ts`, `frontend/src/app/features/bugs/bugs.component.html` und `.ts`, `bug-stats.ts`, `bug-category-matrix.component.ts` sowie `frontend/src/app/features/stats/stats.component.html`.
 
 > **Tests:** Der erste Tester-Lauf scheiterte, weil der Testbefehl nicht freigegeben war; die Kriterien blieben ungeprüft. Der Entwickler meldet danach grün: `npm run typecheck`, `npm run lint`, `npm run format:check` und `npm run test:unit` (2111 bestanden, 0 fehlgeschlagen, 10 übersprungen). Übersprungen sind die Datenbank-Tests (`DEV_LOG_TEST_ADMIN_DATABASE_URL` fehlt) und der Oberflächentest. Der Dokumentierer und ich haben keine Tests ausgeführt; die Angaben oben sind nicht nachgeprüft. Ob die Oberfläche so arbeitet, wie hier beschrieben, bestätigt der Tester.
 
@@ -208,7 +208,7 @@ Dann gibt es keine offenen Vorschläge. Prüfe, ob der Altbestandslauf schon gel
 
 ## 9. Printscreens (ausstehend)
 
-Diese Aufnahmen fehlen noch. Sie entstehen auf einem Host mit laufender App und Browser:
+Diese Aufnahmen fehlen noch. Der Agent konnte sie nicht erstellen: Der Browser-Cache liegt außerhalb des erlaubten Arbeitsordners, und der Start von Playwright verlangt eine Freigabe. Außerdem braucht die App eine laufende Datenbank. Die Aufnahmen entstehen darum von Hand, auf einem Host mit laufender App und Browser. Die Bilder kommen danach in dieses Kapitel:
 
 1. **Anlegeformular:** Auswahlfeld „Kategorie“ mit der Vorgabe „Vom lokalen Modell vorschlagen lassen“ und der Liste der acht Kategorien.
 2. **Bugliste mit Vorschlägen:** Spalte Kategorie mit einem bestätigten Bug, einem Vorschlag („Oberfläche?“ mit „Bestätigen“) und einem Bug ohne Kategorie (–). Dazu die Auswahlleiste mit „N Vorschläge bestätigen“.
