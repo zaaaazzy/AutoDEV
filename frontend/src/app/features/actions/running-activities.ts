@@ -1,4 +1,5 @@
 import type { DevelopmentItem, ReviewSlot, WorkerStatus } from '../../core/models.js';
+import { DEVELOPMENT_STATUS } from '../../core/models.js';
 
 /** Eine laufende Tätigkeit unter „Aktionen → Läuft gerade“. */
 export interface RunningActivity {
@@ -24,7 +25,7 @@ export interface ActivityInput {
 export function runningActivities(input: ActivityInput): RunningActivity[] {
   const activities: RunningActivity[] = [];
   for (const item of input.development) {
-    if (item.status === 'approval' && item.reviewApprovedAt) {
+    if (item.status === DEVELOPMENT_STATUS.approval && item.reviewApprovedAt) {
       activities.push({
         kind: 'git',
         label: 'Freigegeben – wird gemergt',

@@ -2,6 +2,7 @@
 
 import { isAssignableSprintStatus } from '../../../../../src/core/development-transitions.js';
 import { defined } from '../../../../../src/core/defined.js';
+import { DEVELOPMENT_STATUS } from '../../core/models.js';
 
 /**
  * Umsortieren, Herausnehmen und Hineinnehmen nur in geplanten oder aktiven Sprints (dieselbe Regel wie der Server);
@@ -34,12 +35,12 @@ const PRIORITY = { high: 0, medium: 1, low: 2 } as const;
 
 export function sprintPhase(order: Pick<SprintOrder, 'status'>): SprintPhase {
   switch (order.status) {
-    case 'in_progress':
+    case DEVELOPMENT_STATUS.inProgress:
       return 'running';
-    case 'approval':
-    case 'blocked':
-    case 'done':
-    case 'rejected':
+    case DEVELOPMENT_STATUS.approval:
+    case DEVELOPMENT_STATUS.blocked:
+    case DEVELOPMENT_STATUS.done:
+    case DEVELOPMENT_STATUS.rejected:
       return order.status;
     default:
       return 'planned';

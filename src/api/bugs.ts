@@ -1,11 +1,11 @@
 import type { Router } from 'express';
 import type { Pool, PoolClient } from 'pg';
 import { access } from './access.js';
-import { BUG_STATUSES, BUG_STATUS, DEVELOPMENT_STATUS, type BugStatus } from '../core/status.js';
+import { BUG_STATUS, BUG_STATUSES, DEVELOPMENT_STATUS, type BugStatus } from '../core/status.js';
 import { isAssignableSprintStatus, SPRINT_POOL_DEVELOPMENT_STATUSES } from '../core/development-transitions.js';
 import { fencedBugDescriptionSql, isUntrustedBugSource, unapprovedBugSql } from '../core/bug-trust.js';
 import { startProductionFix } from '../runner/production-events.js';
-import { UNTRUSTED_START } from '../runner/hoster.js';
+import { UNTRUSTED_START } from '../core/bug-trust.js';
 import { afterBugCreated } from '../agent/bug-classifier.js';
 import { categoryFromBug } from '../core/bug-category.js';
 import type { Principal } from './roles.js';
@@ -97,7 +97,7 @@ export async function syncBugOrder(db: Pool | PoolClient, bugId: string): Promis
   }
   await db.query(
     `INSERT INTO development_items (project_slug, sprint_id, title, description, status, priority, kind, bug_id)
-     SELECT b.project_slug, b.sprint_id, left('Bug: ' || b.title, 180), ${fencedBugDescriptionSql('b', UNTRUSTED_START)}, 'planned',
+     SELECT b.project_slug, b.sprint_id, left('Bug: ' || b.title, 180), ${fencedBugDescriptionSql('b', UNTRUSTED_START)}, '${DEVELOPMENT_STATUS.planned}',
             ${ORDER_PRIORITY}, 'bug', b.id
        FROM bugs b
       WHERE b.id = $1 AND b.sprint_id IS NOT NULL AND b.status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')
@@ -105,7 +105,7 @@ export async function syncBugOrder(db: Pool | PoolClient, bugId: string): Promis
      ON CONFLICT (bug_id) WHERE bug_id IS NOT NULL DO UPDATE
        SET sprint_id = CASE WHEN development_items.status IN (${BUG_ORDER_SPRINT_MOVABLE_SQL}) AND NOT development_items.auto_run
                             THEN EXCLUDED.sprint_id ELSE development_items.sprint_id END,
-           status = CASE WHEN development_items.status IN ('backlog', 'done') THEN 'planned' ELSE development_items.status END,
+           status = CASE WHEN development_items.status IN ('${DEVELOPMENT_STATUS.backlog}', '${DEVELOPMENT_STATUS.done}') THEN '${DEVELOPMENT_STATUS.planned}' ELSE development_items.status END,
            updated_at = NOW()`,
     [bugId],
   );
@@ -115,87 +115,23 @@ export async function syncBugOrder(db: Pool | PoolClient, bugId: string): Promis
         SET title = left('Bug: ' || b.title, 180), description = ${fencedBugDescriptionSql('b', UNTRUSTED_START)},
             priority = ${ORDER_PRIORITY}, updated_at = NOW()
        FROM bugs b
-      WHERE d.bug_id = b.id AND b.id = $1 AND d.status IN ('planned', 'backlog') AND NOT d.auto_run
+      WHERE d.bug_id = b.id AND b.id = $1 AND d.status IN ('${DEVELOPMENT_STATUS.planned}', '${DEVELOPMENT_STATUS.backlog}') AND NOT d.auto_run
         AND NOT ${unapprovedBugSql('b')}
         AND (d.title, d.description, d.priority) IS DISTINCT FROM
             (left('Bug: ' || b.title, 180), ${fencedBugDescriptionSql('b', UNTRUSTED_START)}, ${ORDER_PRIORITY})`,
     [bugId],
   );
   await db.query(
-    `UPDATE development_items d SET sprint_id = NULL, status = 'backlog', updated_at = NOW()
+    `UPDATE development_items d SET sprint_id = NULL, status = '${DEVELOPMENT_STATUS.backlog}', updated_at = NOW()
        FROM bugs b
-      WHERE d.bug_id = b.id AND b.id = $1 AND b.sprint_id IS NULL AND d.status IN ('planned', 'backlog') AND NOT d.auto_run`,
+      WHERE d.bug_id = b.id AND b.id = $1 AND b.sprint_id IS NULL AND d.status IN ('${DEVELOPMENT_STATUS.planned}', '${DEVELOPMENT_STATUS.backlog}') AND NOT d.auto_run`,
     [bugId],
   );
   await db.query(
     `DELETE FROM development_items d USING bugs b
-      WHERE d.bug_id = b.id AND b.id = $1 AND b.status IN ('${BUG_STATUS.fixed}', '${BUG_STATUS.wontfix}') AND d.status IN ('planned', 'backlog')`,
+      WHERE d.bug_id = b.id AND b.id = $1 AND b.status IN ('${BUG_STATUS.fixed}', '${BUG_STATUS.wontfix}') AND d.status IN ('${DEVELOPMENT_STATUS.planned}', '${DEVELOPMENT_STATUS.backlog}')`,
     [bugId],
   );
-}
-
-/**
- * Creates a bug report for a failed agent step unless an identical open bug already exists. Die Kategorie kommt aus
- * den genannten Pfaden, sonst stuft das lokale Modell im Hintergrund ein (ohne Einfluss auf den Auto-Fix-Ablauf).
- */
-export async function reportAgentBug(
-  pool: Pool,
-  bug: {
-    projectSlug: string;
-    title: string;
-    description: string;
-    sprintId?: string | null;
-    developmentId?: string;
-    paths?: string[];
-  },
-): Promise<string> {
-  const title = bug.title.slice(0, 180);
-  const description = bug.description.slice(0, 10_000);
-  const category = categoryFromBug({ title, description, paths: bug.paths });
-  // development_id: Ist der Auftrag später doch erledigt, kommt die Meldung auf den Friedhof (Trigger).
-  const created = await pool.query<{ id: string }>(
-    `INSERT INTO bugs (project_slug, title, description, severity, source, sprint_id, development_id, category)
-     SELECT $1, $2, $3, 'high', 'agent', NULL, $4, $5
-      WHERE NOT EXISTS (
-        SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2 AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')
-      ) RETURNING id`,
-    [bug.projectSlug, title, description, bug.developmentId ?? null, category],
-  );
-  if (created.rows[0]) {
-    afterBugCreated(pool, created.rows[0].id, category, { title, description });
-    return created.rows[0].id;
-  }
-  const existing = (
-    await pool.query<{ id: string }>(
-      `SELECT id FROM bugs WHERE project_slug = $1 AND title = $2 AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}') ORDER BY created_at LIMIT 1`,
-      [bug.projectSlug, title],
-    )
-  ).rows[0];
-  if (!existing) throw new Error('Bug report could not be found after insertion.');
-  return existing.id;
-}
-
-export interface KnownBug {
-  title: string;
-  description: string;
-  severity: string;
-  status: BugStatus;
-  fixNotes: string;
-  source: string;
-}
-
-/** Bekannte Bugs für den Prompt; fremde, nicht freigegebene Bugs (Betrieb, GitHub) kommen nicht in den Prompt. */
-export async function loadKnownBugs(pool: Pool, projectSlug: string, limit = 40): Promise<KnownBug[]> {
-  const result = await pool.query<KnownBug>(
-    `SELECT title, description, severity, status, fix_notes AS "fixNotes", source
-       FROM bugs
-      WHERE project_slug = $1 AND status NOT IN ('${BUG_STATUS.wontfix}', '${BUG_STATUS.rejected}')
-        AND NOT ${unapprovedBugSql('bugs')}
-      ORDER BY CASE status WHEN '${BUG_STATUS.open}' THEN 0 WHEN '${BUG_STATUS.inProgress}' THEN 0 ELSE 1 END, updated_at DESC
-      LIMIT $2`,
-    [projectSlug, limit],
-  );
-  return result.rows;
 }
 
 /**

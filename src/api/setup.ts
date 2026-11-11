@@ -1,7 +1,7 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { access } from './access.js';
-import { ensureDefaultAgents } from './agents.js';
+import { ensureDefaultAgents } from '../agent/default-agents.js';
 import { DEFAULT_PERMISSION_GROUPS, PERMISSION_GROUPS } from '../agent/tool-permissions.js';
 import {
   isRecord,

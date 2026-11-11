@@ -18,6 +18,8 @@ export type {
   RuleEffect,
 } from '../../../../src/core/shared-types.js';
 export type { BugStatus, DevelopmentStatus, SprintStatus } from '../../../../src/core/status.js';
+// Die Werte selbst (DEVELOPMENT_STATUS.done statt 'done'): Vergleiche und Listen bauen auf ihnen auf.
+export { BUG_STATUS, DEVELOPMENT_STATUS, IDEATION_STATUS, SPRINT_STATUS } from '../../../../src/core/status.js';
 
 import type { CoverageAreaKey } from '../../../../src/core/coverage-areas.js';
 

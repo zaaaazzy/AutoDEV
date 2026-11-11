@@ -1,5 +1,4 @@
 import type { Pool } from 'pg';
-import { ensureDefaultAgents } from '../api/agents.js';
 
 export async function registerProject(
   pool: Pool,
@@ -12,5 +11,4 @@ export async function registerProject(
        SET name = EXCLUDED.name, repository = EXCLUDED.repository`,
     [project.slug, project.name, project.repository],
   );
-  await ensureDefaultAgents(pool, project.slug);
 }

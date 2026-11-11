@@ -55,3 +55,26 @@ auf. Fix: Der Aufruf läuft jetzt im Test-Repo (`cwd: workTree`) mit der neutral
   nur der Gesamtlauf.
 - Kein Image-Neubau von `aideation-agent` und kein Befüllen des Volumes: `docker build` ist für Agents gesperrt.
 - Der Bug gilt erst nach einem grünen GitHub-Actions-Lauf (Jobs `check` und `docker`) als behoben.
+
+## Nachtrag 11.11.2026: zweiter Merge von `sprint/sprint-30`
+
+Der Merge in den Sprint war fehlgeschlagen, weil es in `src/core/sandbox.ts` einen Konflikt gab. In Sprint 30 sind
+Konstanten, Hilfen und Netzwerk nach `src/core/sandbox-base.ts` gewandert. So kann `workbench.ts` sie ohne
+Import-Zyklus nutzen, und `sandbox.ts` reicht sie mit `export * from './sandbox-base.js'` weiter. Der Auftrags-Branch
+hatte im alten Block von `sandbox.ts` nur einen Kommentar zu `npm_config_cache` ergänzt und dabei die Zeile
+versehentlich verdoppelt.
+
+- `src/core/sandbox.ts`: Hier gilt die Seite von Sprint 30. Der alte, doppelte Block ist entfernt.
+- `src/core/sandbox-base.ts`: Der Kommentar, warum der npm-Cache in `/tmp` liegt, ist übernommen, die Zeile steht nur
+  einmal.
+
+Prüfung im Arbeitscontainer am 11.11.2026:
+
+- `npm run typecheck`: ohne Fehler.
+- `npm run lint`: 0 Fehler, 722 Warnungen (die bestehenden). Schichten in Ordnung, keine Zyklen.
+- `npm run format:check`: alles in Ordnung.
+- `npm run test:unit`: **2096 Tests, 2086 bestanden, 0 fehlgeschlagen, 0 abgebrochen, 10 übersprungen.** Übersprungen
+  sind nur Tests, die Docker, macOS oder Windows brauchen. Die Datenbank-Tests liefen mit.
+
+Weiter nicht belegt: der grüne GitHub-Actions-Lauf und der Neubau des Images `aideation-agent`. Für beides fehlt Agents
+die Berechtigung (`gh`, `docker build`).

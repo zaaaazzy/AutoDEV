@@ -5,6 +5,15 @@ import { sendPush } from '../core/push.js';
 import { loadGitState, problemsFor } from '../api/git-state.js';
 import { ENVIRONMENT_TODO, GIT_FOLDER_TODO } from './autofix.js';
 import { MANUAL_TODO_PREFIX, MERGE_TODO } from './action-todo.js';
+import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
+
+/** Aufträge, die im Sprint bleiben: noch offen oder bis zur Freigabe in Arbeit. */
+const SPRINT_BOUND_STATUSES: readonly string[] = [
+  DEVELOPMENT_STATUS.backlog,
+  DEVELOPMENT_STATUS.planned,
+  DEVELOPMENT_STATUS.inProgress,
+  DEVELOPMENT_STATUS.approval,
+];
 
 export type AutopilotStep =
   'off' | 'paused' | 'working' | 'review' | 'completed' | 'started' | 'outside_hours' | 'idle';
@@ -31,8 +40,8 @@ export function sprintSettled(
     !items.some(
       (item) =>
         // Wartet ein Auftrag auf die Review-Freigabe, ist er noch nicht im Sprint-Branch: der Sprint wartet mit.
-        ['backlog', 'planned', 'in_progress', 'approval'].includes(item.status) ||
-        (item.status === 'blocked' &&
+        SPRINT_BOUND_STATUSES.includes(item.status) ||
+        (item.status === DEVELOPMENT_STATUS.blocked &&
           (!item.actionTodo ||
             // Abnahmehinweis eines früheren, bestandenen Tests: kein Warten auf einen Menschen, sondern ein Fehler.
             item.actionTodo.startsWith(MANUAL_TODO_PREFIX) ||
@@ -77,7 +86,7 @@ async function notifyPause(pool: Pool, project: string, sprintId: string, messag
 export async function markSprintReady(pool: Pool, project: string): Promise<boolean> {
   const active = (
     await pool.query<{ id: string; name: string; ready: boolean }>(
-      `SELECT id, name, review_ready_at IS NOT NULL AS ready FROM sprints WHERE project_slug = $1 AND status = 'active'`,
+      `SELECT id, name, review_ready_at IS NOT NULL AS ready FROM sprints WHERE project_slug = $1 AND status = '${SPRINT_STATUS.active}'`,
       [project],
     )
   ).rows[0];
@@ -85,7 +94,7 @@ export async function markSprintReady(pool: Pool, project: string): Promise<bool
   const items = (
     await pool.query<{ status: string; actionTodo: string | null; budgetBlocked: string | null }>(
       `SELECT status, action_todo AS "actionTodo", budget_blocked AS "budgetBlocked" FROM development_items
-        WHERE sprint_id = $1 AND status <> 'rejected' AND kind <> 'express'`,
+        WHERE sprint_id = $1 AND status <> '${DEVELOPMENT_STATUS.rejected}' AND kind <> 'express'`,
       [active.id],
     )
   ).rows;
@@ -132,9 +141,9 @@ async function goLiveAutomatically(
   try {
     await client.query('BEGIN');
     const claimed = await client.query(
-      `UPDATE sprints s SET status = 'completed'
-        WHERE s.id = $1 AND s.status = 'active' AND s.paused_at IS NULL
-          AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.sprint_id = s.id AND d.status = 'in_progress')
+      `UPDATE sprints s SET status = '${SPRINT_STATUS.completed}'
+        WHERE s.id = $1 AND s.status = '${SPRINT_STATUS.active}' AND s.paused_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.sprint_id = s.id AND d.status = '${DEVELOPMENT_STATUS.inProgress}')
         RETURNING s.id`,
       [sprint.id],
     );
@@ -183,7 +192,7 @@ export async function sprintAutopilot(pool: Pool, project: string, now = new Dat
 
   const active = (
     await pool.query<{ id: string; name: string }>(
-      `SELECT id, name FROM sprints WHERE project_slug = $1 AND status = 'active'`,
+      `SELECT id, name FROM sprints WHERE project_slug = $1 AND status = '${SPRINT_STATUS.active}'`,
       [project],
     )
   ).rows[0];
@@ -192,7 +201,7 @@ export async function sprintAutopilot(pool: Pool, project: string, now = new Dat
       await pool.query<{ status: string; actionTodo: string | null; budgetBlocked: string | null }>(
         // Express-Anfragen sind ungeplant: Eine offene Rückfrage im Chat hält den Sprintabschluss nicht auf.
         `SELECT status, action_todo AS "actionTodo", budget_blocked AS "budgetBlocked" FROM development_items
-          WHERE sprint_id = $1 AND status <> 'rejected' AND kind <> 'express'`,
+          WHERE sprint_id = $1 AND status <> '${DEVELOPMENT_STATUS.rejected}' AND kind <> 'express'`,
         [active.id],
       )
     ).rows;

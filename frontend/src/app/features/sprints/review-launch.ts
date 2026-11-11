@@ -1,4 +1,5 @@
 import type { DevelopmentItem, ReviewSlot, SprintCommit, SprintStatus } from '../../core/models.js';
+import { DEVELOPMENT_STATUS } from '../../core/models.js';
 import { isFinished } from '../../shared/labels.js';
 
 const STATUS_TEXT: Record<ReviewSlot['status'], string> = {
@@ -59,7 +60,8 @@ export function nextOpenOrders(items: DevelopmentItem[], sprintId: string, limit
     .filter((item) => item.sprintId === sprintId && !isFinished(item.status))
     .sort(
       (left, right) =>
-        Number(right.status === 'in_progress') - Number(left.status === 'in_progress') ||
+        Number(right.status === DEVELOPMENT_STATUS.inProgress) -
+          Number(left.status === DEVELOPMENT_STATUS.inProgress) ||
         (left.sprintRank ?? Number.MAX_SAFE_INTEGER) - (right.sprintRank ?? Number.MAX_SAFE_INTEGER),
     )
     .slice(0, limit);

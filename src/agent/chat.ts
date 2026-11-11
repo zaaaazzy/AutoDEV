@@ -11,9 +11,9 @@ import { closeExpressOrder, openExpressOrder } from './express-order.js';
 import { saveRequestDoc } from './request-doc.js';
 import { type ChatReference, referenceContext } from './chat-references.js';
 import { replyToIdeaComment } from '../api/idea-comments.js';
-import { READ_ONLY_PERMISSION_ROLE } from './permission-rules.js';
+import { READ_ONLY_PERMISSION_ROLE } from '../core/permission-rules.js';
 import { runServiceMarkers, serviceResultsSection } from './service-actions.js';
-import type { RunnerOptions } from '../runner/runner.js';
+import type { RunnerOptions } from '../runner/runner-types.js';
 import {
   finishTaskRun,
   linkAnswer,

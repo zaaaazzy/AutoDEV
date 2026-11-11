@@ -1,7 +1,7 @@
 # Sandbox für Agents (src/core/sandbox.ts und workbench.ts, Schalter DEV_LOG_AGENT_SANDBOX): Image des
 # Arbeitscontainers je Projekt (workbench, Standard) und der kurzlebigen Container je Lauf (docker). Eingebunden wird
 # nur der Worktree (/workspace) und node_modules als Volume je Projekt. Docker-CLI, Compose und Buildx sprechen im
-# Arbeitscontainer mit dem eigenen Docker des Stapels (docker:dind), nie mit dem des Hosts.
+# Arbeitscontainer mit dem eigenen Docker des Stapels (docker:dind-rootless), nie mit dem des Hosts.
 # Gebaut aus dem Wurzelordner: docker build -t aideation-agent -f deploy/agent/Dockerfile .
 
 # Wächter (agent-guard.ts) als eine Datei bündeln: der PreToolUse-Hook prüft auch im Container jeden Zugriff.

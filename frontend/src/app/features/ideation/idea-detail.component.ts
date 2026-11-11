@@ -72,7 +72,7 @@ export class IdeaDetailComponent {
   }
 
   protected statusOptions(idea: Idea): string[] {
-    return IDEA_SELECTABLE_STATUSES.includes(idea.status) ? IDEA_SELECTABLE_STATUSES : [idea.status];
+    return IDEA_SELECTABLE_STATUSES.includes(idea.status) ? [...IDEA_SELECTABLE_STATUSES] : [idea.status];
   }
 
   protected displayStatus(idea: Idea): string {

@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import { SYSTEM_PERSON } from '../api/idea-comments.js';
 import { isUuid } from '../core/validation.js';
 import { fenceExternalText, isUntrustedBugSource, UNTRUSTED_BUG_SOURCES_SQL } from '../core/bug-trust.js';
-import { containsUntrusted, UNTRUSTED_HINT } from '../runner/hoster.js';
+import { containsUntrusted, UNTRUSTED_HINT } from '../core/bug-trust.js';
 
 /**
  * Verweise im Chat („/auftrag/…“, „/git/…“, „@Person“): Der Server prüft, dass jeder Verweis zum Projekt gehört,

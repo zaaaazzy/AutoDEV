@@ -33,9 +33,16 @@ import {
   StatusClassPipe,
   StatusLabelPipe,
 } from '../../shared/pipes.js';
+import { BUG_STATUS } from '../../core/models.js';
 
 const SEVERITY_RANK = ['low', 'medium', 'high', 'critical'];
-const BUG_STATUS_RANK = ['open', 'in_progress', 'fixed', 'wontfix', 'rejected'];
+const BUG_STATUS_RANK: readonly string[] = [
+  BUG_STATUS.open,
+  BUG_STATUS.inProgress,
+  BUG_STATUS.fixed,
+  BUG_STATUS.wontfix,
+  BUG_STATUS.rejected,
+];
 
 /** Pro Statistik-Karte höchstens so viele Zeilen, der Rest wird zusammengefasst. */
 const STAT_ROWS = 10;
@@ -82,7 +89,13 @@ export class BugsComponent {
   protected readonly editTitleMax = EDIT_TITLE_MAX;
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
-  protected readonly bugStatuses: BugStatus[] = ['open', 'in_progress', 'fixed', 'wontfix', 'rejected'];
+  protected readonly bugStatuses: BugStatus[] = [
+    BUG_STATUS.open,
+    BUG_STATUS.inProgress,
+    BUG_STATUS.fixed,
+    BUG_STATUS.wontfix,
+    BUG_STATUS.rejected,
+  ];
   protected readonly openBug = signal<string | null>(null);
   protected readonly bugId = (bug: Bug): string => bug.id;
   protected readonly bugColumns: DataColumn<Bug>[] = [

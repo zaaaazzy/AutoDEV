@@ -4,7 +4,7 @@ import type { Pool } from 'pg';
 import type { CommandExecutor } from '../core/command.js';
 import { beginShutdown } from '../core/shutdown.js';
 import { shortTitle, TITLE_MAX } from '../core/validation.js';
-import { UNTRUSTED_HINT } from '../runner/hoster.js';
+import { UNTRUSTED_HINT } from '../core/bug-trust.js';
 import { buildRequirementPrompt, draftRequirements, runAuthorAgent, splitTitle } from './requirements.js';
 
 test('Auftragsautor: „@@TITEL:“ wird zum kurzen Titel und verschwindet aus der Anforderung', () => {

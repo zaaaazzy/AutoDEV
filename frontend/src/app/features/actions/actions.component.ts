@@ -4,6 +4,7 @@ import { AuthService } from '../../core/auth.service.js';
 import { FocusOnce } from '../../core/focus-once.js';
 import type { AcceptanceCheck, DevelopmentItem, TestEvidence } from '../../core/models.js';
 import { SettingsGroups } from '../settings/settings-group.js';
+import { DEVELOPMENT_STATUS } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { AcceptanceTicks } from '../../shared/acceptance-ticks.js';
 import type { AttentionCard, CardStep } from '../../shared/attention-card.js';
@@ -203,7 +204,7 @@ export class ActionsComponent {
   /** Antwortfeld nur, wo eine Antwort den Auftrag weiterbringt (blockiert und neu startbar). */
   protected canAnswer(item: DevelopmentItem, step: CardStep): boolean {
     return (
-      item.status === 'blocked' &&
+      item.status === DEVELOPMENT_STATUS.blocked &&
       item.kind !== 'express' &&
       this.auth.can('run') &&
       (step === 'retry' || step === 'suggestion' || step === 'task')

@@ -4,6 +4,7 @@ import { inWindow, nextRoutineRun } from '../core/cron.js';
 import { sendPush } from '../core/push.js';
 import { markerCategory, markerPriority, markerScore, markerTitle, parseMarkerLines } from './visionary.js';
 import { defined } from '../core/defined.js';
+import { AGENT_RUN_STATUS, BUG_STATUS, DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
 
 /**
  * Zeitgesteuerte Routinen: Der Planer im Worker reiht fällige Agent-Aufgaben als Chat-Nachricht mit Herkunft
@@ -71,7 +72,7 @@ export function routineInstructions(target: OutputTarget): string {
 }
 
 /** Läuft für das Projekt gerade ein Auftrag (Projektsperre) oder ein kompletter Test im Projektordner? */
-export const PROJECT_LOCKED_SQL = `(EXISTS (SELECT 1 FROM agent_runs r WHERE r.project_slug = t.project_slug AND r.status = 'running')
+export const PROJECT_LOCKED_SQL = `(EXISTS (SELECT 1 FROM agent_runs r WHERE r.project_slug = t.project_slug AND r.status = '${AGENT_RUN_STATUS.running}')
    OR EXISTS (SELECT 1 FROM test_requests q WHERE q.project_slug = t.project_slug AND q.status = 'running'))`;
 
 interface DueTask {
@@ -310,7 +311,7 @@ export async function storeMarkers(
           `INSERT INTO bugs (project_slug, title, description, severity, source, category, routine_run_id)
            SELECT $1, $2, $3, $4, 'routine', $5, $6
             WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND lower(title) = lower($2)
-                                AND status IN ('open', 'in_progress'))
+                                AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}'))
            RETURNING id`,
           [project, title, body, severity, markerCategory(record.category), run.id],
         )
@@ -323,7 +324,7 @@ export async function storeMarkers(
                                        routine_run_id)
            SELECT $1, $2, $3, $4, $5, $6, $7, 'routine', $8
             WHERE NOT EXISTS (SELECT 1 FROM ideation_items WHERE project_slug = $1 AND lower(title) = lower($2)
-                                AND status NOT IN ('accepted', 'rejected'))
+                                AND status NOT IN ('${IDEATION_STATUS.accepted}', '${IDEATION_STATUS.rejected}'))
            RETURNING id`,
           [
             project,
@@ -343,9 +344,9 @@ export async function storeMarkers(
         await pool.query<{ id: string }>(
           `INSERT INTO development_items (project_slug, title, description, status, priority, kind, category,
                                           auto_run, routine_run_id)
-           SELECT $1, $2, $3, 'backlog', $4, 'feature', $5, FALSE, $6
+           SELECT $1, $2, $3, '${DEVELOPMENT_STATUS.backlog}', $4, 'feature', $5, FALSE, $6
             WHERE NOT EXISTS (SELECT 1 FROM development_items WHERE project_slug = $1 AND lower(title) = lower($2)
-                                AND status NOT IN ('done', 'rejected'))
+                                AND status NOT IN ('${DEVELOPMENT_STATUS.done}', '${DEVELOPMENT_STATUS.rejected}'))
            RETURNING id`,
           [project, title, body, markerPriority(record.priority), markerCategory(record.category), run.id],
         )

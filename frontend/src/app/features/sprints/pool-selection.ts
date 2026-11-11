@@ -1,5 +1,6 @@
 /** Mehrfachauswahl „Aufträge hinzufügen“: welche offenen bzw. abgebrochenen Aufträge in den Sprint sollen. */
 import { computed, linkedSignal, type WritableSignal } from '@angular/core';
+import { DEVELOPMENT_STATUS } from '../../core/models.js';
 
 /** Gewählte Aufträge in der angezeigten Reihenfolge; nicht mehr verfügbare (inzwischen eingeplant) fallen weg. */
 export function pickInOrder<T extends { id: string }>(available: readonly T[], selected: ReadonlySet<string>): T[] {
@@ -8,7 +9,7 @@ export function pickInOrder<T extends { id: string }>(available: readonly T[], s
 
 /** Abgebrochen = aus einem Sprint genommen oder blockiert (wie `aborted` in der Route take-into-sprint). */
 export function isAborted(item: { removedFromSprintAt?: string | null; status: string }): boolean {
-  return !!item.removedFromSprintAt || item.status === 'blocked';
+  return !!item.removedFromSprintAt || item.status === DEVELOPMENT_STATUS.blocked;
 }
 
 /** Hinweis an gesperrten abgebrochenen Aufträgen; der Server antwortet ohne „Ausführen“ mit 403. */

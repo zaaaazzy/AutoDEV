@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { access } from './access.js';
 import { isUuid } from '../core/validation.js';
 import { ANSWERED } from './chat-routes.js';
+import { AGENT_STEP_STATUS, CLOSED_DEVELOPMENT_STATUSES, DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
 
 export interface TimelineEntry {
   at: string;
@@ -47,23 +48,23 @@ const ANALYSIS_LABEL: Record<string, string> = {
 /** Worauf der Auftrag gerade wartet – in einem Satz, für die Kopfzeile der Zeitleiste. */
 export function waitingFor(state: WaitingState): { label: string; tone: 'ok' | 'wait' | 'you' | 'problem' } {
   switch (state.status) {
-    case 'done':
+    case DEVELOPMENT_STATUS.done:
       return { label: 'Erledigt', tone: 'ok' };
-    case 'rejected':
+    case DEVELOPMENT_STATUS.rejected:
       return { label: 'Abgelehnt – wird nicht umgesetzt', tone: 'problem' };
-    case 'in_progress':
+    case DEVELOPMENT_STATUS.inProgress:
       return { label: state.runningAgent ? `Läuft: ${state.runningAgent}` : 'Läuft', tone: 'ok' };
-    case 'backlog':
+    case DEVELOPMENT_STATUS.backlog:
       return { label: 'Wartet auf Einplanung in einen Sprint', tone: 'wait' };
-    case 'planned':
-      if (state.autoRun || state.sprintStatus === 'active')
+    case DEVELOPMENT_STATUS.planned:
+      if (state.autoRun || state.sprintStatus === SPRINT_STATUS.active)
         return { label: 'Wartet auf einen freien Platz im Worker', tone: 'wait' };
       return { label: 'Wartet auf den Start des Sprints', tone: 'wait' };
-    case 'blocked':
+    case DEVELOPMENT_STATUS.blocked:
       if (state.openQuestion) return { label: 'Wartet auf deine Antwort', tone: 'you' };
       if (state.analysisStatus === 'requested' || state.analysisStatus === 'running')
         return { label: 'Wartet auf die Problemanalyse', tone: 'wait' };
-      if (state.bugfix && !['done', 'rejected'].includes(state.bugfix.status))
+      if (state.bugfix && !CLOSED_DEVELOPMENT_STATUSES.includes(state.bugfix.status))
         return { label: `Wartet auf den Bugfix „${state.bugfix.title}“`, tone: 'wait' };
       if (state.actionTodo) return { label: `Aktion notwendig: ${state.actionTodo}`, tone: 'you' };
       return { label: 'Wartet auf „Erneut versuchen“', tone: 'you' };
@@ -172,7 +173,12 @@ export async function loadTimeline(
       kind: 'step',
       title: step.agentName,
       detail: [formatDuration(step.durationMs), step.lastEvent ?? undefined].filter(Boolean).join(' · ') || undefined,
-      state: step.status === 'passed' ? 'passed' : step.status === 'running' ? 'running' : 'failed',
+      state:
+        step.status === AGENT_STEP_STATUS.passed
+          ? 'passed'
+          : step.status === AGENT_STEP_STATUS.running
+            ? 'running'
+            : 'failed',
     });
   }
   const fix = bugfix.rows[0] ?? null;
@@ -203,7 +209,7 @@ export async function loadTimeline(
     );
   }
   entries.sort((left, right) => left.at.localeCompare(right.at));
-  const running = [...steps.rows].reverse().find((step) => step.status === 'running');
+  const running = [...steps.rows].reverse().find((step) => step.status === AGENT_STEP_STATUS.running);
   const waiting = waitingFor({
     status: item.status,
     kind: item.kind,

@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import type { AcceptanceCheck, DevelopmentItem, Estimate } from '../../core/models.js';
+import { DEVELOPMENT_STATUS } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { ConfirmService, type ConfirmOptions } from '../../core/confirm.service.js';
 import { GitGuardService } from '../../core/git-guard.service.js';
@@ -121,11 +122,11 @@ export class OrderService {
 
   /** Erneut versuchen bzw. wieder einplanen – erst nach Bestätigung, optional mit Hinweis für die Agents. */
   async retry(item: DevelopmentItem): Promise<void> {
-    const blocked = item.status === 'blocked';
+    const blocked = item.status === DEVELOPMENT_STATUS.blocked;
     const answer = await this.confirm.ask({
       title: blocked
         ? 'Auftrag erneut versuchen?'
-        : item.status === 'rejected'
+        : item.status === DEVELOPMENT_STATUS.rejected
           ? 'Angepassten Auftrag erneut versuchen?'
           : 'Auftrag wieder einplanen?',
       message: `„${item.title}“ wird wieder eingeplant; der Worker übernimmt ihn beim nächsten Zyklus.`,
@@ -155,7 +156,7 @@ export class OrderService {
     item: DevelopmentItem,
     options: { label: string; note: string; suggestion?: string | null },
   ): Promise<boolean> {
-    const blocked = item.status === 'blocked';
+    const blocked = item.status === DEVELOPMENT_STATUS.blocked;
     const answer = await this.confirm.ask({
       title: `${options.label}?`,
       message: `„${item.title}“ wird ${blocked ? 'erneut versucht' : 'wieder eingeplant'}; der Worker übernimmt ihn beim nächsten Zyklus.`,
@@ -178,7 +179,7 @@ export class OrderService {
         this.api.post(`/api/development/${encodeURIComponent(item.id)}/retry`, {
           comment: comment?.trim() || undefined,
         }),
-      item.status === 'blocked'
+      item.status === DEVELOPMENT_STATUS.blocked
         ? comment?.trim()
           ? 'Antwort übernommen – der Auftrag läuft erneut.'
           : 'Auftrag wird erneut versucht.'

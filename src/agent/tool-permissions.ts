@@ -20,7 +20,7 @@ import {
   normalizeCommands,
   normalizeGroups,
   type PermissionGroup,
-} from './permission-rules.js';
+} from '../core/permission-rules.js';
 import { defined } from '../core/defined.js';
 
 export {
@@ -38,7 +38,7 @@ export {
   normalizeCommands,
   rulesAllow,
   type PermissionGroup,
-} from './permission-rules.js';
+} from '../core/permission-rules.js';
 export {
   CUSTOM_GROUP_ID,
   SECRET_IN_COMMAND,

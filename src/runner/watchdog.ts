@@ -13,6 +13,7 @@ import {
   vapidKeys,
   type VapidKeys,
 } from '../core/push.js';
+import { AGENT_STEP_STATUS } from '../core/status.js';
 
 /**
  * Ausfall-Wächter: prüft alle paar Minuten Dienst, HTTPS-Zugang, Datenbank, Worker, Backups und Speicherplatz.
@@ -128,7 +129,7 @@ const MIN_FAILED_STEPS = 5;
  * Liefert dann einen Satz mit der häufigsten Ursache – ohne Zahlen, damit er nicht bei jeder Prüfung neu meldet.
  */
 export function failureProblem(steps: { status: string; output: string }[]): string | null {
-  const failed = steps.filter((step) => step.status === 'failed');
+  const failed = steps.filter((step) => step.status === AGENT_STEP_STATUS.failed);
   if (failed.length < MIN_FAILED_STEPS || failed.length * 2 < steps.length) return null;
   const counts = new Map<string, number>();
   for (const step of failed) counts.set(failureCause(step.output), (counts.get(failureCause(step.output)) ?? 0) + 1);
@@ -178,7 +179,7 @@ export async function collectProblems(options: WatchdogOptions): Promise<{ probl
       .query<{ status: string; output: string }>(
         `SELECT st.status, right(COALESCE(st.output, ''), 2000) AS output
            FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
-          WHERE r.started_at > NOW() - make_interval(hours => $1) AND st.status IN ('passed', 'failed')`,
+          WHERE r.started_at > NOW() - make_interval(hours => $1) AND st.status IN ('${AGENT_STEP_STATUS.passed}', '${AGENT_STEP_STATUS.failed}')`,
         [FAILURE_WINDOW_HOURS],
       )
       .catch(logged('watchdog', { rows: [] }));

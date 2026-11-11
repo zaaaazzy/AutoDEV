@@ -1,6 +1,6 @@
 // Rechte-Regeln: Pseudo-Befehle, Datei-Werkzeuge, eingebaute Rechte-Gruppen und Rollen-Sets.
 import { LEGACY_DOCKER_GROUP, LEGACY_SERVICE_RULE } from './legacy-rules.js';
-import { defined } from '../core/defined.js';
+import { defined } from './defined.js';
 
 /** Eine schaltbare Rechte-Gruppe für Dashboard-Assistent und Entwickler (Claude-CLI-Regeln). */
 export interface PermissionGroup {

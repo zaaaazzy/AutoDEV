@@ -4,7 +4,7 @@ Was der Worker wann tut, welcher Status welchen Schritt auslöst, wann welcher A
 
 ## 1 · Prozesse und Takte
 
-Drei Prozesse laufen dauerhaft. Gearbeitet wird nur im Worker. Er läuft entweder als Compose-Dienst `worker` (Standard, Profil `worker`) oder auf dem Host (Mac, Linux oder Windows). Im Container ist er der einzige Dienst mit dem Docker-Socket. AIdeation-Ordner und Projektordner sind dort mit dem Pfad des Hosts eingebunden (unter Windows `/c/…`), damit die Pfade für `docker run` stimmen. Der Frontend-Container liefert die Oberfläche und leitet `/api` an den Backend-Container weiter. Der Backend-Container schreibt nur Wünsche in die Datenbank. Agents und Projekttests startet der Worker im Arbeitscontainer des Projekts (`DEV_LOG_AGENT_SANDBOX`, Standard `workbench` auf dem Host, `src/core/workbench.ts`; der Compose-Dienst `worker` setzt `docker` und startet kurzlebige Container je Schritt): ein dauerhafter Compose-Stapel `agents_<projekt>` mit eigenem Docker (`docker:dind`) und den Testdiensten aus `.aideation/workbench.json`; lesende Rollen laufen in kurzlebigen Containern. Der Host selbst führt keinen Code aus, den Agents geschrieben haben. Die Container hängen im internen Netzwerk `aideation-agents`. Hinaus kommen sie nur über den Egress-Proxy, und zwar nur zur Anthropic-API, zur npm-Registry, zu Docker Hub und zu Ollama auf dem Host. LAN und AIdeation-Datenbank sind gesperrt.
+Drei Prozesse laufen dauerhaft. Gearbeitet wird nur im Worker. Er läuft entweder als Compose-Dienst `worker` (Standard, Profil `worker`) oder auf dem Host (Mac, Linux oder Windows). Im Container ist er der einzige Dienst mit dem Docker-Socket. AIdeation-Ordner und Projektordner sind dort mit dem Pfad des Hosts eingebunden (unter Windows `/c/…`), damit die Pfade für `docker run` stimmen. Der Frontend-Container liefert die Oberfläche und leitet `/api` an den Backend-Container weiter. Der Backend-Container schreibt nur Wünsche in die Datenbank. Agents und Projekttests startet der Worker im Arbeitscontainer des Projekts (`DEV_LOG_AGENT_SANDBOX`, Standard `workbench` auf dem Host, `src/core/workbench.ts`; der Compose-Dienst `worker` setzt `docker` und startet kurzlebige Container je Schritt): ein dauerhafter Compose-Stapel `agents_<projekt>` mit eigenem Docker (`docker:dind-rootless`, nicht privilegiert) und den Testdiensten aus `.aideation/workbench.json`; lesende Rollen laufen in kurzlebigen Containern. Der Host selbst führt keinen Code aus, den Agents geschrieben haben. Die Container hängen im internen Netzwerk `aideation-agents`. Hinaus kommen sie nur über den Egress-Proxy, und zwar nur zur Anthropic-API, zur npm-Registry, zu Docker Hub und zu Ollama auf dem Host. LAN und AIdeation-Datenbank sind gesperrt.
 
 ```mermaid
 flowchart TB
@@ -18,7 +18,7 @@ flowchart TB
     P[("Projektordner<br/>AIdeation: AIdeation/agent")]
     subgraph SANDBOX["Docker-Sandbox · Netzwerk aideation-agents (intern)"]
       direction TB
-      WB["Arbeitscontainer agents_projekt<br/>workbench · docker:dind · Testdienste<br/>schreibende Schritte · Gate · test:full"]:::ok
+      WB["Arbeitscontainer agents_projekt<br/>workbench · docker:dind-rootless · Testdienste<br/>schreibende Schritte · Gate · test:full"]:::ok
       AG["Kurzlebiger Container je Schritt<br/>Label aideation.run · lesende Rollen · Modus docker"]:::ok
       EG["Egress-Proxy aideation-egress"]:::wait
     end

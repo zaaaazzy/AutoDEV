@@ -3,6 +3,7 @@ import { Component, DestroyRef, computed, effect, inject, input, signal, untrack
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import type { DevelopmentItem, ReviewSlot, VisualApproval, VisualDevice, VisualSnapshot } from '../../core/models.js';
+import { DEVELOPMENT_STATUS } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { ChangedFilesComponent } from '../../shared/changed-files.component.js';
 import { DateTimePipe } from '../../shared/pipes.js';
@@ -103,10 +104,12 @@ export class OrderVisualComponent {
   protected readonly sprint = computed(() => this.store.sprintOf(this.order()));
   protected readonly fileRef = computed(() => this.ownSlot()?.commit ?? this.order().reviewBranch ?? null);
   protected readonly canSpawn = computed(
-    () => this.auth.can('run') && this.order().status !== 'in_progress' && !!this.chosenSlot()?.enabled,
+    () => this.auth.can('run') && this.order().status !== DEVELOPMENT_STATUS.inProgress && !!this.chosenSlot()?.enabled,
   );
   /** Neu starten in der eigenen, fehlerhaften Umgebung: wie Laden, nur ohne Rücksicht auf die Auswahl im Dropdown. */
-  protected readonly canRestart = computed(() => this.auth.can('run') && this.order().status !== 'in_progress');
+  protected readonly canRestart = computed(
+    () => this.auth.can('run') && this.order().status !== DEVELOPMENT_STATUS.inProgress,
+  );
   /** Statuszeile: Zustand der Abnahme und der nächste Schritt. */
   protected readonly status = computed(() =>
     visualStatus({
@@ -238,7 +241,7 @@ export class OrderVisualComponent {
   }
   protected spawnHint(): string {
     if (!this.auth.can('run')) return 'Umgebungen starten braucht das Recht, Agents zu starten.';
-    if (this.order().status === 'in_progress') return 'Der Auftrag läuft gerade – erst danach ladbar.';
+    if (this.order().status === DEVELOPMENT_STATUS.inProgress) return 'Der Auftrag läuft gerade – erst danach ladbar.';
     if (!this.chosenSlot()?.enabled)
       return 'Diese Umgebung ist gesperrt – ein Administrator gibt sie unter Einstellungen frei.';
     return 'Startet den Stand dieses Auftrags in der gewählten Umgebung. Ein dort geladener anderer Stand wird ersetzt.';

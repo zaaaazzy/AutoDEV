@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { DEFAULT_ACTIONS, MAX_PROMPT, seedDefaultActions, seedRoutineTemplates } from './agent-tasks.js';
+import { MAX_PROMPT } from './agent-tasks.js';
+import { DEFAULT_ACTIONS, seedDefaultActions, seedRoutineTemplates } from '../agent/default-actions.js';
 import { parseCron } from '../core/cron.js';
-import { ROUTINE_TEMPLATES } from '../setup/templates.js';
+import { ROUTINE_TEMPLATES } from '../agent/routine-templates.js';
 
 function fakePool(options: { seeded: boolean; tester: boolean }) {
   const queries: { sql: string; values: unknown[] }[] = [];

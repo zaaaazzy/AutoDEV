@@ -21,7 +21,7 @@ flowchart TB
   classDef wait fill:#fdf1e0,stroke:#e08a1e,color:#5c3a0a
 ```
 
-1. `runner-cli.ts` ruft nach jedem Arbeitszyklus (30 s) `runScheduledJobs()` auf, ausserhalb von `runWorkflow`, weil dieses je Projekt läuft.
+1. `worker-loop.ts` ruft nach jedem Arbeitszyklus (30 s) `runScheduledJobs()` auf, ausserhalb von `runWorkflow`, weil dieses je Projekt läuft.
 2. `runDueJobs` (`src/runner/scheduler.ts`) beansprucht fällige, aktive Zeilen mit `FOR UPDATE SKIP LOCKED`. Dabei setzt es `next_run_at` auf jetzt + Intervall, `locked_until` auf höchstes Zeitlimit + Reserve (330 s) und `last_status` auf `running`. Ein zweiter Worker sieht die Zeile nicht und führt sie nicht doppelt aus.
 3. Die Job-Art wird in der festen Registry `JOB_KINDS` nachgeschlagen. Unbekannte Art: Status `failed`, andere Jobs laufen weiter. Es wird nie ein Pfad oder Befehl aus der Datenbank ausgeführt.
 4. Der Job läuft mit hartem Zeitlimit (`config.timeoutSeconds`, sonst Art-Standard, höchstens 300 s). Status, Zeitpunkt und Meldung werden in die Zeile zurückgeschrieben. Ein Fehler wird gespeichert und bricht weder den Durchgang noch den Worker-Zyklus ab.
