@@ -30,7 +30,7 @@
     "check:diagrams": "tsx scripts/check-diagrams.ts"
   },
   "dependencies": {
-    "@tanstack/angular-table": "^8.21.4",
+    "@tanstack/angular-table": "^9.3.1",
     "express": "^5.1.0",
     "helmet": "^8.3.0",
     "pg": "^8.16.3",
