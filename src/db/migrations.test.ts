@@ -7,6 +7,7 @@ import { SCHEMA } from './schema.js';
 import { coverageHistory, coverageOverview } from '../api/coverage.js';
 import { COVERAGE_AREA_ALIASES, COVERAGE_AREA_KEYS, coverageAreaKey } from '../core/coverage-areas.js';
 import { BUG_CATEGORY_VALUES } from '../core/bug-category-values.js';
+import { FOLLOW_UP_KIND, FOLLOW_UP_STATUS } from '../core/status.js';
 import { adminPool, databaseUrl, dropDatabase } from './test-database.test.js';
 
 /** Verbindung, die jede Abfrage mitschreibt; done = bereits vermerkte Versionen, fail = SQL, das scheitert. */
@@ -212,6 +213,17 @@ test('Migrationen: Gegenprobe je Auftrag kommt per Migration, nicht über das ei
   assert.doesNotMatch(SCHEMA, /counter_check/);
 });
 
+test('Migration 29: Folgevorschläge idempotent, CHECKs erlauben alle Werte, die der Code schreibt', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 29);
+  assert.equal(migration?.name, 'folgevorschlaege-aus-doku');
+  const sql = migration?.sql ?? '';
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS follow_up_proposals/);
+  assert.match(sql, /CREATE INDEX IF NOT EXISTS follow_up_proposals_open_idx/);
+  for (const kind of Object.values(FOLLOW_UP_KIND)) assert.match(sql, new RegExp(`kind IN \\([^)]*'${kind}'`));
+  for (const status of Object.values(FOLLOW_UP_STATUS)) assert.match(sql, new RegExp(`status IN \\([^)]*'${status}'`));
+  assert.doesNotMatch(SCHEMA, /follow_up_proposals/);
+});
+
 test('Migration 25: Zuordnungstabelle enthält genau die Schreibweisen aus COVERAGE_AREA_ALIASES', () => {
   const migration = MIGRATIONS.find((step) => step.version === 25);
   assert.equal(migration?.name, 'coverage-feste-bereiche');
@@ -255,7 +267,10 @@ test('Migration 25: Bereiche umschreiben, Kollisionen zusammenführen, Altbestan
       [report],
     );
 
-    assert.deepEqual(await runMigrations(client), [25, 26, 27, 28, 29]);
+    assert.deepEqual(
+      await runMigrations(client),
+      MIGRATIONS.filter((step) => step.version >= 25).map((step) => step.version),
+    );
     const rows = (
       await client.query(
         `SELECT area, unit_tests AS unit, passed, lines, branches FROM test_coverage_areas
@@ -358,7 +373,10 @@ test('Migrationen 24 und 25: Altbestand wird zugeordnet, bereinigt, abgesichert;
       for (const label of LEGACY_LABELS) await area(await report(label, '2026-09-01T10:00:00Z'), label, 50, 50, 50);
 
       // 24 schreibt über die Zuordnungstabelle um; nach 23 ist alles schon zugeordnet, es ändert sich nichts.
-      assert.deepEqual(await runMigrations(client), [24, 25, 26, 27, 28, 29]);
+      assert.deepEqual(
+        await runMigrations(client),
+        MIGRATIONS.filter((step) => step.version >= 24).map((step) => step.version),
+      );
 
       const rows = async (id: string) =>
         (await client.query('SELECT area, lines FROM test_coverage_areas WHERE report_id = $1 ORDER BY area', [id]))

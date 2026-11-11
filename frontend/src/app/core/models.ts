@@ -6,7 +6,13 @@ import type {
   CounterProbeVerdict,
   RoutingRule,
 } from '../../../../src/core/shared-types.js';
-import type { BugStatus, DevelopmentStatus, SprintStatus } from '../../../../src/core/status.js';
+import type {
+  BugStatus,
+  DevelopmentStatus,
+  FollowUpKind,
+  FollowUpStatus,
+  SprintStatus,
+} from '../../../../src/core/status.js';
 
 export type {
   BudgetPeriod,
@@ -17,9 +23,22 @@ export type {
   RoutingRule,
   RuleEffect,
 } from '../../../../src/core/shared-types.js';
-export type { BugStatus, DevelopmentStatus, SprintStatus } from '../../../../src/core/status.js';
+export type {
+  BugStatus,
+  DevelopmentStatus,
+  FollowUpKind,
+  FollowUpStatus,
+  SprintStatus,
+} from '../../../../src/core/status.js';
 // Die Werte selbst (DEVELOPMENT_STATUS.done statt 'done'): Vergleiche und Listen bauen auf ihnen auf.
-export { BUG_STATUS, DEVELOPMENT_STATUS, IDEATION_STATUS, SPRINT_STATUS } from '../../../../src/core/status.js';
+export {
+  BUG_STATUS,
+  DEVELOPMENT_STATUS,
+  FOLLOW_UP_KIND,
+  FOLLOW_UP_STATUS,
+  IDEATION_STATUS,
+  SPRINT_STATUS,
+} from '../../../../src/core/status.js';
 
 import type { CoverageAreaKey } from '../../../../src/core/coverage-areas.js';
 import type { BugCategoryValue } from '../../../../src/core/bug-category-values.js';
@@ -336,6 +355,20 @@ export interface BugCategoryBacklog {
   done: number;
   suggested: number;
   cancelled: boolean;
+}
+
+/** Vorschlag aus einem Doku-Abschnitt („Offen“, „TODO“, „Bekannter Befund“, „Folgeauftrag“) eines Auftrags. */
+export interface FollowUpProposal {
+  id: string;
+  developmentId: string;
+  docId: string | null;
+  kind: FollowUpKind;
+  section: string;
+  title: string;
+  description: string;
+  status: FollowUpStatus;
+  resultId: string | null;
+  createdAt: string;
 }
 
 /** Produktions-Rückkanal: Zustand fürs Dashboard und die Einstellungen. */

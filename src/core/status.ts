@@ -69,5 +69,19 @@ export const AGENT_STEP_STATUS = {
 } as const;
 export type AgentStepStatus = (typeof AGENT_STEP_STATUS)[keyof typeof AGENT_STEP_STATUS];
 
+/** Vorschläge aus Doku-Abschnitten: erst ein Mensch macht daraus einen Bug oder eine Idee. */
+export const FOLLOW_UP_STATUS = {
+  proposed: 'proposed',
+  accepted: 'accepted',
+  dismissed: 'dismissed',
+} as const;
+export type FollowUpStatus = (typeof FOLLOW_UP_STATUS)[keyof typeof FOLLOW_UP_STATUS];
+
+export const FOLLOW_UP_KIND = {
+  bug: 'bug',
+  idea: 'idea',
+} as const;
+export type FollowUpKind = (typeof FOLLOW_UP_KIND)[keyof typeof FOLLOW_UP_KIND];
+
 /** Review-Freigabe je Projekt: nie, nur bei Änderungen an der Oberfläche, immer. */
 export const REVIEW_MODES = new Set<string>(['off', 'ui', 'always']);

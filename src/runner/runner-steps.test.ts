@@ -286,6 +286,34 @@ test('runStep: Abbruch aus der Oberfläche beendet den Schritt sofort, ohne Bug 
   assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')));
 });
 
+/** Dokumentierer-Schritt mit Abschnitt „Offen“ in der Ausgabe; meldet alle Anweisungen, auch die der Transaktion. */
+async function documenterStep(exitCode: number): Promise<string[]> {
+  const doc = '## Offen\n- Export der Aufträge ergänzen\n';
+  const statements: string[] = [];
+  const answer = (sql: string): unknown[] => {
+    statements.push(sql);
+    if (sql.includes('INSERT INTO agent_run_steps')) return [{ id: 'step-1' }];
+    if (sql.includes('FROM docs')) return [{ id: 'doc-1', projectSlug: item.projectSlug, content: doc }];
+    return [];
+  };
+  const query = async (sql: string) => ({ rows: answer(sql), rowCount: 1 });
+  const pool = { query, connect: async () => ({ query, release: () => undefined }) } as unknown as Pool;
+  const execute: CommandExecutor = async () => ({ exitCode, durationMs: 1, output: doc });
+  await runStep(context(pool, execute), agent('Doku', { role: 'documenter', command: ['doku'] }), 0, 1);
+  return statements;
+}
+
+test('runStep: fehlgeschlagener Dokumentierer-Schritt erzeugt keine Folgevorschläge (und keinen Bug)', async () => {
+  const failed = await documenterStep(1);
+  assert.ok(!failed.some((sql) => sql.includes('INSERT INTO docs')));
+  assert.ok(!failed.some((sql) => sql.includes('follow_up_proposals')));
+  assert.ok(!failed.some((sql) => /INSERT INTO (bugs|ideation_items)/.test(sql)));
+  // Gegenprobe: Derselbe Schritt erfolgreich speichert Doku und Vorschlag.
+  const passed = await documenterStep(0);
+  assert.ok(passed.some((sql) => sql.includes('INSERT INTO docs')));
+  assert.ok(passed.some((sql) => sql.includes('INSERT INTO follow_up_proposals')));
+});
+
 // Verhaltensänderungen: Retry nur bei Agent-Fehlern und mit Budget, Schwelle für verwaiste Läufe.
 
 test('verwaiste Läufe: Schwelle liegt über der längsten Schrittlaufzeit samt Wiederholung', async () => {
