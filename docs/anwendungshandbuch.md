@@ -272,6 +272,47 @@ Auftrag blockiert. Vor dem zweiten Versuch prüft der Worker das Budget erneut.
 Mehrstufige Änderungen der API laufen in einer Transaktion (`withTransaction`, `src/db/transaction.ts`). Das gilt
 etwa für das Übernehmen eines Auftrags in einen Sprint oder das Löschen eines Projekts.
 
+### 6.4 Vorschläge aus der Dokumentation
+
+Nach einem erfolgreichen Dokumentierer-Schritt liest AIdeation die neue Auftragsdoku aus und schlägt daraus Bugs oder
+Ideen vor. Angelegt wird erst, was ein Mensch in der Bestätigungsliste annimmt.
+
+```mermaid
+flowchart TD
+  A["Dokumentierer-Schritt erfolgreich"] --> B["Doku speichern (saveOrderDoc)"]
+  B --> C["Abschnitte lesen:<br/>Offen · TODO · Bekannter Befund · Folgeauftrag"]
+  C --> D{"Titel ähnlich ≥ 0,55 zu<br/>offenem Bug oder offener Idee?"}
+  D -- ja --> E["verwerfen, zählen"]
+  D -- nein --> F["Vorschlag speichern<br/>Status proposed"]
+  F --> G["Bestätigungsliste im Auftrag"]
+  G -- Annehmen --> H["genau ein Bug oder eine Idee<br/>Status accepted"]
+  G -- Verwerfen --> I["Status dismissed, nichts angelegt"]
+```
+
+- **Erkennung:** Ein Abschnitt zählt nur als Überschrift (`#` bis `######`) oder als Zeile, die mit `**Stichwort…:**`
+  beginnt (auch mit Listenpunkt davor). Erwähnungen mitten im Fließtext zählen nicht. Jeder Listenpunkt (bzw. Absatz)
+  unter der Überschrift wird ein Eintrag.
+- **Typ:** „Bekannter Befund“ ergibt einen Bug. Die übrigen Abschnitte ergeben eine Idee, außer der Titel beschreibt
+  einen Fehler, dann einen Bug.
+- **Titel:** Erster Satz des Eintrags, gekürzt auf 80 Zeichen (`TITLE_MAX`, wie bei `POST /bugs`). Die Vorgabe des
+  Auftrags nannte 180 Zeichen; die Kürzung folgt dem bestehenden Bug-Titel.
+- **Dubletten:** Gleiche Titel innerhalb einer Doku werden einmal gespeichert. Ähnlich ≥ 0,55 zu einem **offenen**
+  Bug (Status `open`, `in_progress`) oder einer **offenen** Idee (nicht `accepted`, `rejected`) wird verworfen und
+  gezählt. Bereits angenommene oder abgelehnte Einträge gelten nicht als Dublette.
+- **Was nicht passiert:** Der Schritt legt selbst keinen Bug und keine Idee an, ruft kein Modell auf und ändert weder
+  `bugs` noch `ideation_items`.
+- **Fehler:** Ein Parserfehler blockiert den Auftrag nicht. Eine Doku ohne die Abschnitte erzeugt keinen Vorschlag und
+  keinen Fehler. Der Schritt läuft in einer eigenen Fehlerbehandlung und verändert Tokens, Kosten und Status des
+  Dokumentierer-Schritts nicht. Schlägt er fehl, steht es im Worker-Log; er erscheint nicht als Agent-Schritt.
+- **Bestätigungsliste:** Im Auftrag stehen nur Vorschläge mit Status `proposed`. Annehmen legt genau einen Bug
+  (`source = agent`, über dieselbe Anlage wie `POST /bugs`) bzw. eine Idee an und setzt den Vorschlag auf `accepted`.
+  Verwerfen setzt `dismissed`. Ein zweiter Klick auf „Annehmen“ endet mit 409; das Umschalten läuft in einer
+  bedingten Anweisung (`WHERE status = 'proposed'`), so entsteht nie ein zweiter Bug.
+- **Rechte:** Liste, Annehmen und Verwerfen verlangen Projektbezug. Annehmen und Verwerfen brauchen die Rolle „Planen“.
+- **Bekannte Lücke:** Befunde, die nur im Fließtext stehen, werden nicht erkannt. Zwei der drei Belege aus der Idee
+  sind so geschrieben. Ob der Dokumentierer-Prompt die Befunde als eigene Abschnitte schreiben soll, ist offen
+  (Anhang B).
+
 ## 7. Sprint, Autopilot und Git
 
 Pro Projekt gibt es höchstens **einen aktiven** Sprint (Datenbank-Regel). Der Modus steht in den Einstellungen:
@@ -577,6 +618,7 @@ Statuswerte (Werte aus `src/core/status.ts`):
 - **Auftrag:** `backlog`, `planned`, `in_progress`, `done`, `approval`, `blocked`, `rejected`
 - **Sprint:** geplant, aktiv, Pull Request offen, abgeschlossen, abgebrochen
 - **Git-Sicherung:** `pending`, `running`, `awaiting_merge`, `done`, `failed`
+- **Vorschlag aus der Doku:** `proposed`, `accepted`, `dismissed`; Art `bug` oder `idea` (`FOLLOW_UP_STATUS`, `FOLLOW_UP_KIND`)
 - **Bug-Kategorie:** `frontend`, `backend`, `fullstack`, `infrastructure`, `docs`, `security`, leer = ohne Kategorie
 
 ## Anhang B: Quellen, Korrekturen und offene Punkte
@@ -600,10 +642,13 @@ Statuswerte (Werte aus `src/core/status.ts`):
 
 ### B.3 Offene Punkte
 
-- **Folgevorschläge aus Doku-Abschnitten** (Auftrag 2150f8c0): Migration 29 und die Dateien sind angelegt, ihre
-  Beschreibung fehlt noch im Handbuch. Sie kommt nach der Abnahme des Auftrags dazu, nicht vorher.
-- **Dokumentierer-Prompt:** Befunde in den Doku-Texten werden nur erkannt, wenn sie als eigene Abschnitte stehen (siehe
-  Auftrag 2150f8c0, Risiko Erkennung).
+- **Folgevorschläge aus Doku-Abschnitten** (Auftrag 2150f8c0): Abschnitt 6.4 beschreibt den Code (Migration 29,
+  `src/runner/follow-up-proposals.ts`, `src/api/follow-up-proposals.ts`). Verhalten ist nur per Lesen des Codes geprüft,
+  nicht im Browser oder mit Tests. Die Abnahme steht aus.
+- **Dokumentierer-Prompt:** Befunde in den Doku-Texten werden nur erkannt, wenn sie als eigene Abschnitte stehen. Die
+  Entscheidung, ob der Prompt geändert wird, liegt beim Entwickler (Risiko Erkennung im Auftrag 2150f8c0).
+- **Prüfung:** Der Test für Kriterium 9 (`runner-steps.test.ts`, „fehlgeschlagener Dokumentierer-Schritt“) ist angelegt.
+  `npm test` wurde nicht ausgeführt, weil die Freigabe fehlte. Ebenso `prettier --check` für dieses Handbuch.
 - **Veraltete Kopien unter `docs/`:** Zwei Dateien sind veraltet; ihre Löschung über `git rm` steht aus.
 - **Rollen-Limits:** Nur über die API setzbar, eine Oberfläche gibt es noch nicht (Abschnitt 10.3).
 - **Benutzerhandbuch:** Die Bug-Kategorien sind dort nur für das Feld `category` beschrieben.
