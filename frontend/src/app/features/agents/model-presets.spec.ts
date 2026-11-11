@@ -1,29 +1,31 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { MODEL_PRESETS, modelLabel, presetLabel, presetOf } from './agent-options.js';
+import { CLAUDE_MODELS, MODEL_PRESETS, modelLabel, presetLabel, presetOf } from './agent-options.js';
 
-const claude = (alias: string) => `claude --model ${alias} --permission-mode acceptEdits -p {prompt}`;
+const preset = (alias: string) => MODEL_PRESETS.find((entry) => entry.id === `claude-${alias}`);
+const fable = preset('fable');
 
-test('Claude-Vorgaben nutzen die Aliase der CLI, die immer die neueste Version der Reihe nehmen', () => {
-  const byId = new Map(MODEL_PRESETS.map((preset) => [preset.id, preset]));
-  assert.equal(byId.get('claude-haiku')?.command, claude('haiku'));
-  assert.equal(byId.get('claude-sonnet')?.command, claude('sonnet'));
-  assert.equal(byId.get('claude-opus')?.command, claude('opus'));
-  assert.equal(byId.get('claude-fable')?.command, claude('fable'));
+test('Jedes Claude-Modell hat eine Vorgabe mit Label und Kostenstufe aus CLAUDE_MODELS', () => {
+  // Befehl wie `agentCommand('claude', alias)` in src/api/setup.ts, hier einmal wörtlich festgehalten.
+  assert.equal(fable?.command, 'claude --model fable --permission-mode acceptEdits -p {prompt}');
+  for (const model of CLAUDE_MODELS) {
+    const entry = preset(model.alias);
+    assert.ok(entry, model.alias);
+    assert.deepEqual([entry.label, entry.tier], [model.label, model.tier]);
+    // Gespeicherter Befehl wird als Vorgabe erkannt und mit dem Label angezeigt.
+    assert.equal(presetOf(entry.command), entry.id);
+    assert.equal(modelLabel(entry.command.split(' ')), model.label);
+  }
 });
 
 test('Claude Fable ist die teuerste Stufe und steht hinter Opus', () => {
-  const ids = MODEL_PRESETS.map((preset) => preset.id);
+  const ids = MODEL_PRESETS.map((entry) => entry.id);
   assert.ok(ids.indexOf('claude-opus') < ids.indexOf('claude-fable'));
-  const fable = MODEL_PRESETS.find((preset) => preset.id === 'claude-fable');
   assert.ok(fable);
   assert.equal(fable.tier, 4);
-  assert.match(presetLabel(fable), /^Claude Fable 5\.1 .*· \$\$\$\$$/);
+  assert.equal(presetLabel(fable), `${fable.label} · $$$$`);
 });
 
-test('Gespeicherte Fable-Befehle werden als Vorgabe erkannt und lesbar angezeigt', () => {
-  assert.equal(presetOf(claude('fable')), 'claude-fable');
-  assert.match(modelLabel(claude('fable').split(' ')), /^Claude Fable 5\.1/);
-  // Eigener Befehl ohne Vorgabe: Alias wird nur grossgeschrieben.
+test('Eigener Claude-Befehl ohne Vorgabe: Alias wird nur grossgeschrieben', () => {
   assert.equal(modelLabel(['claude', '--model', 'fable', '-p', '{prompt}']), 'Claude Fable');
 });

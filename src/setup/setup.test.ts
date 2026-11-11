@@ -72,7 +72,7 @@ test('agent commands per provider', () => {
     '-p',
     '{prompt}',
   ]);
-  // Die Claude-CLI kennt die Aliase haiku/sonnet/opus/fable und nimmt dafür die neueste Version der Reihe.
+  // Derselbe Befehl wie die Vorgabe `claude-<alias>` in frontend/.../agent-options.ts (model-presets.spec.ts).
   assert.equal(agentCommand('claude', 'fable')?.[2], 'fable');
   assert.equal(agentCommand('ollama', ''), null);
   assert.equal(agentCommand('gemini', '')?.[2], 'gemini-2.5-pro');
