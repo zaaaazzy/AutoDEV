@@ -196,6 +196,16 @@ export async function findOrderSprintStatus(
   return result.rows[0]?.sprintStatus;
 }
 
+/** Gehört der Sprint zum Projekt des Auftrags (unabhängig vom Status)? */
+export async function sprintInOrderProject(pool: Pool, orderId: string, sprintId: string): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM sprints s JOIN development_items d ON d.project_slug = s.project_slug
+      WHERE d.id = $1 AND s.id = $2`,
+    [orderId, sprintId],
+  );
+  return Boolean(result.rowCount);
+}
+
 export async function agentInOrderProject(pool: Pool, agentId: string, orderId: string): Promise<boolean> {
   const result = await pool.query(
     `SELECT 1 FROM agents a JOIN development_items d ON d.project_slug = a.project_slug

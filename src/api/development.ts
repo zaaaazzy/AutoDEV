@@ -25,6 +25,7 @@ import {
   requestAnalysis,
   retryOrder,
   sprintAcceptsOrder,
+  sprintInOrderProject,
   takeIntoSprint,
   updateOrder,
 } from '../db/development-repository.js';
@@ -38,6 +39,7 @@ import {
   retryComment,
 } from './development-input.js';
 import { developmentPatchRole, hasRole, ROLE_INFO, type Principal } from './roles.js';
+import { assertInProject } from './tenancy.js';
 import {
   invalidInput,
   isRecord,
@@ -141,6 +143,15 @@ const createOrder =
       response.status(400).json(input.error);
       return;
     }
+    // Sprint und Agent setzt erst PATCH; angenommen werden sie trotzdem nur aus demselben Projekt.
+    const body = request.body as Record<string, unknown>;
+    if (
+      !(await assertInProject(pool, 'sprints', isUuid(body.sprintId) ? body.sprintId : null, slug)) ||
+      !(await assertInProject(pool, 'agents', isUuid(body.agentId) ? body.agentId : null, slug))
+    ) {
+      response.status(400).json({ message: 'Sprint oder Agent gehört nicht zu diesem Projekt.' });
+      return;
+    }
     const item = await insertOrder(pool, slug, input.value);
     // Je Idee höchstens ein Auftrag (Unique-Index auf ideation_id).
     if (item === 'duplicate') {
@@ -208,8 +219,13 @@ const retry =
       return;
     }
     const item = await retryOrder(pool, id, retryComment(request.body), sprintId);
-    // Nur für die Meldung: lag es am Sprint oder am Auftrag?
+    // Nur für die Meldung: lag es am Sprint (fremdes Projekt, nicht planbar) oder am Auftrag? Geschrieben hat das
+    // UPDATE in keinem Fall, es prüft Projekt und Status des Sprints selbst.
     if (!item && sprintId && !(await sprintAcceptsOrder(pool, id, sprintId))) {
+      if (!(await sprintInOrderProject(pool, id, sprintId))) {
+        response.status(400).json({ message: 'Sprint gehört nicht zum Projekt.' });
+        return;
+      }
       response
         .status(409)
         .json({ message: 'Erneut versuchen nur in geplante oder aktive Sprints desselben Projekts.' });
@@ -251,6 +267,11 @@ const takeInto =
       return;
     }
     if (!item) {
+      // Nur für die Meldung (wie bei /retry): Ein Sprint aus einem anderen Projekt ist kein Konflikt, sondern falsch.
+      if (!(await sprintInOrderProject(pool, id, sprintId))) {
+        response.status(400).json({ message: 'Sprint gehört nicht zum Projekt.' });
+        return;
+      }
       response.status(409).json({
         message:
           'Nur offene oder abgebrochene Aufträge ohne Sprint lassen sich übernehmen, und nur in geplante oder aktive Sprints desselben Projekts.',

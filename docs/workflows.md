@@ -299,6 +299,17 @@ ohne Namen dorthin. Als Empfänger ist nur ein Agent desselben Projekts erlaubt;
 IDs mit 400 ab, `null` hebt die feste Zuordnung auf. Der Empfänger sieht sie unter „Nachrichten an dich“; gespeichert sind sie in
 `agent_run_steps.handoffs`. Implementierung: `src/core/workflow-phases.ts`, `src/runner/pre-sprint.ts`.
 
+**Mandanten-Prüfung für ID-Felder (Pflicht für neue Routen):** Jede API-Route, die eine ID aus Pfad oder Body
+übernimmt (z. B. `agentId`, `handoffTo`, `sprintId`, `developmentId`, `ids`), prüft vor jedem Schreiben und jeder
+Folgeaktion mit `assertInProject(pool, tabelle, id, projektSlug)` (`src/api/tenancy.ts`), dass die ID zum Projekt der
+Route gehört. Der Fremdschlüssel prüft das Projekt nicht, und `routeGuard` prüft nur den Mandanten der Route selbst
+(`:slug` bzw. `:id`), für Administratoren gar nicht. Fremde IDs ergeben 400 (falsche Eingabe) oder 404 (nicht gefunden);
+ein schon vorhandener Statuscode einer Route bleibt. Jede neue ID-Eingabe gehört zusätzlich in die Allowlist
+`src/api/tenant-id-fields.ts`, mit Szenario in `src/api/tenant-ids.test.ts`. Der Test liest die registrierten
+Express-Routen und ihren Quelltext, scheitert bei einem ID-Feld ohne Eintrag und schickt für jeden Eintrag eine ID aus
+einem zweiten Projekt („fremd“): erwartet 400/404 und eine unveränderte Datenbank (Zeilenzahl und Inhalt aller
+Tabellen). Die gültige ID aus dem eigenen Projekt muss weiter den bisherigen Erfolgsstatus liefern.
+
 ## 5. Fehlerbehandlung und Auto-Bugfix
 
 Die Entscheidung nach einem endgültig gescheiterten Schritt (`registerFailure`) ist als Diagramm in [Ablauf zur Laufzeit](./laufzeit.md), Abschnitt 6, gezeichnet. Vorher gibt es eine Nachbesserung im selben Lauf:

@@ -82,19 +82,21 @@ test('Erneut versuchen auf PostgreSQL: nur in planbare Sprints, Ziel-Sprint atom
       assert.deepEqual(await read(moved), { status: 'planned', sprintId: planned, autoRun: false });
       assert.match(response.body.item.description, /Bitte nochmal/);
 
-      // Gewählter Sprint im Review, abgeschlossen, abgebrochen oder aus fremdem Projekt: 409, nichts geschrieben.
-      for (const target of [
-        await sprint('review'),
-        await sprint('completed'),
-        await sprint('cancelled'),
-        await sprint('active', 'other'),
-      ]) {
+      // Gewählter Sprint im Review, abgeschlossen oder abgebrochen: 409, nichts geschrieben.
+      for (const target of [await sprint('review'), await sprint('completed'), await sprint('cancelled')]) {
         const id = await order('blocked', null);
         const refused = await retry(id, { sprintId: target });
         assert.equal(refused.status, 409);
         assert.match(refused.body.message, /geplante oder aktive Sprints/);
         assert.deepEqual(await read(id), { status: 'blocked', sprintId: null, autoRun: false });
       }
+
+      // Sprint aus fremdem Projekt: 400 (falsche Eingabe, kein Konflikt), nichts geschrieben.
+      const foreignTarget = await order('blocked', null);
+      const foreign = await retry(foreignTarget, { sprintId: await sprint('active', 'other') });
+      assert.equal(foreign.status, 400);
+      assert.match(foreign.body.message, /gehört nicht zum Projekt/);
+      assert.deepEqual(await read(foreignTarget), { status: 'blocked', sprintId: null, autoRun: false });
 
       // Ungültige Sprint-ID: 400 ohne Schreibzugriff.
       const invalid = await order('blocked', null);

@@ -253,6 +253,10 @@ async function takeIntoSprint(itemStatus: string, sprintStatus: string, sprintId
   const pool = {
     query: async (sql: string, values: unknown[] = []) => {
       queries.push({ sql, values });
+      // Meldung nach abgelehntem UPDATE: Sprint im Projekt des Auftrags (fremde Sprints: tenant-ids.test.ts).
+      if (sql.includes('FROM sprints s JOIN development_items d')) {
+        return { rows: [{ status: sprintStatus }], rowCount: 1 };
+      }
       const fits =
         ['backlog', 'planned', 'blocked'].includes(itemStatus) && ['planned', 'active'].includes(sprintStatus);
       return fits ? { rows: [{ id: ID, status: 'planned', sprintId }], rowCount: 1 } : { rows: [], rowCount: 0 };

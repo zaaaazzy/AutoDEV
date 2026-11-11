@@ -95,7 +95,8 @@ test('Testläufe auf PostgreSQL: Übersicht, Live-Ansicht, Einzeltests, Medien m
           { id: media, name: 'video.webm', mime: 'video/webm', size: 10 },
         ]);
         const crossed = await api.call('GET', `/projects/alpha/test-runs/${foreign}/cases`);
-        assert.deepEqual(crossed.body.cases, [], 'Lauf aus anderem Projekt liefert nichts');
+        assert.equal(crossed.status, 404, 'Lauf aus anderem Projekt: nicht gefunden');
+        assert.equal(crossed.body.cases, undefined);
         assert.equal((await api.call('GET', '/projects/alpha/test-runs/keine-uuid/cases')).status, 400);
       });
 
