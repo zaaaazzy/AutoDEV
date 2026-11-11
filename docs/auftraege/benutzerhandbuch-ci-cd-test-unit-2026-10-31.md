@@ -15,6 +15,7 @@ Betroffen sind Entwickler und Betreiber. Es gibt keine neue Seite, keine neue Sc
 Die Installation im Volume startet nur unter diesen Bedingungen:
 
 - Der Worktree hat eine `package.json`. Ohne sie wird nichts installiert.
+- Der Lauf schreibt in den Worktree. Lesende Läufe (Rollen wie Visionär oder Problemanalyse, `:ro`), Läufe ohne Worktree und Läufe mit ausgeschalteter Installation (`dependencies: false`) installieren nichts (`runInSandbox`, `src/core/sandbox.ts`).
 - Der Stempel `node_modules/.aideation-lock` passt nicht zum Hash der `package-lock.json` (sonst der `package.json`). Passt er, bleibt das Volume unverändert.
 - Dann löscht der Worker den Inhalt des Volumes bis auf den Cache und ruft `npm install --ignore-scripts` auf. Installationsskripte laufen nicht, wie bei den Agents.
 - Läuft im Volume schon eine Installation, wartet die nächste über eine Sperre (`flock`). Sie prüft danach den Stempel. Das gilt auch, wenn der Worker während einer Installation neu startet.
