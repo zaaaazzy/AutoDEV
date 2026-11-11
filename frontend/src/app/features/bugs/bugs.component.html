@@ -7,7 +7,43 @@
             <h2>Bugs</h2>
             <p class="muted">Offene Fehler erfassen und priorisieren – behobene liegen auf dem Bug-Friedhof.</p>
           </div>
+          @if (mayPlan()) {
+            @let run = backlog();
+            @if (run.running) {
+              <div class="bug-category-actions" role="status">
+                <span class="muted"
+                  >Altbestand wird kategorisiert: {{ run.done }} von {{ run.total }} geprüft,
+                  {{ run.suggested }} Vorschläge</span
+                >
+                <button class="button secondary" type="button" [disabled]="busy()" (click)="cancelBacklog()">
+                  Lauf abbrechen
+                </button>
+              </div>
+            } @else {
+              <button
+                class="button secondary"
+                type="button"
+                [disabled]="busy() || run.busy || !uncategorized()"
+                [title]="
+                  run.busy
+                    ? 'Ein anderer Lauf belegt gerade das lokale Modell.'
+                    : uncategorized()
+                      ? 'Das lokale Modell schlägt für Bugs ohne Kategorie eine vor; nichts wird ohne Bestätigung gesetzt.'
+                      : 'Alle Bugs haben eine Kategorie oder einen Vorschlag.'
+                "
+                (click)="categorizeBacklog()"
+              >
+                Altbestand kategorisieren
+              </button>
+            }
+          }
         </div>
+        @if (!backlog().running && backlog().total) {
+          <p class="muted" role="status">
+            Letzter Lauf {{ backlog().cancelled ? 'abgebrochen' : 'fertig' }}: {{ backlog().done }} von
+            {{ backlog().total }} Bugs geprüft, {{ backlog().suggested }} Vorschläge zum Bestätigen.
+          </p>
+        }
         @if (store.showCreate()) {
           <form class="form-grid create-form" #bugFormElement (ngSubmit)="createBug(bugFormElement)">
             <label class="wide"
@@ -32,8 +68,19 @@
               </select>
             </label>
             <label
-              >Kategorie<select name="category" [(ngModel)]="bugForm.category">
-                <option value="">Ohne Kategorie</option>
+              >Kategorie<select name="bugCategory" [(ngModel)]="bugForm.bugCategory">
+                <option value="">Vom lokalen Modell vorschlagen lassen</option>
+                @for (category of bugCategories; track category) {
+                  <option [value]="category">{{ bugCategoryLabel(category) }}</option>
+                }
+              </select>
+              <small class="muted"
+                >Zählt in der Statistik erst, wenn bestätigt; ein Vorschlag wartet auf Bestätigung.</small
+              >
+            </label>
+            <label
+              >Bereich<select name="category" [(ngModel)]="bugForm.category">
+                <option value="">Ohne Bereich</option>
                 @for (category of categories; track category) {
                   <option [value]="category">{{ category | categoryLabel }}</option>
                 }
@@ -76,8 +123,19 @@
           </p>
         </div>
       }
+      @if (!list.buried && selectedSuggestionCount()) {
+        <div class="bug-category-actions">
+          <button class="button primary" type="button" [disabled]="busy()" (click)="confirmSelectedSuggestions()">
+            {{ selectedSuggestionCount() }} Vorschl{{ selectedSuggestionCount() === 1 ? 'ag' : 'äge' }} bestätigen
+          </button>
+          <button class="button secondary" type="button" (click)="clearSuggestionSelection()">Auswahl aufheben</button>
+        </div>
+      }
       <app-data-table
         [rows]="list.rows"
+        [selectable]="suggestionSelectable()"
+        [(selection)]="selectedSuggestions"
+        [selectLabel]="selectSuggestionLabel"
         [initialFilters]="list.buried ? {} : store.filtersFor('bugs')"
         [columns]="list.buried ? buriedColumns : bugColumns"
         [rowId]="bugId"
@@ -114,6 +172,32 @@
         </ng-template>
         <ng-template appDataCell="severity" let-bug>
           <span class="tag">{{ bug.severity | severityLabel }}</span>
+        </ng-template>
+        <ng-template appDataCell="bugCategory" let-bug>
+          @if (bug.bugCategory) {
+            <span class="tag">{{ bugCategoryLabel(bug.bugCategory) }}</span>
+          } @else if (bug.bugCategoryState === 'suggested') {
+            <span class="bug-category-cell">
+              <span class="tag bug-category-suggested" title="Vorschlag des lokalen Modells, noch nicht bestätigt"
+                >{{ bugCategoryLabel(bug.bugCategorySuggested) }}?</span
+              >
+              @if (mayPlan()) {
+                <button
+                  type="button"
+                  class="link-button"
+                  [disabled]="busy()"
+                  [attr.aria-label]="
+                    'Vorschlag „' + bugCategoryLabel(bug.bugCategorySuggested) + '“ für „' + bug.title + '“ bestätigen'
+                  "
+                  (click)="confirmCategory(bug)"
+                >
+                  Bestätigen
+                </button>
+              }
+            </span>
+          } @else {
+            <span class="muted">–</span>
+          }
         </ng-template>
         <ng-template appDataDetail let-bug>
           <div class="order-panel">
@@ -158,6 +242,36 @@
                 </label>
               } @else {
                 <span class="control"><span>Sprint</span>{{ sprintName(bug) }}</span>
+              }
+              @if (mayPlan() && bug.bugCategoryState !== 'confirmed') {
+                <label class="control"
+                  ><span>Kategorie</span
+                  ><select #categoryChoice [name]="'bug-category-' + bug.id" [disabled]="busy()">
+                    @for (category of bugCategories; track category) {
+                      <option [value]="category" [selected]="category === bug.bugCategorySuggested">
+                        {{ bugCategoryLabel(category) }}
+                        @if (category === bug.bugCategorySuggested) {
+                          (Vorschlag)
+                        }
+                      </option>
+                    }
+                  </select>
+                </label>
+                <button
+                  class="button secondary"
+                  type="button"
+                  [disabled]="busy()"
+                  (click)="confirmCategory(bug, categoryChoice.value)"
+                >
+                  {{ bug.bugCategorySuggested ? 'Kategorie bestätigen' : 'Kategorie setzen' }}
+                </button>
+              } @else {
+                <span class="control"
+                  ><span>Kategorie</span>{{ bugCategoryLabel(bug.bugCategory) }}
+                  @if (bug.bugCategoryState === 'suggested') {
+                    (Vorschlag: {{ bugCategoryLabel(bug.bugCategorySuggested) }})
+                  }
+                </span>
               }
               @if (awaitsApproval(bug) && (bug.status === 'open' || bug.status === 'in_progress') && mayRun()) {
                 <button
@@ -245,8 +359,16 @@
                     </select>
                   </label>
                   <label
-                    >Kategorie<select name="category" [ngModel]="bug.category ?? ''">
-                      <option value="">Ohne Kategorie</option>
+                    >Kategorie<select name="bugCategory" [ngModel]="bug.bugCategory ?? ''">
+                      <option value="">{{ bug.bugCategorySuggested ? 'Nur Vorschlag' : 'Ohne Kategorie' }}</option>
+                      @for (category of bugCategories; track category) {
+                        <option [value]="category">{{ bugCategoryLabel(category) }}</option>
+                      }
+                    </select>
+                  </label>
+                  <label
+                    >Bereich<select name="category" [ngModel]="bug.category ?? ''">
+                      <option value="">Ohne Bereich</option>
                       @for (category of categories; track category) {
                         <option [value]="category">{{ category | categoryLabel }}</option>
                       }
@@ -342,6 +464,10 @@
             }
           </div>
         }
+      </div>
+      <div class="bug-stats-card bug-category-sprints">
+        <h3>Kategorie × Sprint</h3>
+        <app-bug-category-matrix [pairs]="categorySprintPairs()" />
       </div>
     </section>
   }

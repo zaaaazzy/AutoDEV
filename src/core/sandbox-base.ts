@@ -239,6 +239,8 @@ export function sandboxRunArgs(
     containerDirectory(worktree, options.cwd),
     '-e',
     `HOME=${SANDBOX_HOME}`,
+    // npm-Cache wie beim Füllen des Volumes in /tmp: npx scheitert sonst an EACCES, wenn ein älteres Image noch das
+    // root-eigene /home/agent/.npm von „npm install -g“ enthält.
     '-e',
     `npm_config_cache=${SANDBOX_NPM_CACHE}`,
     '-e',

@@ -30,6 +30,8 @@ test('every write maps to the right role; reads and own-account actions need non
   assert.equal(requiredRole('POST', '/api/ideation/1/reject', {}), 'plan');
   assert.equal(requiredRole('POST', '/api/ideation/bulk/reject', {}), 'plan');
   assert.equal(requiredRole('POST', '/api/ideation/bulk/priority', {}), 'plan');
+  assert.equal(requiredRole('POST', '/api/follow-up-proposals/1/accept', {}), 'plan');
+  assert.equal(requiredRole('POST', '/api/follow-up-proposals/1/dismiss', {}), 'plan');
   assert.equal(requiredRole('POST', '/api/auth/totp/setup', {}), null);
   assert.equal(requiredRole('POST', '/api/projects/x/ingest-token', {}), 'admin');
   assert.equal(requiredRole('DELETE', '/api/projects/x/ingest-token', {}), 'admin');

@@ -134,7 +134,11 @@
           }
           @for (row of group.rows; track row.id) {
             @let open = expanded() === row.id;
-            <tr [class.row-open]="open" [class.dt-clickable]="!!detail()" (click)="rowClick(row.id, $event)">
+            <tr
+              [class.row-open]="open"
+              [class.dt-clickable]="!!detail() || !!rowLink()"
+              (click)="rowClick(row.id, $event)"
+            >
               @if (selectable()) {
                 <td class="dt-select-cell" data-label="Auswahl">
                   @if (canSelect(row.original)) {

@@ -43,6 +43,18 @@ const optionalDescription = (value: unknown): boolean =>
   value === undefined || (typeof value === 'string' && value.length <= DESCRIPTION_MAX);
 const trimmedDescription = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
+/** Obergrenze der Sammelabnahme je Anfrage; mehr wartet in der Praxis nie gleichzeitig. */
+const APPROVE_IDS_MAX = 500;
+
+/** Body von POST /projects/:slug/approve: die IDs der Umsetzungen, die der Dialog genannt hat. */
+export function parseApproveIds(body: unknown): Parsed<string[]> {
+  const ids = isRecord(body) ? body.ids : undefined;
+  if (!Array.isArray(ids) || !ids.length || ids.length > APPROVE_IDS_MAX || !ids.every(isUuid)) {
+    return { ok: false, error: { field: 'ids', message: 'Bitte die abzunehmenden Umsetzungen angeben.' } };
+  }
+  return { ok: true, value: [...new Set(ids)] };
+}
+
 /** Erklärt, warum ein neuer Auftrag abgelehnt wurde, samt Feld für die Anzeige im Formular. */
 function invalidNewOrder(body: unknown): InvalidInput {
   if (isRecord(body) && typeof body.title === 'string' && body.title.trim().length > TITLE_MAX) {

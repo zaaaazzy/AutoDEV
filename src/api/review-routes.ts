@@ -1,11 +1,14 @@
 import { logged } from '../core/log.js';
-import type { Router } from 'express';
+import type { Request, Response, Router } from 'express';
 import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
+import { approveWaitingOrders, findSprintProject, type ApprovalScope } from '../db/development-repository.js';
 import { access } from './access.js';
+import { parseApproveIds } from './development-input.js';
 import { DEV_COLUMNS, retryAutoRunSql, retryComment, retrySprintSql } from './development.js';
 import { guardGit } from './git-state.js';
+import { assertInProject } from './tenancy.js';
 
 const PORT_BASE = 4200;
 /** Sprints, deren Stände die Kopfzeile anbietet (laufender Sprint zuerst). */
@@ -149,7 +152,62 @@ async function requestSlot(
 }
 
 /**
- * Review-Freigabe und Review-Container: Ein fertiger Auftrag wartet (Status approval), bis ein Mensch ihn im Review-Container angesehen hat; in der Sprint-Ansicht lässt sich jeder Stand eines Sprints starten.
+ * Sammelabnahme („Alle abnehmen“): Git-Zustand einmal für alle prüfen, in einem UPDATE abnehmen und den Worker
+ * genau einmal wecken – er mergt die Umsetzungen danach nacheinander. Antwortet mit der Anzahl tatsächlich
+ * abgenommener Umsetzungen; inzwischen geänderte zählen nicht mit.
+ */
+async function approveAll(
+  pool: Pool,
+  slug: string,
+  scope: ApprovalScope,
+  request: Request,
+  response: Response,
+): Promise<void> {
+  if (!(await guardGit(pool, slug, 'approve', request.body, response))) return;
+  const approved = await approveWaitingOrders(pool, scope);
+  if (approved.length) {
+    await pool.query(`SELECT pg_notify('devlog_work', $1)`, [slug]).catch(logged('review-routes'));
+  }
+  response.json({ approved: approved.length, ids: approved.map((item) => item.id) });
+}
+
+/** POST /sprints/:id/approve: alle wartenden Umsetzungen dieses Sprints. */
+function approveSprint(pool: Pool) {
+  return async (request: Request, response: Response): Promise<void> => {
+    const sprintId = String(request.params.id ?? '');
+    const slug = isUuid(sprintId) ? await findSprintProject(pool, sprintId) : undefined;
+    if (!slug) {
+      response.status(404).json({ message: 'Sprint nicht gefunden.' });
+      return;
+    }
+    await approveAll(pool, slug, { sprintId }, request, response);
+  };
+}
+
+/** POST /projects/:slug/approve (Seite „Aktionen“): die im Dialog genannten Umsetzungen des Projekts. */
+function approveProject(pool: Pool) {
+  return async (request: Request, response: Response): Promise<void> => {
+    const slug = parseProjectSlug(String(request.params.slug ?? ''));
+    if (!slug) {
+      response.status(404).json({ message: 'Projekt nicht gefunden.' });
+      return;
+    }
+    const ids = parseApproveIds(request.body);
+    if (!ids.ok) {
+      response.status(400).json(ids.error);
+      return;
+    }
+    // Das UPDATE filtert nach Projekt; eine Liste mit fremden IDs wird trotzdem abgelehnt, statt teilweise abzunehmen.
+    if (!(await assertInProject(pool, 'development_items', ids.value, slug))) {
+      response.status(400).json({ field: 'ids', message: 'Umsetzungen gehören nicht zu diesem Projekt.' });
+      return;
+    }
+    await approveAll(pool, slug, { projectSlug: slug, ids: ids.value }, request, response);
+  };
+}
+
+/**
+ * Review-Freigabe und Review-Container:Ein fertiger Auftrag wartet (Status approval), bis ein Mensch ihn im Review-Container angesehen hat; in der Sprint-Ansicht lässt sich jeder Stand eines Sprints starten.
  * Freigeben merkt die Freigabe vor; gemergt wird vom Worker auf dem Host (dort liegt das Git-Repository).
  */
 export function registerReviewRoutes(app: Router, pool: Pool): void {
@@ -341,6 +399,9 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
     await pool.query(`SELECT pg_notify('devlog_work', $1)`, [item.projectSlug]).catch(logged('review-routes'));
     response.json({ item });
   });
+
+  app.post('/sprints/:id/approve', access({ role: 'run', tenant: 'sprints' }), approveSprint(pool));
+  app.post('/projects/:slug/approve', access({ role: 'run', tenant: 'project' }), approveProject(pool));
 
   app.post(
     '/development/:id/review-reject',

@@ -5,6 +5,7 @@ import { isRecord, isUuid, parseProjectSlug } from '../core/validation.js';
 import { nextCronRun, nextRoutineRun, parseCron, parseWindow } from '../core/cron.js';
 import { OUTPUT_TARGETS, type OutputTarget, queueRun, taskMessage } from '../agent/routine.js';
 import type { Principal } from './roles.js';
+import { assertInProject } from './tenancy.js';
 
 /**
  * Agent-Aufgaben: gespeicherte Anweisungen je Projekt, die mit einem Klick an den Assistenten gehen.
@@ -81,12 +82,6 @@ export function computeNextRun(
   return task.schedule && task.enabled ? nextRoutineRun(task.schedule, task.runWindow, now) : null;
 }
 
-/** Der gewählte Agent muss zum Projekt gehören. */
-export async function agentInProject(pool: Pool, agentId: string | null, slug: string): Promise<boolean> {
-  if (!agentId) return true;
-  return !!(await pool.query('SELECT 1 FROM agents WHERE id = $1 AND project_slug = $2', [agentId, slug])).rows[0];
-}
-
 export { taskMessage };
 
 const notFound = (response: Response): void => void response.status(404).json({ message: 'Aufgabe nicht gefunden.' });
@@ -120,7 +115,7 @@ export function registerAgentTaskRoutes(app: Router, pool: Pool): void {
         const task = parseTask(request.body);
         if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
         if (typeof task === 'string') return void response.status(400).json({ message: task });
-        if (!(await agentInProject(pool, task.agentId, slug))) {
+        if (!(await assertInProject(pool, 'agents', task.agentId, slug))) {
           return void response.status(400).json({ message: 'Agent gehört nicht zum Projekt.' });
         }
         const schedule = task.schedule ?? null;
@@ -173,7 +168,7 @@ export function registerAgentTaskRoutes(app: Router, pool: Pool): void {
         )
       ).rows[0];
       if (!current) return notFound(response);
-      if (!(await agentInProject(pool, task.agentId, current.slug))) {
+      if (!(await assertInProject(pool, 'agents', task.agentId, current.slug))) {
         return void response.status(400).json({ message: 'Agent gehört nicht zum Projekt.' });
       }
       // Nicht mitgeschickte Zeitplan-Felder bleiben (z. B. Bearbeiten auf der Agents-Seite ohne Zeitplan-Auswahl).

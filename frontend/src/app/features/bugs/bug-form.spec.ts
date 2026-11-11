@@ -45,6 +45,18 @@ test('Bug bearbeiten: nur geänderte Felder, leere Auswahl als null', () => {
   assert.deepEqual(bugChanges(bug, { ...unchanged, title: ' Neu ' }), { title: 'Neu' });
 });
 
+test('Bug bearbeiten: Bug-Kategorie getrennt vom Bereich; offener Vorschlag bleibt bei leerer Auswahl', () => {
+  const form = { ...unchanged, bugCategory: '' };
+  assert.deepEqual(bugChanges(bug, { ...form, bugCategory: 'git-sync' }), { bugCategory: 'git-sync' });
+  // Nur vorgeschlagen: leere Auswahl ist keine Änderung (der Vorschlag wartet weiter auf Bestätigung).
+  const suggested: Bug = { ...bug, bugCategorySuggested: 'api', bugCategoryState: 'suggested' };
+  assert.deepEqual(bugChanges(suggested, form), {});
+  assert.deepEqual(bugChanges(suggested, { ...form, bugCategory: 'api' }), { bugCategory: 'api' });
+  const confirmed: Bug = { ...bug, bugCategory: 'ci', bugCategoryState: 'confirmed' };
+  assert.deepEqual(bugChanges(confirmed, { ...form, bugCategory: 'ci' }), {});
+  assert.deepEqual(bugChanges(confirmed, form), { bugCategory: null });
+});
+
 test('Sprints: nur geplante und aktive (kein Review, kein Abschluss), ausser dem aktuellen des Bugs', () => {
   const sprints = [
     sprint('a', 'active'),

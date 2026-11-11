@@ -25,6 +25,7 @@ import { CategoryLabelPipe, HoursPipe, PriorityLabelPipe, StatusLabelPipe } from
 import { parseRisks } from '../../shared/risk-list.js';
 import { OrderService } from './order.service.js';
 import { OrderApprovalComponent } from './order-approval.component.js';
+import { OrderProposalsComponent } from './order-proposals.component.js';
 import { OrderVisualComponent } from './order-visual.component.js';
 import { needsVisual } from './needs-visual.js';
 import { agentEnds, buildWorkflow } from '../../shared/workflow.js';
@@ -45,6 +46,7 @@ const COUNTER_CHECK_LABELS: Record<CounterCheckResult, string> = {
   imports: [
     OrderBriefComponent,
     OrderApprovalComponent,
+    OrderProposalsComponent,
     OrderVisualComponent,
     OrderQuestionComponent,
     OrderTimelineComponent,

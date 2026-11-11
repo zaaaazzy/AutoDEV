@@ -1,6 +1,8 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type APIRequestContext, expect, type Locator, type Page, test } from '@playwright/test';
+import pg from 'pg';
+import { e2eAdminUrl } from './admin-url.js';
 
 const username = process.env.E2E_USERNAME!;
 const password = process.env.E2E_PASSWORD!;
@@ -553,6 +555,72 @@ test('Sprint: offenen Auftrag unter „Aufträge hinzufügen“ in den Sprint ne
   await expect(pool.locator('.dt-group', { hasText: 'Abgebrochen' })).toHaveCount(0);
   await request.delete(`/api/development/${order.id}`, { headers });
   await request.delete(`/api/sprints/${sprint.id}`, { headers });
+});
+
+test('Sprint: Register „Anfragen“ und „Alle abnehmen“ – Abbruch schickt nichts, Bestätigung nimmt ab', async ({
+  page,
+  request,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const title = `Abnahme-Auftrag ${Date.now()}`;
+  const sprint = (
+    await (
+      await request.post('/api/projects/e2e/sprints', { headers, data: { name: `Abnahme ${Date.now() % 10000}` } })
+    ).json()
+  ).sprint;
+  const order = (await (await request.post('/api/projects/e2e/development', { headers, data: { title } })).json()).item;
+  // „Freigabe“ setzt nur der Worker (PATCH lehnt den Status ab): direkt in der Datenbank nachbilden.
+  const url = e2eAdminUrl();
+  url.pathname = `/${process.env.E2E_DATABASE ?? 'dev_log_e2e'}`;
+  const db = new pg.Client({ connectionString: url.toString() });
+  await db.connect();
+  try {
+    await db.query(
+      `UPDATE development_items SET status = 'approval', sprint_id = $2, review_since = NOW() WHERE id = $1`,
+      [order.id, sprint.id],
+    );
+    const approvals: string[] = [];
+    page.on('request', (sent) => {
+      if (sent.method() === 'POST' && sent.url().endsWith('/approve')) approvals.push(sent.url());
+    });
+    await login(page);
+    await page.goto('/#sprints');
+    const detail = await sprintDetail(page, sprint.name);
+    // „Aufträge“ bleibt der Standard-Reiter; „Anfragen“ nennt die Zahl der wartenden Umsetzungen.
+    await expect(detail.getByRole('tab', { name: /Aufträge/ })).toHaveAttribute('aria-selected', 'true');
+    const requestsTab = detail.getByRole('tab', { name: /Anfragen/ });
+    await expect(requestsTab).toContainText('1');
+    await requestsTab.click();
+    const row = detail.locator('.sprint-requests tbody tr', { hasText: title });
+    await expect(row).toContainText('Wartet auf Abnahme');
+
+    const approveAll = detail.getByRole('button', { name: /Alle abnehmen/ });
+    await approveAll.click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('1 Umsetzung abnehmen?');
+    await expect(dialog).toContainText(title);
+    await dialog.getByRole('button', { name: 'Abbrechen' }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(approvals).toEqual([]);
+    await expect(approveAll).toBeEnabled();
+
+    await approveAll.click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Alle abnehmen' }).click();
+    await expect(page.getByText('1 Umsetzung abgenommen')).toBeVisible();
+    expect(approvals).toHaveLength(1);
+    // Abgenommen, aber noch nicht gemergt: bleibt im Register, der Knopf verschwindet, der Reiter bleibt gewählt.
+    await expect(row).toContainText('wird gemergt');
+    await expect(requestsTab).toHaveAttribute('aria-selected', 'true');
+    await expect(approveAll).toHaveCount(0);
+
+    // Zeilenklick führt zur Umsetzung auf der Seite „Aktionen“.
+    await row.locator('.order-title').click();
+    await expect(page).toHaveURL(/#actions/);
+  } finally {
+    await db.end();
+    await request.delete(`/api/development/${order.id}`, { headers });
+    await request.delete(`/api/sprints/${sprint.id}`, { headers });
+  }
 });
 
 test('Begrüßung beim ersten Besuch und interaktive Tour mit Spotlight', async ({ page }) => {
@@ -1227,6 +1295,13 @@ test('Bugs: Wer nur lesen darf, sieht keine Bearbeiten- und Löschknöpfe', asyn
   await expect(panel.getByText('Bug bearbeiten')).toHaveCount(0);
   await expect(panel.getByLabel('Status')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Neuer Bug' })).toHaveCount(0);
+  // Bug-Kategorie: weder Bestätigen noch Altbestandslauf sichtbar, und die API lehnt beides ab.
+  await expect(panel.getByRole('button', { name: /Kategorie (bestätigen|setzen)/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Altbestand kategorisieren' })).toHaveCount(0);
+  expect((await page.request.post(`/api/bugs/${id}/category/confirm`, { data: { category: 'ui' } })).status()).toBe(
+    403,
+  );
+  expect((await page.request.post('/api/projects/e2e/bugs/categorize-backlog', { data: {} })).status()).toBe(403);
   expect((await page.request.delete(`/api/bugs/${id}`)).status()).toBe(403);
   await context.close();
   await request.delete(`/api/bugs/${id}`, { headers: admin });

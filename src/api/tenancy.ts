@@ -18,6 +18,7 @@ export const ENTITY_PROJECT = {
   'agent-tasks': 'SELECT project_slug AS slug FROM agent_tasks WHERE id = $1',
   'workflow-steps': 'SELECT project_slug AS slug FROM workflow_steps WHERE id = $1',
   'doc-revisions': 'SELECT d.project_slug AS slug FROM doc_revisions r JOIN docs d ON d.id = r.doc_id WHERE r.id = $1',
+  'follow-up-proposals': 'SELECT project_slug AS slug FROM follow_up_proposals WHERE id = $1',
   'visual-snapshots': 'SELECT project_slug AS slug FROM visual_snapshots WHERE id = $1',
   'test-media': 'SELECT r.project_slug AS slug FROM test_media m JOIN test_runs r ON r.id = m.run_id WHERE m.id = $1',
   attachments: `SELECT COALESCE(i.project_slug, b.project_slug) AS slug FROM ideation_attachments a
@@ -64,6 +65,48 @@ function decoded(value: string | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+/** Tabellen mit Spalte project_slug, deren IDs Routen aus Pfad oder Body übernehmen (feste Namen, nie Eingabe). */
+export const PROJECT_TABLES = [
+  'agents',
+  'agent_tasks',
+  'bugs',
+  'chat_messages',
+  'development_items',
+  'ideation_items',
+  'project_permission_groups',
+  'sprints',
+  'test_runs',
+  'workflow_steps',
+] as const;
+
+export type ProjectTable = (typeof PROJECT_TABLES)[number];
+
+/**
+ * Gehört die ID (oder jede ID der Liste) zum Projekt mit diesem Slug? Jede Route, die eine ID aus Pfad oder Body
+ * übernimmt, prüft sie damit, bevor sie schreibt; der Fremdschlüssel prüft das Projekt nicht. Welche Routen das sind,
+ * steht in tenant-id-fields.ts (Test: tenant-ids.test.ts). Ohne ID (null, leere Liste) gibt es nichts zu prüfen.
+ * UUIDs vorher mit isUuid prüfen: Postgres lehnt sonst die Abfrage ab.
+ */
+export async function assertInProject(
+  pool: Pool,
+  table: ProjectTable,
+  id: string | readonly string[] | null | undefined,
+  slug: string,
+): Promise<boolean> {
+  if (!PROJECT_TABLES.includes(table)) throw new Error(`Keine Projekttabelle: ${table}`);
+  if (!id) return true;
+  if (typeof id === 'string') {
+    return !!(await pool.query(`SELECT 1 FROM ${table} WHERE id = $1 AND project_slug = $2`, [id, slug])).rows[0];
+  }
+  const ids = [...new Set(id)];
+  if (!ids.length) return true;
+  const found = await pool.query(`SELECT DISTINCT id FROM ${table} WHERE id = ANY($1) AND project_slug = $2`, [
+    ids,
+    slug,
+  ]);
+  return found.rows.length === ids.length;
 }
 
 /** Projekt einer Anfrage nach dem deklarierten Mandanten und den Pfadparametern; null = keines/unbekannt. */

@@ -1,13 +1,14 @@
 import { NgClass } from '@angular/common';
-import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { GithubLinkComponent } from '../../shared/github-link.component.js';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import { ConfirmService } from '../../core/confirm.service.js';
-import type { Bug, BugStatus, Sprint } from '../../core/models.js';
+import type { Bug, BugCategoryBacklog, BugStatus, Sprint } from '../../core/models.js';
 import { FocusOnce } from '../../core/focus-once.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { visibleInterval } from '../../core/visible-interval.js';
 import { errorMessage } from '../../core/errors.js';
 import { assertImageSizes } from '../../shared/image-upload.js';
 import { FieldErrors, focusField } from '../../shared/field-errors.js';
@@ -19,11 +20,12 @@ import {
   DataTableComponent,
 } from '../../shared/data-table/data-table.component.js';
 import { formatIsoDate } from '../../shared/format.js';
-import { CATEGORIES, severityLabel, statusLabel } from '../../shared/labels.js';
+import { BUG_CATEGORIES, CATEGORIES, bugCategoryLabel, severityLabel, statusLabel } from '../../shared/labels.js';
 import { categoryColumn } from '../../shared/data-table/columns.js';
 import { GalleryComponent } from '../../shared/gallery.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
-import { type BugStatRow, type BugStats, bugStats, isBuried } from './bug-stats.js';
+import { type BugStatRow, type BugStats, bugCategoryPairs, bugStats, isBuried } from './bug-stats.js';
+import { BugCategoryMatrixComponent } from './bug-category-matrix.component.js';
 import { ProductionDetailComponent } from './production-detail.component.js';
 import { BURYING_STATUSES, EDIT_TITLE_MAX, SEVERITIES, bugChanges, selectableSprints } from './bug-form.js';
 import {
@@ -47,6 +49,28 @@ const BUG_STATUS_RANK: readonly string[] = [
 /** Pro Statistik-Karte höchstens so viele Zeilen, der Rest wird zusammengefasst. */
 const STAT_ROWS = 10;
 
+/** Bis zur Bestätigung zählt ein Vorschlag nicht als Kategorie, lässt sich aber eigens filtern. */
+const SUGGESTION_OPEN = 'Vorschlag offen';
+const BUG_CATEGORY_FILTER_OPTIONS: readonly string[] = [
+  ...BUG_CATEGORIES.map(bugCategoryLabel),
+  SUGGESTION_OPEN,
+  bugCategoryLabel(null),
+];
+function bugCategoryFilterValue(bug: Bug): string {
+  if (bug.bugCategory) return bugCategoryLabel(bug.bugCategory);
+  return bug.bugCategoryState === 'suggested' ? SUGGESTION_OPEN : bugCategoryLabel(null);
+}
+/** Stand des Altbestandslaufs abfragen, solange er läuft. */
+const BACKLOG_POLL_MS = 5_000;
+const NO_BACKLOG: BugCategoryBacklog = {
+  running: false,
+  busy: false,
+  total: 0,
+  done: 0,
+  suggested: 0,
+  cancelled: false,
+};
+
 const BUG_SOURCE_LABEL: Record<string, string> = {
   agent: 'Agent',
   manual: 'Manuell',
@@ -67,6 +91,7 @@ const BUG_SOURCE_LABEL: Record<string, string> = {
     DataDetailDirective,
     GalleryComponent,
     ProductionDetailComponent,
+    BugCategoryMatrixComponent,
     MarkdownPipe,
     SeverityLabelPipe,
     ShortTextPipe,
@@ -112,8 +137,21 @@ export class BugsComponent {
       value: (bug) => severityLabel(bug.severity),
       sortValue: (bug) => SEVERITY_RANK.indexOf(bug.severity),
     },
-    // Kategoriefilter mit allen Kategorien und „Ohne Kategorie“; Zurücksetzen und Chips über die DataTable.
-    categoryColumn<Bug>((bug) => bug.category, true),
+    // Feste Bug-Kategorie: Filter mit allen acht Werten, offenen Vorschlägen und „Ohne Kategorie“; Zurücksetzen und
+    // Chips über die DataTable (wirkt zusätzlich zu Titel, Status, Schweregrad).
+    {
+      id: 'bugCategory',
+      header: 'Kategorie',
+      value: bugCategoryFilterValue,
+      sortValue: (bug) => {
+        const index = (BUG_CATEGORIES as readonly string[]).indexOf(bug.bugCategory ?? '');
+        return index < 0 ? BUG_CATEGORIES.length + (bug.bugCategoryState === 'suggested' ? 0 : 1) : index;
+      },
+      filter: 'select',
+      options: BUG_CATEGORY_FILTER_OPTIONS,
+    },
+    // Bereich (Frontend, Backend, …): geht per Trigger an den Auftrag, getrennt von der Bug-Kategorie.
+    { ...categoryColumn<Bug>((bug) => bug.category, true), header: 'Bereich' },
     { id: 'source', header: 'Quelle', value: (bug) => BUG_SOURCE_LABEL[bug.source] ?? 'Manuell' },
     {
       id: 'sprint',
@@ -152,6 +190,26 @@ export class BugsComponent {
     ];
   });
   protected readonly statistics = computed(() => bugStats(this.data().bugs));
+  /** Kategorie × Sprint aus der Bug-Liste, gezählt wie `bugsByCategorySprint` der API. */
+  protected readonly categorySprintPairs = computed(() => bugCategoryPairs(this.data().bugs, this.data().sprints));
+
+  protected readonly bugCategories = BUG_CATEGORIES;
+  protected readonly bugCategoryLabel = bugCategoryLabel;
+  /** Zum Bestätigen gesammelt ausgewählte Bugs (nur solche mit offenem Vorschlag). */
+  protected readonly selectedSuggestions = signal<ReadonlySet<string>>(new Set());
+  protected readonly suggestionSelectable = computed(() =>
+    this.mayPlan() ? (bug: Bug) => bug.bugCategoryState === 'suggested' : null,
+  );
+  protected readonly selectedSuggestionCount = computed(
+    () =>
+      this.data().bugs.filter((bug) => bug.bugCategoryState === 'suggested' && this.selectedSuggestions().has(bug.id))
+        .length,
+  );
+  protected readonly selectSuggestionLabel = (bug: Bug): string =>
+    `Vorschlag „${bugCategoryLabel(bug.bugCategorySuggested)}“ für „${bug.title}“ auswählen`;
+  /** Altbestandslauf dieses Projekts; busy = ein Lauf (auch eines anderen Projekts) belegt das lokale Modell. */
+  protected readonly backlog = signal<BugCategoryBacklog>(NO_BACKLOG);
+  protected readonly uncategorized = computed(() => this.data().bugs.filter((bug) => !bug.bugCategoryState).length);
 
   protected statGroups(stats: BugStats) {
     const group = (title: string, column: string, rows: BugStatRow[], empty: string) => ({
@@ -165,6 +223,7 @@ export class BugsComponent {
     return [
       group('Gefunden von', 'Wer', stats.finders, 'Noch keine Bugs.'),
       group('Wo', 'Seite / Bereich', stats.places, 'Noch keine Zuordnung.'),
+      // Bestätigte Bug-Kategorie (security, git-sync, …); der Bereich (Frontend, Backend, …) steht unter „Wo“.
       group('Nach Kategorie', 'Kategorie', stats.categories, 'Noch keine Bugs.'),
       group('In welchen Tests', 'Test', stats.tests, 'In den Berichten wird kein Test genannt.'),
     ];
@@ -173,7 +232,14 @@ export class BugsComponent {
   protected readonly bugErrors = new FieldErrors();
   /** Fehler im Bearbeiten-Formular; es ist immer nur ein Bug aufgeklappt. */
   protected readonly editErrors = new FieldErrors();
-  protected bugForm = { title: '', description: '', severity: 'medium', sprintId: '', category: '' };
+  protected bugForm = {
+    title: '',
+    description: '',
+    severity: 'medium',
+    sprintId: '',
+    category: '',
+    bugCategory: '',
+  };
   protected readonly categories = CATEGORIES;
   protected pendingImages: File[] = [];
 
@@ -192,6 +258,94 @@ export class BugsComponent {
         );
       });
     });
+    // Projektwechsel: Auswahl und Stand des Altbestandslaufs gehören zum alten Projekt.
+    effect(() => {
+      const slug = this.store.activeProject();
+      untracked(() => {
+        this.selectedSuggestions.set(new Set());
+        this.backlog.set(NO_BACKLOG);
+        if (slug) void this.loadBacklog(slug);
+      });
+    });
+    inject(DestroyRef).onDestroy(
+      visibleInterval(() => {
+        if (this.backlog().running) void this.loadBacklog(this.store.activeProject());
+      }, BACKLOG_POLL_MS),
+    );
+  }
+
+  private backlogPath(slug: string): string {
+    return `${this.api.projectPath(slug)}/bugs/categorize-backlog`;
+  }
+
+  private async loadBacklog(slug: string): Promise<void> {
+    if (!slug) return;
+    const wasRunning = this.backlog().running;
+    try {
+      const status = await this.api.get<BugCategoryBacklog>(this.backlogPath(slug));
+      if (!this.store.isActive(slug)) return;
+      this.backlog.set(status);
+      // Lauf eben fertig geworden: Vorschläge in die Liste holen.
+      if (wasRunning && !status.running) await this.store.loadProject(slug, true);
+    } catch {
+      // Stand nicht abrufbar: Knopf bleibt nutzbar, die API lehnt einen zweiten Lauf selbst ab.
+    }
+  }
+
+  /** Altbestand kategorisieren: nur Vorschläge für Bugs ohne Kategorie, ändert keine Kategorie. */
+  protected async categorizeBacklog(): Promise<void> {
+    const slug = this.store.activeProject();
+    const answer = await this.confirm.ask({
+      title: 'Altbestand kategorisieren?',
+      message: `Das lokale Modell schlägt für ${this.uncategorized()} Bug(s) ohne Kategorie nacheinander eine Kategorie vor. Das kann dauern; die Vorschläge zählen erst, wenn sie hier bestätigt sind.`,
+      confirmLabel: 'Lauf starten',
+      withoutComment: true,
+    });
+    if (!answer) return;
+    await this.store.perform(
+      async () => {
+        await this.api.post(this.backlogPath(slug), {});
+        if (this.store.isActive(slug)) await this.loadBacklog(slug);
+      },
+      'Altbestand wird kategorisiert.',
+      false,
+    );
+  }
+
+  protected async cancelBacklog(): Promise<void> {
+    const slug = this.store.activeProject();
+    await this.store.perform(async () => {
+      await this.api.delete(this.backlogPath(slug));
+      if (this.store.isActive(slug)) await this.loadBacklog(slug);
+    }, 'Lauf abgebrochen; bisherige Vorschläge bleiben.');
+  }
+
+  /** Einzeln bestätigen: ohne Auswahl den Vorschlag, mit Auswahl die korrigierte Kategorie. */
+  protected async confirmCategory(bug: Bug, category: string | null = null): Promise<void> {
+    await this.store.perform(
+      () => this.api.post(`/api/bugs/${encodeURIComponent(bug.id)}/category/confirm`, category ? { category } : {}),
+      category && category !== bug.bugCategorySuggested
+        ? `Kategorie „${bugCategoryLabel(category)}“ gesetzt.`
+        : 'Kategorie bestätigt.',
+    );
+  }
+
+  /** Gesammelt bestätigen: übernimmt die Vorschläge der ausgewählten Bugs. */
+  protected async confirmSelectedSuggestions(): Promise<void> {
+    const ids = this.data()
+      .bugs.filter((bug) => bug.bugCategoryState === 'suggested' && this.selectedSuggestions().has(bug.id))
+      .map((bug) => bug.id);
+    if (!ids.length) return;
+    const slug = this.store.activeProject();
+    const done = await this.store.perform(
+      () => this.api.post(`${this.api.projectPath(slug)}/bugs/category/confirm`, { ids }),
+      ids.length === 1 ? '1 Vorschlag bestätigt.' : `${ids.length} Vorschläge bestätigt.`,
+    );
+    if (done) this.clearSuggestionSelection();
+  }
+
+  protected clearSuggestionSelection(): void {
+    this.selectedSuggestions.set(new Set());
   }
 
   protected toggleBug(id: string): void {
@@ -218,7 +372,11 @@ export class BugsComponent {
       focusField(form, 'title');
       return;
     }
-    const body = { ...this.bugForm, sprintId: this.bugForm.sprintId || null };
+    const body = {
+      ...this.bugForm,
+      sprintId: this.bugForm.sprintId || null,
+      bugCategory: this.bugForm.bugCategory || null,
+    };
     const files = this.pendingImages;
     let uploadError = '';
     await this.store.perform(async () => {
@@ -232,7 +390,7 @@ export class BugsComponent {
         });
       // Angelegt ist angelegt: Formular sofort leeren, damit ein zweiter Klick keinen doppelten Bug erzeugt.
       this.pendingImages = [];
-      this.bugForm = { title: '', description: '', severity: 'medium', sprintId: '', category: '' };
+      this.bugForm = { title: '', description: '', severity: 'medium', sprintId: '', category: '', bugCategory: '' };
       this.store.showCreate.set(false);
       uploadError = await this.uploadImages(created.bug.id, files).then(
         () => '',

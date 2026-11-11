@@ -74,6 +74,21 @@ test('Pausieren/Fortsetzen brauchen „Ausführen“, Abbrechen und Wieder plane
   assert.equal(sprintButtons(active, [], [], only('run')).edit, false);
 });
 
+test('Alle abnehmen: nur mit „Ausführen“ und wartender Umsetzung dieses Sprints', () => {
+  const active = { id: 's1', status: 'active' };
+  const waiting = { sprintId: 's1', status: 'approval' };
+  assert.equal(sprintButtons(active, [], [waiting], only('run')).approveAll, true);
+  assert.equal(sprintButtons(active, [], [waiting], only('plan')).approveAll, false, 'ohne Ausführen');
+  assert.equal(sprintButtons(active, [], [], all).approveAll, false, 'nichts wartet');
+  assert.equal(sprintButtons(active, [], [{ ...waiting, sprintId: 's2' }], all).approveAll, false, 'anderer Sprint');
+  assert.equal(sprintButtons(active, [], [{ ...waiting, status: 'done' }], all).approveAll, false, 'nicht Freigabe');
+  assert.equal(
+    sprintButtons(active, [], [{ ...waiting, reviewApprovedAt: '2026-10-31T10:00:00Z' }], all).approveAll,
+    false,
+    'schon abgenommen, wird gemergt',
+  );
+});
+
 test('Doppelklick auf „Sprint starten“ schickt nur einen PATCH', async () => {
   const acting = signal(false);
   let patches = 0;
