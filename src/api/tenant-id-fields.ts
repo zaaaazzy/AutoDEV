@@ -46,6 +46,7 @@ export const TENANT_ID_FIELDS: readonly TenantIdField[] = [
   // bugs.ts
   body('POST', '/projects/:slug/bugs', 'sprintId', 'sprints'),
   body('PATCH', '/bugs/:id', 'sprintId', 'sprints'),
+  body('POST', '/projects/:slug/bugs/category/confirm', 'ids', 'bugs'),
   // chat-routes.ts; references verweist auf Aufträge, Ideen, Bugs, Sprints oder Dokumente (resolveReferences)
   body('POST', '/projects/:slug/chat', 'agentId', 'agents'),
   body('POST', '/projects/:slug/chat', 'replyTo', 'chat_messages'),
@@ -67,8 +68,9 @@ export const TENANT_ID_FIELDS: readonly TenantIdField[] = [
   // permission-groups.ts (ID je Projekt, Schlüssel project_slug + id)
   inPath('PATCH', '/projects/:slug/permission-groups/:id', 'id', 'project_permission_groups'),
   inPath('DELETE', '/projects/:slug/permission-groups/:id', 'id', 'project_permission_groups'),
-  // review-routes.ts (Fehlercode bleibt 404)
+  // review-routes.ts (Fehlercode bleibt 404); „Alle abnehmen“ auf der Seite „Aktionen“
   body('POST', '/projects/:slug/review-slots/start', 'developmentId', 'development_items', 404),
+  body('POST', '/projects/:slug/approve', 'ids', 'development_items'),
   // workflow.ts
   body('POST', '/projects/:slug/workflow/steps', 'agentId', 'agents'),
   body('POST', '/projects/:slug/workflow/order', 'ids', 'workflow_steps'),

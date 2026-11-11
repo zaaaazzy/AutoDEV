@@ -347,6 +347,10 @@ async function approveAllRequest(path: string, options: { body?: unknown; approv
         return { rows: [{ state, stateAt: new Date() }] };
       }
       if (sql.includes('FROM sprints WHERE id = $1')) return { rows: [{ slug: 'dev-log' }] };
+      // Mandantenprüfung der ID-Liste (assertInProject): alle genannten Umsetzungen gehören zum Projekt.
+      if (sql.includes('FROM development_items WHERE id = ANY($1)')) {
+        return { rows: (values[0] as string[]).map((id) => ({ id })) };
+      }
       if (sql.startsWith('UPDATE development_items')) {
         const rows = (options.approved ?? []).map((id) => ({ id, title: id, projectSlug: 'dev-log' }));
         return { rows, rowCount: rows.length };

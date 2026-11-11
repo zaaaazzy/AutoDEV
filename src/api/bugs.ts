@@ -10,6 +10,7 @@ import { categoryFromBug } from '../core/bug-category.js';
 import { isBugCategoryValue } from '../core/bug-category-values.js';
 import { backlogStatus, cancelBacklogCategorization, startBacklogCategorization } from '../agent/bug-category.js';
 import type { Principal } from './roles.js';
+import { assertInProject } from './tenancy.js';
 import {
   buildUpdate,
   INVALID,
@@ -448,6 +449,11 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
       }
       if (!Array.isArray(ids) || !ids.length || ids.length > CONFIRM_MAX || !ids.every(isUuid)) {
         response.status(400).json({ field: 'ids', message: `Bitte 1 bis ${CONFIRM_MAX} Bugs auswählen.` });
+        return;
+      }
+      // Mandantenprüfung (tenant-id-fields.ts): fremde Bugs in der Liste lehnen die ganze Anfrage ab.
+      if (!(await assertInProject(pool, 'bugs', ids as string[], slug))) {
+        response.status(400).json({ field: 'ids', message: 'Bugs gehören nicht zu diesem Projekt.' });
         return;
       }
       const result = await pool.query(

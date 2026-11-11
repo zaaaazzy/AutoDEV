@@ -317,6 +317,15 @@ test('Mandanten-Prüfung auf PostgreSQL: fremde IDs 400/404 ohne Schreibzugriff,
         [slug],
       );
     const bug = (slug: string) => id(`INSERT INTO bugs (project_slug, title) VALUES ($1, 'Bug') RETURNING id`, [slug]);
+    /** Bug mit vorgeschlagener Kategorie (nur die bestätigt die Sammelroute). */
+    const suggestedBug = async (slug: string) => {
+      const bugId = await bug(slug);
+      await pool.query(
+        `UPDATE bugs SET bug_category_suggested = 'docs', bug_category_state = 'suggested' WHERE id = $1`,
+        [bugId],
+      );
+      return bugId;
+    };
     const task = (slug: string) =>
       id(`INSERT INTO agent_tasks (project_slug, title, prompt) VALUES ($1, $2, 'Tu was') RETURNING id`, [
         slug,
@@ -415,6 +424,8 @@ test('Mandanten-Prüfung auf PostgreSQL: fremde IDs 400/404 ohne Schreibzugriff,
         const bugId = await bug(OWN);
         return same((sprintId) => patch(`/bugs/${bugId}`, { sprintId }), sprint, 200);
       },
+      'POST /projects/:slug/bugs/category/confirm ids': () =>
+        same((bugId) => post(`/projects/${OWN}/bugs/category/confirm`, { ids: [bugId] }), suggestedBug, 200),
       'POST /projects/:slug/chat agentId': () =>
         same((agentId) => post(`/projects/${OWN}/chat`, { content: 'Hallo', agentId }), agent, 201),
       'POST /projects/:slug/chat replyTo': () =>
@@ -463,6 +474,12 @@ test('Mandanten-Prüfung auf PostgreSQL: fremde IDs 400/404 ohne Schreibzugriff,
       },
       'DELETE /projects/:slug/permission-groups/:id id': () =>
         same((groupId) => ({ method: 'DELETE', path: `/projects/${OWN}/permission-groups/${groupId}` }), group, 204),
+      'POST /projects/:slug/approve ids': () =>
+        same(
+          (orderId) => post(`/projects/${OWN}/approve`, { ids: [orderId] }),
+          (slug) => order(slug, 'approval'),
+          200,
+        ),
       'POST /projects/:slug/review-slots/start developmentId': () =>
         same(
           (developmentId) => post(`/projects/${OWN}/review-slots/start`, { commit: 'a'.repeat(40), developmentId }),

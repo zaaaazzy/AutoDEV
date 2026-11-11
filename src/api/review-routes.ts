@@ -8,6 +8,7 @@ import { access } from './access.js';
 import { parseApproveIds } from './development-input.js';
 import { DEV_COLUMNS, retryAutoRunSql, retryComment, retrySprintSql } from './development.js';
 import { guardGit } from './git-state.js';
+import { assertInProject } from './tenancy.js';
 
 const PORT_BASE = 4200;
 /** Sprints, deren Stände die Kopfzeile anbietet (laufender Sprint zuerst). */
@@ -194,6 +195,11 @@ function approveProject(pool: Pool) {
     const ids = parseApproveIds(request.body);
     if (!ids.ok) {
       response.status(400).json(ids.error);
+      return;
+    }
+    // Das UPDATE filtert nach Projekt; eine Liste mit fremden IDs wird trotzdem abgelehnt, statt teilweise abzunehmen.
+    if (!(await assertInProject(pool, 'development_items', ids.value, slug))) {
+      response.status(400).json({ field: 'ids', message: 'Umsetzungen gehören nicht zu diesem Projekt.' });
       return;
     }
     await approveAll(pool, slug, { projectSlug: slug, ids: ids.value }, request, response);

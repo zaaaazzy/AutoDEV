@@ -181,9 +181,11 @@ test('Bug-Kategorie auf PostgreSQL: Anlegen, Vorschlag, Bestätigen, Korrektur u
           `UPDATE bugs SET bug_category_suggested = 'docs', bug_category_state = 'suggested' WHERE id = ANY($1::uuid[])`,
           [[first, second, untouched, foreign]],
         );
-        const response = await api.call('POST', '/projects/shop/bugs/category/confirm', {
-          ids: [first, second, foreign],
-        });
+        // Mandantenprüfung: ein fremder Bug in der Liste lehnt die ganze Anfrage ab (tenant-id-fields.ts).
+        const mixed = await api.call('POST', '/projects/shop/bugs/category/confirm', { ids: [first, second, foreign] });
+        assert.equal(mixed.status, 400);
+        assert.equal((await state(first))?.state, 'suggested', 'bei Ablehnung bleibt alles unverändert');
+        const response = await api.call('POST', '/projects/shop/bugs/category/confirm', { ids: [first, second] });
         assert.equal(response.status, 200);
         assert.deepEqual((response.body.bugs as { id: string }[]).map((bug) => bug.id).sort(), [first, second].sort());
         assert.equal((await state(untouched))?.state, 'suggested');
