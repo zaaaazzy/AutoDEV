@@ -9,7 +9,9 @@ import {
   containerDirectory,
   credentialProblem,
   dependencyCommand,
+  dependencyFailureMessage,
   dependencyStamp,
+  packageManagerOf,
   dockerClientEnvironment,
   EGRESS_CONTAINER,
   EGRESS_URL,
@@ -509,10 +511,11 @@ export async function runInWorkbench(
   if (options.dependencies !== false) {
     const stamp = dependencyStamp(worktree);
     if (stamp) {
+      const manager = packageManagerOf(worktree);
       const key = `${workbenchName(options.project)}:${stamp}`;
       let install = installs.get(key);
       if (!install) {
-        install = runInWorkbench(dependencyCommand(stamp), worktree, {
+        install = runInWorkbench(dependencyCommand(stamp, manager), worktree, {
           ...options,
           cwd: worktree,
           runId: `${options.runId}-npm`,
@@ -526,9 +529,9 @@ export async function runInWorkbench(
       }
       const installed = await install;
       if (installed.exitCode !== 0) {
-        const message = `Arbeitscontainer: Abhängigkeiten liessen sich nicht installieren (Exit-Code ${installed.exitCode}). Befehl nicht gestartet.\n${installed.output.trim().slice(-800)}`;
-        noteProblem(options.project, defined(message.split('\n')[0]));
-        return blocked(message, redactWith);
+        // Der Container selbst läuft: kein Sandbox-Problem fürs Badge, der Fehler gehört zum Auftrag.
+        noteProblem(options.project, null);
+        return blocked(dependencyFailureMessage(manager, installed, 'im Arbeitscontainer'), redactWith);
       }
     }
   }

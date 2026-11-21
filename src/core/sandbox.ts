@@ -11,7 +11,9 @@ import {
   credentialProblem,
   dockerClientEnvironment,
   dependencyCommand,
+  dependencyFailureMessage,
   dependencyStamp,
+  packageManagerOf,
   ensureAgentNetwork,
   INSTALL_TIMEOUT_MS,
   KILL_TIMEOUT_MS,
@@ -31,19 +33,28 @@ import { runInWorkbench } from './workbench.js';
 export * from './sandbox-base.js';
 
 /**
- * Eigene Agent-Worktrees verlinken node_modules des Hauptordners (agent-workspace.ts). Im Container zeigt der Link auf
- * einen Host-Pfad: Docker hängt das Volume dann dort ein, und npm scheitert an „/workspace/node_modules“ (ENOTDIR).
- * Der Link wird darum durch einen leeren Ordner ersetzt (nur der Link, nie sein Ziel); linkDependencies stellt ihn
- * ohne Sandbox wieder her. Nur in einem Git-Worktree (.git ist eine Datei): Projektordner der Menschen bleiben unberührt.
+ * node_modules im Worktree muss ein echter Ordner sein: der Einhängepunkt für das node_modules-Volume.
+ * - Fehlt er (frisches Projekt ohne Abhängigkeiten), legt Docker ihn sonst im Bind-Mount an – bei :ro (lesende Rollen
+ *   wie Visionär, Container mit --read-only) scheitert das mit Exit-Code 125 („create mountpoint … read-only file
+ *   system“). Darum wird er hier leer angelegt, auch im Projektordner der Menschen: Git kennt keine leeren Ordner.
+ * - Eigene Agent-Worktrees verlinken node_modules des Hauptordners (agent-workspace.ts). Im Container zeigt der Link
+ *   auf einen Host-Pfad: Docker hängt das Volume dann dort ein, und npm scheitert an „/workspace/node_modules“
+ *   (ENOTDIR). Der Link wird durch einen leeren Ordner ersetzt (nur der Link, nie sein Ziel); linkDependencies stellt
+ *   ihn ohne Sandbox wieder her. Nur in einem Git-Worktree (.git ist eine Datei): Links der Menschen bleiben unberührt.
  */
-export function replaceLinkedModules(worktree: string): void {
+export function ensureModulesMountpoint(worktree: string): void {
   const path = join(worktree, 'node_modules');
   try {
-    if (!lstatSync(join(worktree, '.git')).isFile() || !lstatSync(path).isSymbolicLink()) return;
+    const stat = lstatSync(path, { throwIfNoEntry: false });
+    if (!stat) {
+      mkdirSync(path);
+      return;
+    }
+    if (!stat.isSymbolicLink() || !lstatSync(join(worktree, '.git')).isFile()) return;
     rmSync(path);
     mkdirSync(path);
   } catch {
-    // Kein node_modules oder nicht änderbar: Der Lauf geht trotzdem weiter.
+    // Worktree fehlt oder nicht änderbar: Der Lauf geht trotzdem weiter.
   }
 }
 
@@ -63,7 +74,7 @@ function ensureDependencies(
   const key = `${modulesVolume(options.project)}:${stamp}`;
   let install = installs.get(key);
   if (!install) {
-    install = runInSandbox(dependencyCommand(stamp), worktree, {
+    install = runInSandbox(dependencyCommand(stamp, packageManagerOf(worktree)), worktree, {
       runId: options.runId,
       project: options.project,
       platform: options.platform,
@@ -120,7 +131,7 @@ export async function runInSandbox(
     return blocked(missing, redactWith);
   }
   if (options.workspace !== false) {
-    replaceLinkedModules(worktree);
+    ensureModulesMountpoint(worktree);
     const volume = await prepareModulesVolume(docker, options, env, worktree);
     if (volume.exitCode !== 0) {
       const message = `Sandbox: node_modules-Volume „${modulesVolume(options.project)}“ liess sich nicht vorbereiten (Exit-Code ${volume.exitCode}). Der Agent wurde nicht gestartet.\n${volume.output.trim().slice(-500)}`;
@@ -131,9 +142,10 @@ export async function runInSandbox(
   if (options.workspace !== false && !options.readOnly && options.dependencies !== false) {
     const installed = await ensureDependencies(worktree, { ...options, environment: source });
     if (installed && installed.exitCode !== 0) {
-      const message = `Sandbox: Abhängigkeiten liessen sich nicht ins Volume „${modulesVolume(options.project)}“ installieren (Exit-Code ${installed.exitCode}). Befehl nicht gestartet.\n${installed.output.trim().slice(-800)}`;
-      noteProblem(options.project, message.split('\n')[0]);
-      return blocked(message, redactWith);
+      // Docker, Image und Volume sind in Ordnung: kein Sandbox-Problem fürs Badge, der Fehler gehört zum Auftrag.
+      noteProblem(options.project, null);
+      const where = `im Volume „${modulesVolume(options.project)}“`;
+      return blocked(dependencyFailureMessage(packageManagerOf(worktree), installed, where), redactWith);
     }
   }
   if ((options.network ?? SANDBOX_NETWORK) === SANDBOX_NETWORK) {

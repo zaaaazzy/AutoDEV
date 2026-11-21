@@ -52,10 +52,13 @@ ENV DISABLE_AUTOUPDATER=1 \
     HOME=/home/agent
 # Playwright in derselben Version wie die Browser des Basis-Images (für die Vorschau-Aufnahme des visuellen Testers).
 ARG PLAYWRIGHT_VERSION=1.64.1
+# Corepack in fester Version: lädt pnpm und Yarn eines Projekts (dependencyCommand in sandbox-base.ts) über die
+# npm-Registry. Node ab 25 bringt kein Corepack mehr mit, und das aus dem Playwright-Basis-Image ist Zufall.
+ARG COREPACK_VERSION=0.36.0
 # Der Build läuft als root mit HOME=/home/agent: ohne das rm gehört /home/agent/.npm root, und npm/npx im Container
 # (andere UID) scheitern mit EACCES. Zur Laufzeit liegt der npm-Cache ohnehin unter /tmp (sandbox.ts).
 RUN npm install -g --no-audit --no-fund "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-      "playwright@${PLAYWRIGHT_VERSION}" \
+      "playwright@${PLAYWRIGHT_VERSION}" "corepack@${COREPACK_VERSION}" \
     && npm cache clean --force \
     && rm -rf /home/agent/.npm /root/.npm
 COPY --from=guard /out/agent-guard.mjs /out/egress-proxy.mjs /out/visual-capture.mjs /opt/aideation/

@@ -61,8 +61,11 @@
     <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
   </ng-template>
   <ng-template appDataActions let-item>
+    <!-- Zusatzaktionen (z. B. Verschieben im Sprint) in einer Hülle: auf dem Handy wandern sie in eine eigene Zeile. -->
     @if (extraActions(); as extra) {
-      <ng-container *ngTemplateOutlet="extra.template; context: { $implicit: item }" />
+      <span class="row-extra">
+        <ng-container *ngTemplateOutlet="extra.template; context: { $implicit: item }" />
+      </span>
     }
     @if (editable()) {
       <button
@@ -72,7 +75,15 @@
         [attr.aria-label]="'Auftrag bearbeiten: ' + item.title"
         title="Bearbeiten"
       >
-        ✎
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <path
+            d="M11.2 2.3a1.4 1.4 0 0 1 2 0l.5.5a1.4 1.4 0 0 1 0 2L6.2 12.3 3 13l.7-3.2Z"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linejoin="round"
+          />
+        </svg>
       </button>
     }
   </ng-template>

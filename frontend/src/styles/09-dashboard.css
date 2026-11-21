@@ -118,7 +118,7 @@
 
 /* ── Aufträge in Entstehung ──────────────────────────────────────────── */
 .drafts-panel {
-  border-color: #cfe5d8;
+  border-color: var(--success-soft);
   background: linear-gradient(180deg, var(--success-surface-faint), var(--surface) 120px);
 }
 .draft-list {
@@ -150,7 +150,7 @@
 .draft-spinner {
   width: 20px;
   height: 20px;
-  border: 2.5px solid #d5e6dc;
+  border: 2.5px solid var(--success-soft);
   border-top-color: var(--green);
   border-radius: 50%;
   animation: spin 0.9s linear infinite;
@@ -177,7 +177,7 @@
 /* ── Besondere Aufmerksamkeit ────────────────────────────────────────── */
 .attention-panel {
   border-color: var(--notice-border);
-  background: linear-gradient(180deg, #fffaf3, var(--surface) 120px);
+  background: linear-gradient(180deg, var(--notice-surface-faint), var(--surface) 120px);
 }
 
 .attention-panel .approve-all {
@@ -202,7 +202,7 @@
   overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fafaf8;
+  background: var(--surface-soft);
   font-size: 14px;
   overscroll-behavior: contain;
 }
@@ -267,7 +267,7 @@
 
 /* Live-Anzeige eines laufenden Testlaufs (Testläufe, Test-Gate der Sprint-Sicherung). */
 .test-live {
-  border-color: #b9d6c7;
+  border-color: var(--success-border-soft-alt);
 }
 .test-live h2 {
   display: flex;
@@ -278,7 +278,7 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #2f8f5b;
+  background: var(--success);
   animation: test-live-pulse 1.4s ease-in-out infinite;
 }
 @keyframes test-live-pulse {
@@ -323,8 +323,8 @@
   padding: 8px 10px;
   overflow: auto;
   border-radius: 8px;
-  background: #1f2620;
-  color: #e7ede9;
+  background: var(--inverse-bg);
+  color: var(--inverse-text);
   font-size: 12px;
   white-space: pre-wrap;
 }
@@ -427,8 +427,8 @@ a.git-commit[href]:hover {
 }
 .git-ref-head {
   border-color: var(--green);
-  background: var(--green);
-  color: var(--surface);
+  background: var(--accent-bg);
+  color: var(--on-accent);
 }
 .git-ref-branch {
   border-color: var(--green);
@@ -439,7 +439,7 @@ a.git-commit[href]:hover {
 }
 .git-ref-tag {
   border-color: var(--orange);
-  color: #9a4f1c;
+  color: var(--notice-text-warm);
 }
 .git-ref-tag::before {
   content: '🏷 ';
@@ -570,10 +570,10 @@ app-wait-status {
 .wait-status.wait-status-card {
   margin: 0 0 18px;
   padding: 14px 18px;
-  border: 1px solid #ecd9b8;
+  border: 1px solid var(--notice-border);
   border-radius: 11px;
   background: var(--notice-surface-faint);
-  box-shadow: 0 1px 2px rgb(32 40 36 / 4%);
+  box-shadow: 0 1px 2px rgb(var(--shadow-rgb) / 4%);
   font-size: 14px;
 }
 .wait-status-card .wait-status-bar {
@@ -588,13 +588,13 @@ app-wait-status {
   height: 6px;
   overflow: hidden;
   border-radius: 999px;
-  background: #f1e6d4;
+  background: var(--warn-soft);
 }
 .wait-status-bar span {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: #d08a1e;
+  background: var(--accent-orange);
   transition: width 0.6s ease;
 }
 .wait-status-bar.indeterminate span {
@@ -625,7 +625,7 @@ app-wait-status {
   padding: 8px 12px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #fbfcfb;
+  background: var(--surface-soft);
   font-size: 13.5px;
 }
 .running-kind {
@@ -649,7 +649,7 @@ app-wait-status {
 }
 .production-tile.tone-healthy {
   border-left-color: var(--success-bright);
-  background: #eef8f2;
+  background: var(--success-surface);
 }
 .production-tile.tone-healthy strong {
   color: var(--success-text);
@@ -672,7 +672,7 @@ app-wait-status {
   font-family: Inter, 'Segoe UI', system-ui, sans-serif;
 }
 .production-badge {
-  background: #e3f3ea;
+  background: var(--success-soft-alt);
   color: var(--success-text);
   white-space: nowrap;
 }

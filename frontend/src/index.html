@@ -5,8 +5,11 @@
     <title>AIdeation</title>
     <base href="./" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light" />
-    <meta name="theme-color" content="#202824" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#202824" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141917" />
+    <!-- Vor den Stylesheets: setzt data-theme aus dem localStorage, damit nichts flackert. -->
+    <script src="theme-init.js"></script>
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
     <link rel="icon" type="image/png" sizes="64x64" href="icons/favicon-64.png" />
