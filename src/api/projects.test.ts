@@ -112,10 +112,16 @@ test('Projekte auf PostgreSQL: anlegen, Einstellungen, Mandantentrennung, lösch
           ],
           [{ orderTestCommands: "echo 'offen" }, /Testbefehle je Auftrag, Zeile 1: Anführungszeichen/],
           [{ deployCommands: 'docker compose up\n\nsh -c "x' }, /Deploy-Befehle, Zeile 3: Anführungszeichen/],
-          [{ reviewCommand: 'sh -c "x' }, /Review-Befehl: Anführungszeichen nicht geschlossen/],
           [{ deployCommands: Array(11).fill('x').join('\n') }, /höchstens 10/],
           [{ reviewMode: 'manchmal' }, /Review-Freigabe/],
           [{ reviewUrl: 'ftp://x' }, /Review-Adresse/],
+          [{ reviewCommand: Array(21).fill('npm start').join('\n') }, /Review-Befehle: .*höchstens 20/],
+          [{ reviewCommand: 42 }, /Review-Befehle/],
+          [{ reviewPort: 0 }, /Port der App im Container/],
+          [{ reviewPort: 'achtzig' }, /Port der App im Container/],
+          [{ reviewHealthPath: 'health' }, /Health-Pfad/],
+          [{ reviewDockerfile: '../Dockerfile' }, /Review-Dockerfile/],
+          [{ reviewDockerfile: '/etc/Dockerfile' }, /Review-Dockerfile/],
           [{ description: 'x'.repeat(10_001) }, /10000/],
           [{ sprintMode: 'chaos' }, /Sprintplanung/],
           [{ sprintCapacityHours: 0 }, /Kapazität/],
@@ -147,8 +153,12 @@ test('Projekte auf PostgreSQL: anlegen, Einstellungen, Mandantentrennung, lösch
             'npm test\n\nnpm run lint  -- --fix\nsh -c "if [ -f package.json ]; then npm test; else echo \\"kein Code\\"; fi"',
           orderTestCommands: '',
           deployCommands: "docker compose up -d\nsh -c 'npm run build && npm test'",
-          reviewCommand: 'sh review.sh "mit Leerzeichen"',
           reviewMode: 'ui',
+          reviewCommand:
+            'npm run build\n\n  sh review.sh "mit Leerzeichen" --host $REVIEW_HOST --port $REVIEW_FRONTEND_PORT  \n',
+          reviewPort: '8080',
+          reviewHealthPath: ' /health ',
+          reviewDockerfile: 'deploy/review/Dockerfile',
           sprintMode: 'autopilot',
           sprintCapacityHours: 12.5,
           autopilotStart: '08:00',
@@ -169,7 +179,25 @@ test('Projekte auf PostgreSQL: anlegen, Einstellungen, Mandantentrennung, lösch
           ['docker', 'compose', 'up', '-d'],
           ['sh', '-c', 'npm run build && npm test'],
         ]);
-        assert.deepEqual(project.reviewCommand, ['sh', 'review.sh', 'mit Leerzeichen']);
+        // Review-Befehle bleiben ganze Zeilen (kein Wort-Splitting, Anführungszeichen unverändert), leere Zeilen entfallen.
+        assert.deepEqual(project.reviewCommand, [
+          'npm run build',
+          'sh review.sh "mit Leerzeichen" --host $REVIEW_HOST --port $REVIEW_FRONTEND_PORT',
+        ]);
+        assert.equal(project.reviewPort, 8080);
+        assert.equal(project.reviewHealthPath, '/health');
+        assert.equal(project.reviewDockerfile, 'deploy/review/Dockerfile');
+        const reset = await api.call('PATCH', '/projects/alpha-projekt', {
+          reviewCommand: '',
+          reviewPort: null,
+          reviewHealthPath: '',
+          reviewDockerfile: '',
+        });
+        assert.equal(reset.status, 200, JSON.stringify(reset.body));
+        assert.equal(reset.body.project.reviewCommand, null);
+        assert.equal(reset.body.project.reviewPort, null);
+        assert.equal(reset.body.project.reviewHealthPath, null);
+        assert.equal(reset.body.project.reviewDockerfile, null);
         assert.equal(project.githubMode, 'issues');
         assert.equal(project.githubAuthCheckedAt, null, 'neuer Modus wird neu geprüft');
         assert.equal(project.description, 'Shop');

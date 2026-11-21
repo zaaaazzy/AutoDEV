@@ -17,6 +17,7 @@ import { BudgetSettingsComponent } from './budget-settings.component.js';
 import { AuthService } from '../../core/auth.service.js';
 import { PageSearchService } from '../../core/page-search.service.js';
 import { SettingsGroupDirective, SettingsGroups } from './settings-group.js';
+import { reviewContainerForm, reviewContainerPatch } from './review-container-form.js';
 
 @Component({
   selector: 'app-settings',
@@ -59,7 +60,7 @@ export class SettingsComponent {
     /** Leer = globaler Schalter. */
     agentSandbox: '' as '' | 'off' | 'docker' | 'workbench',
     reviewMode: 'off' as 'off' | 'ui' | 'always',
-    reviewCommand: '',
+    ...reviewContainerForm(undefined),
     restartAfterSprint: false,
     sprintMode: 'manual' as 'manual' | 'suggest' | 'autopilot',
     sprintCapacityHours: 4,
@@ -142,7 +143,7 @@ export class SettingsComponent {
           agentWorkspace: this.settings.agentWorkspace,
           agentSandbox: this.settings.agentSandbox || null,
           reviewMode: this.settings.reviewMode,
-          reviewCommand: this.settings.reviewCommand.trim(),
+          ...reviewContainerPatch(this.settings),
           restartAfterSprint: this.settings.restartAfterSprint,
           sprintMode: this.settings.sprintMode,
           sprintCapacityHours: this.settings.sprintCapacityHours,
@@ -212,7 +213,7 @@ export class SettingsComponent {
       agentWorkspace: project?.agentWorkspace ?? false,
       agentSandbox: project?.agentSandbox ?? '',
       reviewMode: project?.reviewMode ?? 'off',
-      reviewCommand: joinShellLine(project?.reviewCommand ?? []),
+      ...reviewContainerForm(project),
       restartAfterSprint: project?.restartAfterSprint ?? false,
       sprintMode: project?.sprintMode ?? 'manual',
       sprintCapacityHours: project?.sprintCapacityHours ?? 4,

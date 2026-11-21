@@ -569,10 +569,23 @@ Worauf zu achten ist: Schlägt das Speichern einzelner Ereignisse teilweise fehl
 Der Review-Container (Worker-Takt 5 s, `src/runner/review-slots.ts`) führt Code aus Agent-Commits aus, inklusive `npm ci` mit Lifecycle-Skripten. Deshalb bekommt er nichts, was sich missbrauchen liesse:
 
 - **Keine `.env`, kein Projektordner:** Eingebunden sind nur die Git-Objekte (`<repo>/.git/objects` schreibgeschützt unter `/source/objects`). Der Stand wird daraus nach `/work` ausgecheckt. Review-Befehle, die noch auf `/source/…` zeigen, laufen dort ebenfalls (`/source/` → `/work/`). Für AIdeation selbst lautet der Befehl `sh deploy/review/aideation-review.sh`.
-- **Kein root:** Der Container läuft als Benutzer `node`, mit `--cap-drop ALL` und `no-new-privileges`.
+- **Kein root:** Der Container läuft als Benutzer `node`, mit `--cap-drop ALL` und `no-new-privileges`. Ein projekteigenes Image (siehe unten) muss selbst einen Benutzer mit `USER` setzen; meldet `docker image inspect` root oder keinen Benutzer, startet der Container nicht.
 - **npm-Cache je Projekt:** Volume `aideation_review_npm_<projekt>` statt eines gemeinsamen Caches.
 - **Eigener DB-User:** `DEV_LOG_REVIEW_DATABASE_URL` im Worker zeigt auf einen User ohne Superuser-Rechte und auf dessen Basis-Datenbank (`scripts/setup-review-db.sh` legt beides an und entzieht `PUBLIC` das `CONNECT` auf `aideation` und `postgres`). Projekte ohne eigene Datenbank bekommen damit die leere Slot-Datenbank `aideation_review_<n>` (`REVIEW_DATABASE_URL`, `DATABASE_URL`). Angelegt wird sie vom Worker, und zwar über die Basis-Datenbank, nie über `postgres`. Projekte mit eigener Datenbank bekommen wie bisher eine Kopie `<db>_review_<n>`.
 - **Kein Rückfall:** Fehlt der Review-User, gleicht er dem Haupt-User (User, Passwort oder Datenbank) oder enthielte das Env das Haupt-DB-Passwort, den Haupt-User oder die DB `postgres`, dann wird der Container gar nicht erst gestartet. Der Slot steht dann auf „fehlgeschlagen“ mit Meldung, Docker-Ausgaben werden maskiert. Das betrifft nur den Review-Container, nicht den Auftrag und nicht den Autofix.
+
+**Einstellungen je Projekt** (`projects.review_*`, Formular „Review & Deploy“, Prüfung in `src/api/project-input.ts`, gemeinsame Ableitungen in `src/core/review-config.ts`):
+
+| Spalte | Bedeutung | Standard (NULL) |
+|---|---|---|
+| `review_command` (JSONB) | Review-Befehle, **eine Zeile je Befehl** (Array von Strings, Zeilen bleiben ganze Strings). Der Container führt sie als Skript unter `sh -e` aus: nacheinander, die erste gescheiterte Zeile beendet ihn. Migration 31 wandelte das frühere Wort-Array eines Befehls (`['npm','run','review']`) in eine Zeile um. | keine → „Version ansehen“ fehlt, Start scheitert mit Hinweis |
+| `review_port` | Port, auf dem die App **im Container** lauscht. Der Worker mappt `127.0.0.1:<4200+n>:<review_port>` und setzt `REVIEW_FRONTEND_PORT` darauf. | 4200 |
+| `review_health_path` | Pfad der Bereitschaftsprüfung: `GET http://localhost:<4200+n><pfad>` mit Status < 500 schaltet den Slot auf „läuft“. | `/` |
+| `review_dockerfile` | Dockerfile relativ zum Projekt (ohne `..`, kein führendes `/`) für eine eigene Laufzeit. | Standard-Image `aideation-review:latest` (Node, Git, Benutzer `node`) |
+
+Der Host-Port bleibt `4200 + Slot` (`REVIEW_PORT_BASE`), die Adresse im Browser `http://localhost:420<n>`; nur der Port im Container ist einstellbar.
+
+**Projekteigenes Image** (`buildProjectImage`): Ist `review_dockerfile` gesetzt, exportiert der Worker den gewählten Commit mit `git archive` in einen temporären Ordner (kein Arbeitsordner, keine `.env`), baut daraus `docker build -f <ordner>/<pfad> -t aideation-review-<slug>` (der Stand ist der Build-Kontext) und prüft `{{.Config.User}}` des Images. Fehlt das Dockerfile im Stand, scheitert der Build oder läuft das Image als root, steht der Slot auf „fehlgeschlagen“ mit der Ursache. Der Container startet dann ohne Git-Objekte und ohne npm-Volume: `--entrypoint sh -w /work <image> -ec "<Review-Befehle>"` mit derselben Umgebung (`REVIEW_*`, `DATABASE_URL`) und denselben Schranken (`--cap-drop ALL`, `no-new-privileges`, Port nur auf `127.0.0.1`). Alte, taglose Fassungen des Images räumt `docker image prune --filter label=aideation.review-image=<image>` nach jedem Build auf. Muster für Node, statische Frontends und andere Laufzeiten stehen in `betrieb.md`, „Beliebige Anwendung reviewen“.
 
 ### Frontend-Polling: Git-Verlauf und Review-Container
 
