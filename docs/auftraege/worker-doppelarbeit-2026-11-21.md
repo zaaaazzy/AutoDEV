@@ -24,7 +24,7 @@ Beobachtet am 21.11.2026 im Projekt „pianotrainer“:
   Ablauf verglichen, ein fortgesetzter Lauf speichert seine Schritte aber ab der Fortsetzungsposition – der erste
   Schritt (z. B. Reviewer) stand so an Index 0 und passte nicht zum Entwickler, also ebenfalls Position 0.
 - Der Worker kannte keine Abhängigkeiten zwischen Aufträgen; die Auswahl ging nur nach `sprint_rank`/Priorität.
-- `foreignChanges` kannte nur `.dev-log/` und die Berichtsordner als Ausnahmen.
+- `foreignChanges` kannte nur `.dev-log/` und die Berichtsordner als Ausnahmen (behoben in PR #90).
 - `@@REGEL` galt immer als Ablehnung, auch wenn der Agent nur „nichts mehr zu tun“ meinte.
 
 ## Änderungen
@@ -95,23 +95,20 @@ Tests: `src/runner/dependency-selection.test.ts` (PostgreSQL: Auswahl, `--item`,
 `findOrderByTitle`, Kreise über eine und zwei Stufen, `ON DELETE SET NULL`), `requirements.test.ts` (`splitDependency`,
 Auflösen und Setzen beim Entwurf, unbekannter Titel), `migrations.test.ts` (32/33), `dependency.spec.ts` (Frontend).
 
-### 4. Claude-Worktrees der Agents (`src/runner/git-sync/order-branch.ts`)
+### 4. Claude-Worktrees der Agents
 
-- `foreignChanges` übergeht unversionierte Pfade unter `.claude/` (Status `??`); versionierte Dateien darin (z. B. ein
-  eingechecktes `.claude/settings.json`) zählen weiter als fremd.
-- `removeAgentWorktrees(cwd)`: entfernt Worktrees unter `.claude/worktrees/` (erst `unlock`, dann `remove --force
-  --force`), löscht `worktree-…`-Branches der CLI nur, wenn sie keine eigenen Commits haben, dann `git worktree prune`;
-  den Ordner `.claude/worktrees` löscht sie, wenn nichts darin versioniert ist. Läuft vor jedem Commit eines
-  Agent-Schritts (`commitAgentStep`), weil `git add -A` einen Worktree sonst als eingebettetes Repository mitnähme.
-- CLI-Einstellungen (`src/agent/tool-permissions.ts`): Die Claude-CLI 2.1.x isoliert Hintergrund-Agents standardmässig in
-  Worktrees unter `.claude/worktrees/` (Einstellung `worktree.bgIsolation`, Werte `worktree` | `none`; auch
-  `CLAUDE_BG_ISOLATION`). AIdeation gibt jetzt in den `--settings` jedes Agents `"worktree": {"bgIsolation": "none"}`
-  mit – für normale Rollen und den Vollzugriff des Assistenten. Ein ausdrückliches `EnterWorktree`/Agent mit
-  `isolation: "worktree"` könnte weiterhin einen Worktree anlegen; dafür greift die Aufräumroutine.
+Den Kern dieses Punkts löst PR #90 (`fix/claude-worktrees-im-projekt`): `.claude/` steht lokal in `info/exclude`,
+`foreignChanges` übergeht unversionierte `.claude/`-Einträge, `enterOrderBranch` entfernt verschachtelte Worktrees
+unter `.claude/worktrees/`, und die CLI-Werkzeuge `EnterWorktree`/`ExitWorktree` sind per `permissions.deny` gesperrt.
+Eine eigene Fassung dieser Logik stand zunächst in diesem Branch und wurde zugunsten von #90 wieder entfernt, damit es
+nicht zwei Mechanismen für dasselbe gibt.
 
-Tests: `foreign-changes.test.ts` (Worktree samt Sperre und lokale Einstellungen → Auftrag startet; geänderte versionierte
-Einstellung → fremd; `removeAgentWorktrees` mit leerem und mit beschäftigtem Worktree, fremder Worktree bleibt),
-`tool-permissions.test.ts` (`bgIsolation: none`).
+Hier bleibt nur die Ergänzung in `src/agent/tool-permissions.ts`: Claude Code 2.1 isoliert Hintergrund-Agents
+standardmässig in Worktrees unter `.claude/worktrees/` und verlangt dafür den Aufruf von `EnterWorktree` (Einstellung
+`worktree.bgIsolation`, Werte `worktree` | `none`; auch Umgebungsvariable `CLAUDE_BG_ISOLATION`). Ist `EnterWorktree`
+gesperrt, bliebe ein Hintergrund-Agent sonst an diesem Wächter hängen. AIdeation gibt deshalb in den `--settings` jedes
+Agents `"worktree": {"bgIsolation": "none"}` mit – für normale Rollen und den Vollzugriff des Assistenten.
+Nachgeschlagen im lokalen CLI-Bundle (2.1.302). Test: `tool-permissions.test.ts`.
 
 ### 5. Ablehnung bei „nichts zu tun“ (`src/runner/step-evaluation.ts`, `runner-steps.ts`)
 

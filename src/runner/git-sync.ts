@@ -31,7 +31,6 @@ export {
   type OrderBranch,
   OrderBranchError,
   orderWorkInProgress,
-  removeAgentWorktrees,
   unresolvedConflicts,
 } from './git-sync/order-branch.js';
 export { ciLogExcerpt, ciWorkflowYaml, maskSecrets, parseRunState, waitForCi } from './git-sync/ci.js';

@@ -1,7 +1,7 @@
 // Auftrags-Branches: anlegen, nach jedem Agent committen, abschliessen, mergen und geänderte Dateien ermitteln.
-import { existsSync, realpathSync } from 'node:fs';
-import { readFile, rm } from 'node:fs/promises';
-import { join, sep } from 'node:path';
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { withProjectLock } from '../../core/project-lock.js';
 import { type CommandExecutor, runCommand } from '../../core/command.js';
 import {
@@ -87,69 +87,15 @@ export class OrderBranchError extends Error {
  * Scheitert git, wirft sie wie unresolvedConflicts: „keine fremden Änderungen“ darf nie aus einem Fehler folgen, sonst
  * nähme „git add -A“ fremde Dateien in den Commit des Auftrags.
  */
-export async function foreignChanges(git: GitHelpers['git']): Promise<string[]> {
+async function foreignChanges(git: GitHelpers['git']): Promise<string[]> {
   const status = await git('-c', 'core.quotePath=false', 'status', '--porcelain', '--untracked-files=all');
   if (status.exitCode !== 0) {
     throw new OrderBranchError(`Arbeitsordner nicht prüfbar (git status): ${status.output.trim().slice(-200)}`);
   }
   return status.output
     .split('\n')
-    .filter((line) => line.trim() && !untrackedClaudeFolder(line))
     .map(porcelainPath)
     .filter((path) => path && !CHANGED_FILES_IGNORED.some((prefix) => path.startsWith(prefix)));
-}
-
-/**
- * Ablage der Claude-CLI im Projekt (.claude/: Sitzungen, Einstellungen, Agent-Worktrees unter .claude/worktrees/):
- * Legt die CLI eines Agents sie an, ist das keine fremde Änderung – versionierte Dateien darin (z. B. ein
- * eingechecktes .claude/settings.json) zählen weiter. Robust gegen das Trimmen der ersten Zeile durch gitHelpers.
- */
-const CLAUDE_FOLDER = '.claude/';
-function untrackedClaudeFolder(line: string): boolean {
-  const untracked = /^\?\?\s+/.test(line);
-  return untracked && porcelainPath(line).startsWith(CLAUDE_FOLDER);
-}
-
-/** Worktrees, die eine Claude-CLI im Projekt angelegt hat (Agent-Isolation): Pfad unter .claude/worktrees/ des Ordners. */
-const AGENT_WORKTREES = join(CLAUDE_FOLDER, 'worktrees');
-
-/**
- * Räumt Git-Worktrees weg, die die Claude-CLI eines Agents unter .claude/worktrees/ angelegt hat (samt Sperre), und
- * den Ordner selbst, sofern nichts darin versioniert ist. Ohne das zählte der Ordner beim nächsten Auftrag als fremde
- * Änderung (Sprint-Pause), und „git add -A“ nähme einen Worktree als eingebettetes Repository in den Commit. Ein
- * Branch des Worktrees bleibt stehen, wenn er Commits enthält, die HEAD nicht hat (Arbeit eines Agents). Liefert die
- * entfernten Worktrees; scheitert git, bleibt alles stehen (nie „aufgeräumt“ aus einem Fehler ableiten).
- */
-export async function removeAgentWorktrees(cwd: string, rawExecute: CommandExecutor = runCommand): Promise<string[]> {
-  if (!existsSync(join(cwd, '.git'))) return [];
-  const { git } = gitHelpers(rawExecute, cwd);
-  const root = join(realpathSync(cwd), AGENT_WORKTREES);
-  const listing = await git('worktree', 'list', '--porcelain');
-  if (listing.exitCode !== 0) return [];
-  const removed: string[] = [];
-  for (const block of listing.output.split(/\n\s*\n/)) {
-    const path = /^worktree (.+)$/m.exec(block)?.[1];
-    if (!path) continue;
-    const real = existsSync(path) ? realpathSync(path) : path;
-    if (real !== root && !real.startsWith(`${root}${sep}`)) continue;
-    await git('worktree', 'unlock', path);
-    if ((await git('worktree', 'remove', '--force', '--force', path)).exitCode !== 0) continue;
-    removed.push(path);
-    const branch = /^branch refs\/heads\/(.+)$/m.exec(block)?.[1];
-    // Nur Branches der CLI (worktree-agent-…) und nur ohne eigene Commits löschen.
-    if (
-      branch?.startsWith('worktree-') &&
-      !(await git('rev-list', '--count', `HEAD..${branch}`)).output.match(/^[1-9]/)
-    ) {
-      await git('branch', '-D', branch);
-    }
-  }
-  await git('worktree', 'prune');
-  // Der Ordner selbst (auch ohne registrierten Worktree, z. B. nach einem Absturz): weg, wenn nichts darin versioniert ist.
-  if (existsSync(root) && !(await git('ls-files', '--', AGENT_WORKTREES)).output) {
-    await rm(root, { recursive: true, force: true }).catch(() => undefined);
-  }
-  return removed;
 }
 
 /**
@@ -572,9 +518,6 @@ export async function commitAgentStep(
   const { git, must } = gitHelpers(execute, cwd);
   if (!existsSync(join(cwd, '.git'))) return null;
   try {
-    // Worktrees der Agent-CLI unter .claude/worktrees/ nie in den Commit nehmen (eingebettetes Repository).
-    const worktrees = await removeAgentWorktrees(cwd, execute).catch(() => []);
-    if (worktrees.length) console.info(`[${item.id}] Agent-Worktrees entfernt: ${worktrees.join(', ')}`);
     if (branch) {
       const head = await currentBranch(git);
       if (head !== branch) {
