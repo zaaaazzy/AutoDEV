@@ -47,6 +47,20 @@ test('Projekt mit eigenem Arbeitsordner: Agents arbeiten im Worktree daneben', a
   assert.equal(git(cwd!, 'status', '--short', '--untracked-files=all'), 'M .gitignore');
 });
 
+test('Agent-Worktree: .claude/ und node_modules stehen genau einmal in info/exclude, auch nach erneutem Anlegen', async () => {
+  const folder = repository();
+  const first = await resolveAgentWorkspace(folder, '/somewhere/else', undefined, true);
+  const second = await resolveAgentWorkspace(folder, '/somewhere/else', undefined, true);
+  assert.equal(first.cwd, second.cwd);
+  const exclude = readFileSync(join(folder, '.git', 'info', 'exclude'), 'utf8').split('\n');
+  assert.equal(exclude.filter((line) => line === '.claude/').length, 1);
+  assert.equal(exclude.filter((line) => line === 'node_modules').length, 1);
+  // Was die Claude-CLI dort ablegt, sieht git im Arbeitsordner der Agents nicht mehr.
+  mkdirSync(join(second.cwd!, '.claude', 'worktrees', 'x'), { recursive: true });
+  writeFileSync(join(second.cwd!, '.claude', 'worktrees', 'x', 'a.txt'), 'a\n');
+  assert.equal(git(second.cwd!, 'status', '--short', '--untracked-files=all'), '');
+});
+
 test('npm-Workspaces: Workspace-Pakete zeigen auf den Code im Arbeitsordner, nicht in den Hauptordner', async () => {
   const folder = repository();
   mkdirSync(join(folder, 'contracts'));

@@ -261,10 +261,18 @@ export function agentRights(
   };
 }
 
-/** Einstellungen für --settings: Deny-Regeln für Geheimnisse und (falls startbar) der Wächter als PreToolUse-Hook. */
+/**
+ * Worktree-Werkzeuge der Claude-CLI (EnterWorktree legt einen Git-Worktree unter `.claude/worktrees/<name>` im
+ * Projektordner an). Für jede Rolle gesperrt, auch mit Vollzugriff: Ein solcher Ordner zählt als Änderung im
+ * Arbeitsordner der Agents, der nächste Auftrag scheitert mit „Arbeitsordner nicht sauber“ und der Sprint pausiert.
+ * Der Wächter-Hook greift hier nicht (kein Write/Bash), darum als Deny-Regel der CLI – die gilt in jedem Modus.
+ */
+export const WORKTREE_TOOLS = ['EnterWorktree', 'ExitWorktree'];
+
+/** Einstellungen für --settings: Deny-Regeln für Geheimnisse und Worktrees, (falls startbar) der Wächter als PreToolUse-Hook. */
 function agentSettings(hook: string | null, matcher: string): object {
   return {
-    permissions: { deny: SECRET_READ_DENY },
+    permissions: { deny: [...SECRET_READ_DENY, ...WORKTREE_TOOLS] },
     ...(hook ? { hooks: { PreToolUse: [{ matcher, hooks: [{ type: 'command', command: hook, timeout: 90 }] }] } } : {}),
   };
 }
