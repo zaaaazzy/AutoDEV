@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { gitHelpers } from './git-sync.js';
-import { CHANGED_FILES_IGNORED, porcelainPath } from './git-sync/git-helpers.js';
+import { CHANGED_FILES_IGNORED, porcelainPath, untrackedClaudeEntry } from './git-sync/git-helpers.js';
 
 /**
  * Git-Zustand der Projektordner, wie ihn der Worker jede Minute sieht: Branch, offene Änderungen und wie weit das
@@ -94,8 +94,10 @@ export async function readFolder(
     '--porcelain',
     '--untracked-files=normal',
   );
-  const lines = status.exitCode === 0 ? status.output.split('\n').filter(Boolean) : [];
-  // Testberichte und Agent-Ablage zählen nicht (wie bei der Prüfung vor jedem Auftrag).
+  // Testberichte, Agent-Ablage und unversionierte Dateien der Claude-CLI zählen nicht (wie bei der Prüfung vor jedem
+  // Auftrag).
+  const lines =
+    status.exitCode === 0 ? status.output.split('\n').filter((line) => line && !untrackedClaudeEntry(line)) : [];
   const counted = (path: string): boolean => !CHANGED_FILES_IGNORED.some((prefix) => path.startsWith(prefix));
   const untracked = lines
     .filter((line) => line.startsWith('??'))

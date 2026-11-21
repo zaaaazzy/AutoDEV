@@ -14,6 +14,7 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { sandboxMode, usesSandbox } from '../core/sandbox.js';
+import { CLAUDE_LOCAL_DIRECTORY } from './git-sync/git-helpers.js';
 import { gitEnvironment } from './project-command.js';
 
 /**
@@ -125,18 +126,25 @@ export function linkDependencies(folder: string, workspace: string): void {
 }
 
 /**
- * Verlinkte node_modules sind Symlinks; ein `node_modules/` in .gitignore greift dafür nicht, und `git add -A` der
- * WIP-Commits würde sie einchecken. Deshalb lokal (info/exclude, gilt für alle Worktrees) ausschliessen.
+ * Lokale Ausschlüsse des Agent-Worktrees (info/exclude, gilt für alle Worktrees des Repositories), idempotent:
+ * - `node_modules`: Verlinkte node_modules sind Symlinks; ein `node_modules/` in .gitignore greift dafür nicht, und
+ *   `git add -A` der WIP-Commits würde sie einchecken.
+ * - `.claude/`: Ablage der Claude-CLI (Einstellungen, Worktrees ihrer Worktree-Funktion). Unversioniert zählte sie
+ *   als fremde Änderung, der nächste Auftrag scheiterte mit „Arbeitsordner nicht sauber“ und der Sprint pausierte.
  */
-export async function excludeLinkedDependencies(workspace: string, execute: CommandExecutor): Promise<void> {
+export const WORKSPACE_EXCLUDES = ['node_modules', CLAUDE_LOCAL_DIRECTORY];
+
+export async function excludeLocalEntries(workspace: string, execute: CommandExecutor): Promise<void> {
   const result = await execute(['git', 'rev-parse', '--git-common-dir'], workspace, { env: gitEnvironment() });
   if (result.exitCode !== 0) return;
   const common = result.output.trim().split('\n').pop() ?? '';
   const file = join(isAbsolute(common) ? common : join(workspace, common), 'info', 'exclude');
   const lines = existsSync(file) ? readFileSync(file, 'utf8').split('\n') : [];
-  if (lines.some((line) => line.trim() === 'node_modules')) return;
+  const present = new Set(lines.map((line) => line.trim()));
+  const missing = WORKSPACE_EXCLUDES.filter((entry) => !present.has(entry));
+  if (!missing.length) return;
   mkdirSync(dirname(file), { recursive: true });
-  appendFileSync(file, `${lines.length && lines.at(-1) !== '' ? '\n' : ''}node_modules\n`);
+  appendFileSync(file, `${lines.length && lines.at(-1) !== '' ? '\n' : ''}${missing.join('\n')}\n`);
 }
 
 /** Git-Worktree neben dem Projektordner anlegen (falls nötig) und Abhängigkeiten verlinken. */
@@ -159,7 +167,7 @@ export async function ensureWorktree(
   }
   try {
     linkDependencies(folder, workspace);
-    await excludeLinkedDependencies(workspace, execute);
+    await excludeLocalEntries(workspace, execute);
   } catch {
     // Ohne verlinkte Abhängigkeiten installieren die Agents sie bei Bedarf selbst.
   }

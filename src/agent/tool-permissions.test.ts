@@ -541,6 +541,21 @@ test('withAgentPermissions: voller Zugriff des Assistenten ohne Wächter – nur
   assert.equal(settings.hooks.PreToolUse[0]!.matcher, 'Read|Grep|Glob|NotebookRead');
 });
 
+test('withAgentPermissions: Worktree-Werkzeuge der CLI sind für jede Rolle gesperrt, auch mit Vollzugriff', () => {
+  const settingsOf = (command: string[]): { permissions: { deny: string[] } } =>
+    JSON.parse(command[command.indexOf('--settings') + 1] ?? '{}') as { permissions: { deny: string[] } };
+  for (const [command, role] of [
+    [CLAUDE, 'developer'],
+    [CLAUDE, 'reviewer'],
+    [CLAUDE, 'visionary'],
+    [['claude', '--dangerously-skip-permissions', '-p'], 'assistant'],
+  ] as const) {
+    const { deny } = settingsOf(withAgentPermissions([...command], role, all, null)).permissions;
+    assert.ok(deny.includes('EnterWorktree'), `${role}: EnterWorktree`);
+    assert.ok(deny.includes('ExitWorktree'), `${role}: ExitWorktree`);
+  }
+});
+
 test('withAgentPermissions: Visionär (nur lesen) ohne Datei-Werkzeuge und ohne Shell – trotz Zuweisung', () => {
   const command = withAgentPermissions(CLAUDE, 'visionary', all, ['files', 'Bash(git status:*)', 'logs']);
   assert.deepEqual(option(command, '--disallowedTools')?.split(','), [
