@@ -1,4 +1,5 @@
 import type { AgentPhase } from '../../core/models.js';
+import { splitShellLine } from '../../../../../src/core/shell-words.js';
 
 export const AGENT_ROLES = [
   { value: 'author', label: 'Auftragsautor' },
@@ -84,7 +85,7 @@ export function rightsTexts(role: string | null | undefined): { files: string; c
   };
 }
 
-/** Leerer Text ergibt null (eingebauter Agent), `[...]` wird als JSON-Array gelesen, sonst an Leerzeichen getrennt. */
+/** Leerer Text ergibt null (eingebauter Agent), `[...]` wird als JSON-Array gelesen, sonst wie in der Shell zerlegt. */
 export function parseCommand(text: string): string[] | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
@@ -93,7 +94,7 @@ export function parseCommand(text: string): string[] | null {
     if (Array.isArray(value) && value.every((part: unknown) => typeof part === 'string')) return value;
     throw new Error('Der Befehl im JSON-Format muss ein Array aus Textwerten sein.');
   }
-  return trimmed.split(/\s+/);
+  return splitShellLine(trimmed);
 }
 
 export interface ModelPreset {

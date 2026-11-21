@@ -106,6 +106,13 @@ test('Projekte auf PostgreSQL: anlegen, Einstellungen, Mandantentrennung, lösch
           [{ repository: '/etc' }, /./],
           [{ definitionOfDone: Array(21).fill('Punkt') }, /höchstens 20/],
           [{ testCommands: ['npm', 'test'] }, /ein Befehl pro Zeile/],
+          [
+            { testCommands: 'npm test\nsh -c "npm run build' },
+            /Testbefehle, Zeile 2: Anführungszeichen nicht geschlossen/,
+          ],
+          [{ orderTestCommands: "echo 'offen" }, /Testbefehle je Auftrag, Zeile 1: Anführungszeichen/],
+          [{ deployCommands: 'docker compose up\n\nsh -c "x' }, /Deploy-Befehle, Zeile 3: Anführungszeichen/],
+          [{ reviewCommand: 'sh -c "x' }, /Review-Befehl: Anführungszeichen nicht geschlossen/],
           [{ deployCommands: Array(11).fill('x').join('\n') }, /höchstens 10/],
           [{ reviewMode: 'manchmal' }, /Review-Freigabe/],
           [{ reviewUrl: 'ftp://x' }, /Review-Adresse/],
@@ -136,9 +143,11 @@ test('Projekte auf PostgreSQL: anlegen, Einstellungen, Mandantentrennung, lösch
           gitRemote: 'https://github.com/ana/alpha.git',
           githubMode: 'issues',
           definitionOfDone: '- Tests grün\n* Doku aktualisiert\n\n',
-          testCommands: 'npm test\n\nnpm run lint  -- --fix',
+          testCommands:
+            'npm test\n\nnpm run lint  -- --fix\nsh -c "if [ -f package.json ]; then npm test; else echo \\"kein Code\\"; fi"',
           orderTestCommands: '',
-          deployCommands: 'docker compose up -d',
+          deployCommands: "docker compose up -d\nsh -c 'npm run build && npm test'",
+          reviewCommand: 'sh review.sh "mit Leerzeichen"',
           reviewMode: 'ui',
           sprintMode: 'autopilot',
           sprintCapacityHours: 12.5,
@@ -153,9 +162,14 @@ test('Projekte auf PostgreSQL: anlegen, Einstellungen, Mandantentrennung, lösch
         assert.deepEqual(project.testCommands, [
           ['npm', 'test'],
           ['npm', 'run', 'lint', '--', '--fix'],
+          ['sh', '-c', 'if [ -f package.json ]; then npm test; else echo "kein Code"; fi'],
         ]);
         assert.equal(project.orderTestCommands, null);
-        assert.deepEqual(project.deployCommands, [['docker', 'compose', 'up', '-d']]);
+        assert.deepEqual(project.deployCommands, [
+          ['docker', 'compose', 'up', '-d'],
+          ['sh', '-c', 'npm run build && npm test'],
+        ]);
+        assert.deepEqual(project.reviewCommand, ['sh', 'review.sh', 'mit Leerzeichen']);
         assert.equal(project.githubMode, 'issues');
         assert.equal(project.githubAuthCheckedAt, null, 'neuer Modus wird neu geprüft');
         assert.equal(project.description, 'Shop');

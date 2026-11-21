@@ -145,7 +145,8 @@
             </label>
             <p class="muted wide">
               Die Befehle je Auftrag laufen im Tester-Schritt: &#123;tests&#125; = Testdateien zu den geänderten
-              Dateien, &#123;files&#125; = geänderte Dateien; leer = wie beim Live schalten.
+              Dateien, &#123;files&#125; = geänderte Dateien; leer = wie beim Live schalten. Argumente mit Leerzeichen
+              in Anführungszeichen setzen, z. B. <code>sh -c "npm run build &amp;&amp; npm test"</code>.
             </p>
             <label class="wide check">
               <input type="checkbox" name="autoBugfix" [(ngModel)]="settings.autoBugfix" />
@@ -198,7 +199,8 @@
               ></textarea>
             </label>
             <p class="muted wide">
-              Ein Befehl pro Zeile, im Projektordner. So laufen Container immer mit dem neuesten Stand.
+              Ein Befehl pro Zeile, im Projektordner. So laufen Container immer mit dem neuesten Stand. Argumente mit
+              Leerzeichen in Anführungszeichen setzen, z. B. <code>sh -c "npm run build &amp;&amp; npm test"</code>.
               @if (project.deployStatus) {
                 Letzter Lauf: {{ project.deployStatus }}
               }
