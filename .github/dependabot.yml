@@ -9,6 +9,15 @@ updates:
         patterns:
           - '@angular/*'
           - '@angular-devkit/*'
+    # Major-Updates brechen den Build (TypeScript 7 = nativer Port, von Angular 22 nicht unterstützt;
+    # @tanstack/angular-table 9 und Mermaid 12 ändern die API). Sie kommen bewusst, nicht per Dependabot.
+    ignore:
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@tanstack/angular-table'
+        update-types: ['version-update:semver-major']
+      - dependency-name: mermaid
+        update-types: ['version-update:semver-major']
   - package-ecosystem: docker
     directories:
       - /
