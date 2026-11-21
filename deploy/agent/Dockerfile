@@ -27,7 +27,7 @@ FROM node:26.13.1-bookworm-slim AS node
 FROM docker:29-cli AS dockercli
 
 # Browser und ihre Systembibliotheken für Playwright-Tests im Projekt.
-FROM mcr.microsoft.com/playwright:v1.64.1-noble
+FROM mcr.microsoft.com/playwright:v1.65.1-noble
 # Node 22 in derselben Version wie Worker und API (.nvmrc), unabhängig von der Node-Version des Basis-Images.
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
