@@ -19,6 +19,7 @@ import {
   reviewPort,
   reviewSlotDatabase,
   reviewUrl,
+  runsAsRoot,
 } from './review-slots.js';
 import { orderOf, parseSprintLog } from './sprint-commits.js';
 
@@ -107,6 +108,10 @@ async function startSlot(options: {
   databases: { reviewUrl: string | null; mainUrl: string | null };
   slug?: string;
   projectDatabaseUrl?: string | null;
+  /** Spalten review_command, review_port, review_health_path, review_dockerfile des Projekts. */
+  review?: { command?: string[]; port?: number | null; healthPath?: string | null; dockerfile?: string | null };
+  /** USER des projekteigenen Images (docker image inspect) und ob das Dockerfile im Stand liegt. */
+  image?: { user?: string; dockerfileExists?: boolean; buildExit?: number };
 }): Promise<{ commands: string[][]; updates: unknown[][]; run: string[] | undefined }> {
   const commands: string[][] = [];
   const updates: unknown[][] = [];
@@ -130,7 +135,10 @@ async function startSlot(options: {
           rows: [
             {
               folder: '/projekte/aideation',
-              command: ['sh', '/source/deploy/review/aideation-review.sh'],
+              command: options.review?.command ?? ['sh /source/deploy/review/aideation-review.sh'],
+              port: options.review?.port ?? null,
+              healthPath: options.review?.healthPath ?? null,
+              dockerfile: options.review?.dockerfile ?? null,
               databaseUrl: options.projectDatabaseUrl ?? null,
             },
           ],
@@ -142,6 +150,14 @@ async function startSlot(options: {
   const execute: CommandExecutor = async (command) => {
     commands.push(command);
     const output = command.includes('--git-common-dir') ? '/projekte/aideation/.git\n' : '';
+    if (command[1] === 'cat-file')
+      return { exitCode: options.image?.dockerfileExists === false ? 1 : 0, durationMs: 1, output };
+    if (command[1] === 'build' && command.includes('-f')) {
+      return { exitCode: options.image?.buildExit ?? 0, durationMs: 1, output: 'ERROR: failed to solve: kaputt' };
+    }
+    if (command[1] === 'image' && command[2] === 'inspect') {
+      return { exitCode: 0, durationMs: 1, output: `${options.image?.user ?? 'app'}\n` };
+    }
     return { exitCode: 0, durationMs: 1, output };
   };
   await new ReviewSlots(pool, '/install', execute, async () => false, options.databases).sync();
@@ -340,10 +356,10 @@ const MIGRATION_LOGS = [
  * `running=false` und das Protokoll `logs`. Updates des Workers landen im Slot-Objekt, so lässt sich mehrmals
  * synchronisieren (zweiter Start, erneutes Scheitern, Erreichbarkeit).
  */
-function exitedSlot(logs: string, options: { databaseUrl?: string | null } = {}) {
+function exitedSlot(logs: string, options: { databaseUrl?: string | null; healthPath?: string | null } = {}) {
   const commands: string[][] = [];
   const updates: Record<string, unknown>[] = [];
-  const state = { running: false, reachable: false, logs };
+  const state = { running: false, reachable: false, logs, fetched: [] as string[] };
   const slot: Record<string, unknown> = {
     slot: 2,
     enabled: true,
@@ -373,7 +389,8 @@ function exitedSlot(logs: string, options: { databaseUrl?: string | null } = {})
           rows: [
             {
               folder: '/projekte/mainty',
-              command: ['sh', '/work/scripts/review-live.sh'],
+              command: ['sh /work/scripts/review-live.sh'],
+              healthPath: options.healthPath ?? null,
               databaseUrl:
                 options.databaseUrl === undefined
                   ? 'postgresql://mainty:pw@localhost:5432/mainty'
@@ -392,10 +409,16 @@ function exitedSlot(logs: string, options: { databaseUrl?: string | null } = {})
     if (command[1] === 'logs') return { exitCode: 0, durationMs: 1, output: state.logs };
     return { exitCode: 0, durationMs: 1, output: '' };
   };
-  const slots = new ReviewSlots(pool, '/install', execute, async () => state.reachable, {
-    reviewUrl: REVIEW_URL,
-    mainUrl: MAIN_URL,
-  });
+  const slots = new ReviewSlots(
+    pool,
+    '/install',
+    execute,
+    async (url) => {
+      state.fetched.push(url);
+      return state.reachable;
+    },
+    { reviewUrl: REVIEW_URL, mainUrl: MAIN_URL },
+  );
   const scripts = () =>
     commands.filter((command) => command.includes('postgres:17-alpine')).map((command) => command.at(-1));
   const runs = () => commands.filter((command) => command[1] === 'run' && command[2] === '-d');
@@ -475,4 +498,116 @@ test('Review-Container: andere Ursachen (npm, Port) und Projekte ohne Datenbank-
   await died.slots.sync();
   assert.equal(died.slot.status, 'failed');
   assert.equal(died.runs().length, 0);
+});
+
+const DATABASES = { reviewUrl: REVIEW_URL, mainUrl: MAIN_URL };
+
+/** Werte der Option `flag` in den docker-run-Argumenten. */
+const argsOf = (run: readonly string[] | undefined, flag: string): string[] =>
+  (run ?? []).flatMap((arg, index) => (run?.[index - 1] === flag ? [arg] : []));
+
+test('Review-Container: Standardwerte – Port 4200 im Container, Bereitschaft über „/“, Standard-Image', async () => {
+  const { run, commands } = await startSlot({ databases: DATABASES });
+  assert.deepEqual(argsOf(run, '-p'), ['127.0.0.1:4201:4200']);
+  assert.ok(argsOf(run, '-e').includes('REVIEW_FRONTEND_PORT=4200'));
+  assert.equal(run?.at(-1), 'aideation-review:latest');
+  assert.ok(!run?.includes('--entrypoint'), 'Standard-Image startet über seinen Entrypoint');
+  assert.ok(!commands.some((command) => command[1] === 'cat-file'), 'kein projekteigenes Image');
+});
+
+test('Review-Container: Port je Projekt wird gemappt und als REVIEW_FRONTEND_PORT gesetzt', async () => {
+  const { run } = await startSlot({ databases: DATABASES, review: { port: 8080 } });
+  assert.deepEqual(argsOf(run, '-p'), ['127.0.0.1:4201:8080']);
+  const env = argsOf(run, '-e');
+  assert.ok(env.includes('REVIEW_FRONTEND_PORT=8080'));
+  assert.ok(env.includes('REVIEW_HOST=0.0.0.0'));
+  assert.ok(env.includes('REVIEW_PUBLIC_URL=http://localhost:4201'));
+});
+
+test('Review-Container: mehrere Befehle laufen als Zeilen unter sh -e, /source/ wird /work/', async () => {
+  const { run } = await startSlot({
+    databases: DATABASES,
+    review: { command: ['npm run build', 'sh /source/scripts/serve.sh --port $REVIEW_FRONTEND_PORT'] },
+  });
+  assert.ok(
+    argsOf(run, '-e').includes('REVIEW_COMMAND=npm run build\nsh /work/scripts/serve.sh --port $REVIEW_FRONTEND_PORT'),
+  );
+});
+
+test('Review-Container: ohne Review-Befehle scheitert der Start mit Hinweis auf die Einstellungen', async () => {
+  const { commands, updates } = await startSlot({ databases: DATABASES, review: { command: [] } });
+  assert.ok(!commands.some((command) => command[0] === 'docker'));
+  assert.match(failure(updates), /keine Review-Befehle eingestellt/);
+});
+
+test('Review-Container: Bereitschaft über den Health-Pfad des Projekts', async () => {
+  const box = exitedSlot('', { healthPath: '/api/health' });
+  box.state.running = true;
+  box.state.reachable = true;
+  await box.slots.sync();
+  assert.deepEqual(box.state.fetched, ['http://localhost:4202/api/health']);
+  assert.equal(box.slot.status, 'running');
+  const plain = exitedSlot('');
+  plain.state.running = true;
+  await plain.slots.sync();
+  assert.deepEqual(plain.state.fetched, ['http://localhost:4202/']);
+});
+
+test('Review-Container mit eigenem Dockerfile: Image aus dem Stand bauen, ohne Git-Objekte und npm-Cache starten', async () => {
+  const { run, commands } = await startSlot({
+    databases: DATABASES,
+    slug: 'flask-app',
+    review: { command: ['python app.py'], port: 5000, dockerfile: 'deploy/review/Dockerfile' },
+  });
+  const commit = 'c'.repeat(40);
+  const catFile = commands.find((command) => command[1] === 'cat-file');
+  assert.deepEqual(catFile, ['git', 'cat-file', '-e', `${commit}:deploy/review/Dockerfile`]);
+  const archive = commands.find((command) => command[1] === 'archive');
+  assert.ok(archive?.includes(commit), 'git archive des Stands als Build-Kontext');
+  const build = commands.find((command) => command[1] === 'build' && command.includes('-f'));
+  assert.ok(build, 'docker build mit dem Dockerfile aus dem Stand');
+  assert.equal(build[build.indexOf('-t') + 1], 'aideation-review-flask-app');
+  assert.match(build[build.indexOf('-f') + 1] ?? '', /\/stand\/deploy\/review\/Dockerfile$/);
+  assert.ok(
+    commands.some((command) => command[1] === 'image' && command[2] === 'inspect'),
+    'USER wird geprüft',
+  );
+  assert.ok(run, 'docker run');
+  assert.deepEqual(argsOf(run, '-p'), ['127.0.0.1:4201:5000']);
+  assert.deepEqual(argsOf(run, '-v'), [], 'weder Git-Objekte noch npm-Cache');
+  assert.ok(!run.includes('--user'), 'Benutzer kommt aus dem Image');
+  assert.ok(run.includes('no-new-privileges'));
+  assert.deepEqual(argsOf(run, '--entrypoint'), ['sh']);
+  assert.deepEqual(run.slice(-3), ['aideation-review-flask-app', '-ec', 'python app.py']);
+  assert.deepEqual(argsOf(run, '-w'), ['/work']);
+});
+
+test('Review-Container mit eigenem Dockerfile: fehlendes Dockerfile, Build-Fehler und root werden klar gemeldet', async () => {
+  const review = { command: ['python app.py'], dockerfile: 'deploy/review/Dockerfile' };
+  const missing = await startSlot({ databases: DATABASES, review, image: { dockerfileExists: false } });
+  assert.match(failure(missing.updates), /Review-Dockerfile „deploy\/review\/Dockerfile“ fehlt im Stand cccccccc/);
+  assert.equal(missing.run, undefined);
+
+  const broken = await startSlot({ databases: DATABASES, review, image: { buildExit: 1 } });
+  assert.match(
+    failure(broken.updates),
+    /Review-Image aus deploy\/review\/Dockerfile nicht gebaut:\nERROR: failed to solve: kaputt/,
+  );
+  assert.equal(broken.run, undefined);
+
+  for (const user of ['', 'root', '0', 'root:root', '0:0']) {
+    const asRoot = await startSlot({ databases: DATABASES, review, image: { user } });
+    assert.match(failure(asRoot.updates), /läuft als root/, JSON.stringify(user));
+    assert.equal(asRoot.run, undefined);
+  }
+
+  const traversal = await startSlot({ databases: DATABASES, review: { ...review, dockerfile: '../Dockerfile' } });
+  assert.match(failure(traversal.updates), /relativ zum Projekt/);
+  assert.ok(!traversal.commands.some((command) => command[0] === 'docker'), 'kein Docker-Aufruf');
+});
+
+test('USER eines Images: leer, root oder UID 0 heisst root', () => {
+  for (const root of ['', ' ', 'root', '0', 'root:root', '0:0']) assert.equal(runsAsRoot(root), true, root);
+  for (const user of ['node', 'app:app', '1000', '1000:1000', 'www-data\n'])
+    assert.equal(runsAsRoot(user), false, user);
 });

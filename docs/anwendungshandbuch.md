@@ -512,7 +512,7 @@ dürfen keine Regeln für `.env`, `.ssh`, `.aws`, `.gnupg`, DevLog oder AIdeatio
 | --- | --- |
 | `.env` (Ordner `source`) | Zugänge, `DEV_LOG_SECRET_KEY`, Domain, Projektbereich, Backup-Optionen |
 | `~/.config/aideation/worker.env` | Worker auf dem Host (Rechte 600) |
-| Projekt-Einstellungen | Testbefehle, Review-Befehl, Vorschau-Adresse, Regeln für Agents, `review_mode`, `auto_bugfix` |
+| Projekt-Einstellungen | Testbefehle, Review-Befehle (Port, Health-Pfad, Dockerfile des Review-Containers), Vorschau-Adresse, Regeln für Agents, `review_mode`, `auto_bugfix` |
 | Einstellungen → Agents | Modell, Befehl (nur Administration), Rolle, Rechte, Schrittlimit |
 | Einstellungen → Budget | Limits je Tag, Sprint und Auftrag (Tokens oder USD); Modell-Routing |
 | Wartungs-Jobs (`GET`/`PATCH /api/scheduled-jobs`) | Takt, Zeitlimit und Ein-/Ausschalten je Job |

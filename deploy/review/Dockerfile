@@ -1,7 +1,8 @@
 # Review-Container: startet einen beliebigen Commit eines Projekts zum Ansehen (eigener Port, eigene Datenbank).
 # Eingebunden sind nur die Git-Objekte des Projekts (schreibgeschützt unter /source/objects, ohne Arbeitsordner und
 # .env); der gewählte Stand wird nach /work ausgecheckt, Abhängigkeiten installiert (Linux-Binärdateien, daher nicht
-# die des Macs) und der Review-Befehl gestartet – als Benutzer „node“, nicht als root.
+# die des Macs) und die Review-Befehle gestartet – als Benutzer „node“, nicht als root. Projekte mit anderer Laufzeit
+# hinterlegen ein eigenes Dockerfile (Einstellung „Review-Dockerfile“, siehe docs/betrieb.md).
 FROM node:26.13.1-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
