@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { type CommandExecutor, redactOutput } from '../../core/command.js';
 import { GIT_TIMEOUT_MS, type GitHelpers, SECRET_CONTENT } from './git-helpers.js';
 import { gitEnvironment, runProjectCommand } from '../project-command.js';
+import { skippedTestCommandsNote, type TestCommandSet } from '../runner-selection.js';
 import { defined } from '../../core/defined.js';
 
 // Projekttests können den kompletten Oberflächentest mit Playwright enthalten (Desktop und Handy).
@@ -246,13 +247,22 @@ export function loadErrorLine(output: string): string | null {
   );
 }
 
-/** Führt die Testbefehle des Projekts aus; wirft mit einer Kurzfassung (rote Schritte, Befunde), sobald einer fehlschlägt. */
+/**
+ * Führt die Testbefehle des Projekts aus; wirft mit einer Kurzfassung (rote Schritte, Befunde), sobald einer fehlschlägt.
+ * Die Standardwerte entfallen ohne package.json im Ordner (geprüft erst hier, nach Checkout bzw. Merge).
+ */
 export async function runTestGate(
   execute: CommandExecutor,
   cwd: string,
-  commands: string[][],
+  set: TestCommandSet,
   log: string[],
 ): Promise<void> {
+  const note = skippedTestCommandsNote(set, cwd);
+  if (note) {
+    log.push(`Test-Gate ${note}.`);
+    return;
+  }
+  const { commands } = set;
   for (const command of commands) {
     // Nur mit dem gefilterten Environment: Projekttests sollen weder AIdeation-Zugänge sehen noch vom Projektbereich
     // des Workers abhängen.

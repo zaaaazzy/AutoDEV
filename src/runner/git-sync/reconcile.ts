@@ -13,6 +13,7 @@ import {
   type GitHelpers,
   MAIN_BRANCH,
   porcelainPath,
+  untrackedClaudeEntry,
   sprintBranchOf,
   stageAll,
 } from './git-helpers.js';
@@ -71,7 +72,7 @@ async function openChanges(git: GitHelpers['git']): Promise<string[]> {
   if (status.exitCode !== 0) return [];
   return status.output
     .split('\n')
-    .filter(Boolean)
+    .filter((line) => line && !untrackedClaudeEntry(line))
     .map(porcelainPath)
     .filter((path) => path && !CHANGED_FILES_IGNORED.some((prefix) => path.startsWith(prefix)));
 }

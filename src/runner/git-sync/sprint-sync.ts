@@ -5,7 +5,7 @@ import { type CommandExecutor, runCommand } from '../../core/command.js';
 import { isShuttingDown } from '../../core/shutdown.js';
 import { createGithubAdapter, githubRepo } from '../github.js';
 import type { HosterAdapter } from '../hoster.js';
-import { loadTestCommands } from '../runner-selection.js';
+import { loadTestCommandSet, skippedTestCommandsNote, type TestCommandSet } from '../runner-selection.js';
 import { requestRestart } from '../system-restart.js';
 import {
   BOT_IDENTITY,
@@ -134,7 +134,7 @@ async function pushSprint(
   gate: (log: string[]) => Promise<void>,
   ci: {
     cwd: string;
-    commands: string[][];
+    commands: TestCommandSet;
     execute: CommandExecutor;
     /** Führt die Testbefehle des Gates in einem Ordner aus (Testcontainer der Sandbox); Standard: execute. */
     testExecutor?: (folder: string) => Promise<CommandExecutor>;
@@ -189,7 +189,11 @@ async function pushSprint(
       log.push(`Aktuellen ${MAIN_BRANCH} in ${head} übernommen.`);
     }
   }
-  if (sprint.remote && /github\.com/.test(sprint.remote)) await ensureCiWorkflow(ci.cwd, ci.commands, helpers, log);
+  if (sprint.remote && /github\.com/.test(sprint.remote)) {
+    // Ohne package.json keine npm-Schritte in die CI schreiben (sie wären dort genauso rot wie im Gate).
+    const ciCommands = skippedTestCommandsNote(ci.commands, ci.cwd) ? [] : ci.commands.commands;
+    await ensureCiWorkflow(ci.cwd, ciCommands, helpers, log);
+  }
   await gate(log);
   let current = await must('rev-parse', '--abbrev-ref', 'HEAD');
   // PR-Modus: Der Push öffnet oder aktualisiert einen Pull Request (Abschluss wie Nachbesserung im Review). Vorher die
@@ -330,7 +334,7 @@ export async function mergeIntoCheckedOutMain(
   folder: string,
   branch: string,
   sprintName: string,
-  commands: string[][],
+  commands: TestCommandSet,
   log: string[],
   /** Testbefehle des Gates (Testcontainer der Sandbox); Git läuft weiter über execute auf dem Host. */
   testExecute: CommandExecutor = execute,
@@ -481,7 +485,7 @@ export async function syncSprintToGit(
     if (sprint.remote) {
       await configureOrigin(helpers.git, helpers.must, sprint.remote);
     }
-    const commands = await loadTestCommands(pool, project);
+    const commands = await loadTestCommandSet(pool, project);
     const restartAfterSprint =
       (
         await pool

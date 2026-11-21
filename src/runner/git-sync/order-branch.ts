@@ -17,6 +17,7 @@ import {
   MAIN_BRANCH,
   porcelainPath,
   refreshSprintFromMain,
+  removeNestedClaudeWorktrees,
   setAsideFiles,
   trackedChanges,
   slugify,
@@ -24,6 +25,7 @@ import {
   sprintBranchOf,
   stageAll,
   taskCommitMessage,
+  untrackedClaudeEntry,
 } from './git-helpers.js';
 
 /** Branch eines Auftrags, z. B. auftrag/1a2b3c4d-login-seite. */
@@ -83,9 +85,9 @@ export class OrderBranchError extends Error {
 }
 
 /**
- * Offene Änderungen im Arbeitsordner, die zu keinem Auftrag gehören (Testberichte und Agent-Ablage ausgenommen).
- * Scheitert git, wirft sie wie unresolvedConflicts: „keine fremden Änderungen“ darf nie aus einem Fehler folgen, sonst
- * nähme „git add -A“ fremde Dateien in den Commit des Auftrags.
+ * Offene Änderungen im Arbeitsordner, die zu keinem Auftrag gehören (Testberichte, Agent-Ablage und unversionierte
+ * Dateien der Claude-CLI unter .claude/ ausgenommen). Scheitert git, wirft sie wie unresolvedConflicts: „keine fremden
+ * Änderungen“ darf nie aus einem Fehler folgen, sonst nähme „git add -A“ fremde Dateien in den Commit des Auftrags.
  */
 async function foreignChanges(git: GitHelpers['git']): Promise<string[]> {
   const status = await git('-c', 'core.quotePath=false', 'status', '--porcelain', '--untracked-files=all');
@@ -94,6 +96,7 @@ async function foreignChanges(git: GitHelpers['git']): Promise<string[]> {
   }
   return status.output
     .split('\n')
+    .filter((line) => !untrackedClaudeEntry(line))
     .map(porcelainPath)
     .filter((path) => path && !CHANGED_FILES_IGNORED.some((prefix) => path.startsWith(prefix)));
 }
@@ -158,6 +161,11 @@ export async function enterOrderBranch(
   if (!existsSync(join(cwd, '.git'))) return null;
   try {
     await ensureRepository(git, must, cwd);
+    // Worktrees der Claude-CLI im Projektordner (.claude/worktrees/<name>) hinterlässt ein Agent trotz Sperre höchstens
+    // in Altfällen; sie halten einen Branch besetzt und gälten als fremder Eintrag – weg damit, bevor geprüft wird.
+    for (const path of await removeNestedClaudeWorktrees(git, cwd)) {
+      console.warn(`[${item.id}] Worktree der Claude-CLI im Arbeitsordner entfernt: ${path}`);
+    }
     const branch = orderBranch(item);
     if ((await currentBranch(git)) === branch) {
       // Nach einem Abbruch steht der Ordner noch auf dem Auftrags-Branch (samt offener Änderungen): fortsetzen.

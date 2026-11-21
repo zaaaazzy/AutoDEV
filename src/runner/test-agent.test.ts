@@ -81,6 +81,41 @@ test('runs a command and persists a sanitized test run and result', async () => 
   }
 });
 
+test('übersprungene Schritte tragen die mitgegebene Begründung als Ausgabe und der Lauf gilt als bestanden', async () => {
+  const writes: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      writes.push({ sql, values });
+      if (sql.includes('INSERT INTO test_runs')) return { rows: [{ id: values[0] }] };
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+  await runTestAgent(
+    {
+      project: 'test-project',
+      cwd: process.cwd(),
+      commands: [
+        ['npm', 'run', 'build'],
+        ['npm', 'test'],
+      ],
+      skipped: [true, true],
+      skipNote: 'übersprungen – keine package.json im Projekt',
+    },
+    pool,
+  );
+  const steps = writes.filter(({ sql }) => sql.includes('UPDATE test_run_steps'));
+  assert.deepEqual(
+    steps.map(({ values }) => [values[2], values[5]]),
+    [
+      ['passed', 'übersprungen – keine package.json im Projekt'],
+      ['passed', 'übersprungen – keine package.json im Projekt'],
+    ],
+  );
+  const finished = writes.find(({ sql }) => sql.includes('SET status = $2, completed_at = NOW()'));
+  assert.ok(finished);
+  assert.equal(finished.values[1], 'passed');
+});
+
 test('Playwright-Dateien laufen mit playwright test statt im Node-Testrunner', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'route-pw-'));
   mkdirSync(join(cwd, 'e2e'));

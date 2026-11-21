@@ -1,7 +1,7 @@
 // Git-Grundlagen: Befehlsausführung, Remotes, Branch-Namen, Zugangsdaten-Schutz und Sprint-Branch.
 import { existsSync, realpathSync } from 'node:fs';
 import { appendFile, mkdir, readFile, realpath, unlink } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { createProjectDirectory, isInside, readProjectFile, writeNewProjectFile } from '../../core/project-paths.js';
 import { withProjectLock } from '../../core/project-lock.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../../core/command.js';
@@ -73,9 +73,18 @@ export function sprintBranchOf(sprint: SprintRef | string): string {
 
 export const MAIN_BRANCH = 'main';
 
+/**
+ * Ablage der Claude-CLI im Projektordner (Einstellungen, `worktrees/<name>` ihrer Worktree-Funktion). Was dort noch
+ * nicht versioniert ist, gehört keinem Auftrag und darf weder als fremde Änderung zählen noch in einen Commit geraten.
+ */
+export const CLAUDE_LOCAL_DIRECTORY = '.claude/';
+/** Dort legt die Claude-CLI Git-Worktrees an (relativ zum Arbeitsordner, mit „/“). */
+export const CLAUDE_WORKTREES_DIRECTORY = `${CLAUDE_LOCAL_DIRECTORY}worktrees/`;
+
 const INTERNAL_EXCLUDES = [
   '.dev-log-backups/',
   '.dev-log/',
+  CLAUDE_LOCAL_DIRECTORY,
   '.env',
   '.env.*',
   // Typische Zugangsdaten: gelten nur für noch nicht versionierte Dateien, bereits versionierte bleiben unberührt.
@@ -563,6 +572,46 @@ export function porcelainPath(line: string): string {
     .replace(/^[ MADRCUT?!]{1,2}\s+/, '')
     .replace(/^.* -> /, '')
     .trim();
+}
+
+/**
+ * Noch nicht versionierter Eintrag unter .claude/ in einer Zeile von `git status --porcelain`. Solche Einträge (etwa
+ * ein Worktree der Claude-CLI, der trotz Sperre entstand oder vor dem Ausschluss in info/exclude da war) gehören
+ * keinem Auftrag und zählen nicht als fremde Änderung. Versionierte .claude/-Dateien bleiben davon unberührt.
+ */
+export function untrackedClaudeEntry(line: string): boolean {
+  return line.startsWith('??') && porcelainPath(line).startsWith(CLAUDE_LOCAL_DIRECTORY);
+}
+
+/**
+ * Liegt `path` (ein Eintrag aus `git worktree list`) unter .claude/worktrees/ des Arbeitsordners `cwd`? Nur dann darf
+ * er entfernt werden – nie der Arbeitsordner selbst, nie der Ordner der Menschen oder ein anderer Worktree daneben.
+ */
+export function nestedClaudeWorktree(cwd: string, path: string): boolean {
+  const real = (folder: string): string => (existsSync(folder) ? realpathSync(folder) : folder);
+  const inside = relative(real(cwd), real(path)).split(sep).join('/');
+  if (!inside || inside.startsWith('..') || isAbsolute(inside)) return false;
+  return inside.startsWith(CLAUDE_WORKTREES_DIRECTORY) && inside.length > CLAUDE_WORKTREES_DIRECTORY.length;
+}
+
+/**
+ * Entfernt Git-Worktrees, die die Claude-CLI unter .claude/worktrees/ des Arbeitsordners angelegt hat (samt Ordner;
+ * Einträge ohne Ordner räumt `worktree prune` weg). Sie blockierten sonst den Branch, den sie ausgecheckt haben, und
+ * lägen als fremder Eintrag im Arbeitsordner. Liefert die entfernten Pfade für das Worker-Log.
+ */
+export async function removeNestedClaudeWorktrees(git: GitHelpers['git'], cwd: string): Promise<string[]> {
+  const listing = await git('worktree', 'list', '--porcelain');
+  if (listing.exitCode !== 0) return [];
+  const removed: string[] = [];
+  for (const block of listing.output.split(/\n\s*\n/)) {
+    const path = /^worktree (.+)$/m.exec(block)?.[1];
+    if (!path || !nestedClaudeWorktree(cwd, path)) continue;
+    const result = await git('worktree', 'remove', '--force', path);
+    if (result.exitCode !== 0 && existsSync(path)) continue;
+    if (result.exitCode !== 0) await git('worktree', 'prune');
+    removed.push(path);
+  }
+  return removed;
 }
 
 /**

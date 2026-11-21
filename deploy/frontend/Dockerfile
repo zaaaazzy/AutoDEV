@@ -21,6 +21,9 @@ COPY src/core/defined.ts ./src/core/defined.ts
 COPY src/core/estimate-overrun.ts ./src/core/estimate-overrun.ts
 COPY src/core/coverage-areas.ts ./src/core/coverage-areas.ts
 COPY src/core/bug-category-values.ts ./src/core/bug-category-values.ts
+# Befehlszeilen wie in der Shell zerlegen und zusammensetzen (Einstellungen: Test-, Deploy-, Agent-Befehle) – dieselbe
+# Logik wie die Validierung der API.
+COPY src/core/shell-words.ts ./src/core/shell-words.ts
 RUN npm run build:ui
 
 # Ohne root schon im Master-Prozess: PID-Datei und Zwischenablagen unter /tmp, damit läuft der Container auch mit

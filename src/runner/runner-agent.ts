@@ -28,7 +28,7 @@ import { runTestAgent } from './test-agent.js';
 import { projectEnvironment } from './project-command.js';
 import { agentEnvironment, buildInvocation } from './runner-prompts.js';
 import type { BuiltinAgent, WorkflowAgent } from './runner-types.js';
-import { planSummary, SKIPPED_NOTE, testerPlan } from './order-tests.js';
+import { planSummary, testerPlan } from './order-tests.js';
 import { runVisualStep } from './visual-check.js';
 import { captureInSandbox } from './visual-sandbox.js';
 import { projectSandbox, projectTestExecutor } from './test-sandbox.js';
@@ -58,6 +58,7 @@ export const runBuiltinAgent: BuiltinAgent = async ({
         cwd,
         commands: plan.commands.map((entry) => entry.command),
         skipped: plan.commands.map((entry) => entry.skipped),
+        skipNote: plan.skipNote,
         existingProject: true,
         timeoutMs,
         signal,
@@ -75,8 +76,8 @@ export const runBuiltinAgent: BuiltinAgent = async ({
     const failed = steps.rows.some((step) => step.status !== 'passed');
     const output = steps.rows
       .map((step) =>
-        step.output === SKIPPED_NOTE
-          ? `$ ${step.command} → ${SKIPPED_NOTE}`
+        step.output === plan.skipNote
+          ? `$ ${step.command} → ${plan.skipNote}`
           : `$ ${step.command} → ${step.status}\n${step.status === 'passed' ? step.output.slice(-400) : step.output.slice(-3000)}`,
       )
       .join('\n\n');
