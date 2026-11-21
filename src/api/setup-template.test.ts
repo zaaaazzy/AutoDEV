@@ -42,7 +42,7 @@ test('Projekt-Assistent auf PostgreSQL: Vorlage belegt die Projekt-Einstellungen
         ['npm', 'run', 'test:smoke'],
       ]);
       assert.deepEqual(row.order_test_commands[1], ['npx', 'vitest', 'run', '{tests}']);
-      assert.deepEqual(row.review_command, ['npm', 'run', 'review']);
+      assert.deepEqual(row.review_command, ['npm run review']);
       assert.equal(row.preview_url, PHASER_DEV_URL);
       assert.match(row.guidelines, /Phaser 3/);
 

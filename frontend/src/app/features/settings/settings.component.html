@@ -145,7 +145,8 @@
             </label>
             <p class="muted wide">
               Die Befehle je Auftrag laufen im Tester-Schritt: &#123;tests&#125; = Testdateien zu den geänderten
-              Dateien, &#123;files&#125; = geänderte Dateien; leer = wie beim Live schalten.
+              Dateien, &#123;files&#125; = geänderte Dateien; leer = wie beim Live schalten. Argumente mit Leerzeichen
+              in Anführungszeichen setzen, z. B. <code>sh -c "npm run build &amp;&amp; npm test"</code>.
             </p>
             <label class="wide check">
               <input type="checkbox" name="autoBugfix" [(ngModel)]="settings.autoBugfix" />
@@ -174,19 +175,59 @@
                 <option value="always">Immer</option>
               </select>
             </label>
-            <label
-              >Review-Befehl
-              <input
+            <label class="wide"
+              >Review-Befehle<textarea
                 name="reviewCommand"
                 [(ngModel)]="settings.reviewCommand"
-                placeholder="sh /source/scripts/review-live.sh"
-              />
+                rows="3"
+                maxlength="10000"
+                placeholder="npm run build&#10;npm run start -- --host $REVIEW_HOST --port $REVIEW_FRONTEND_PORT"
+              ></textarea>
             </label>
             <p class="muted wide">
               Mit Review-Freigabe wartet ein fertiger Auftrag, bis du ihn freigibst; erst dann wird er in den Sprint
-              gemergt (und die Vorschau im Projektordner nachgezogen). Der Review-Befehl läuft in einem
-              Review-Container: dort ist der Source-Ordner unter <code>/source</code> eingebunden, gearbeitet wird im
-              gewählten Stand (Ports und Datenbank-Kopie stellt der Container).
+              gemergt (und die Vorschau im Projektordner nachgezogen). Die Review-Befehle starten den gewählten Stand in
+              einem Review-Container („Version ansehen“ erscheint nur, wenn hier etwas steht): ein Befehl pro Zeile,
+              nacheinander ausgeführt; die erste gescheiterte Zeile beendet den Container. Der Stand ist nach
+              <code>/work</code> ausgecheckt (Arbeitsordner), bei <code>package-lock.json</code> läuft vorher
+              <code>npm ci</code>. Variablen: <code>REVIEW_FRONTEND_PORT</code> (Port, auf dem die App lauschen muss),
+              <code>REVIEW_HOST</code> (<code>0.0.0.0</code>), <code>REVIEW_PUBLIC_URL</code> (Adresse im Browser),
+              <code>REVIEW_DATABASE_URL</code> (eigene Datenbank-Kopie bzw. leere Datenbank). Beispiel statisches
+              Frontend: <code>vite build</code> und
+              <code>vite preview --host $REVIEW_HOST --port $REVIEW_FRONTEND_PORT</code>.
+            </p>
+            <label
+              >Port der App im Container
+              <input
+                name="reviewPort"
+                type="number"
+                min="1"
+                max="65535"
+                [(ngModel)]="settings.reviewPort"
+                placeholder="4200"
+              />
+            </label>
+            <label
+              >Health-Pfad (Bereitschaft)
+              <input name="reviewHealthPath" [(ngModel)]="settings.reviewHealthPath" maxlength="200" placeholder="/" />
+            </label>
+            <label class="wide"
+              >Review-Dockerfile (eigene Laufzeit, optional)
+              <input
+                name="reviewDockerfile"
+                [(ngModel)]="settings.reviewDockerfile"
+                maxlength="200"
+                placeholder="deploy/review/Dockerfile"
+              />
+            </label>
+            <p class="muted wide">
+              Der Container gilt als bereit, sobald der Health-Pfad mit einem Status unter 500 antwortet. Ohne
+              Dockerfile läuft das Standard-Image (Node.js, Git, Benutzer <code>node</code>). Für Python, Go oder andere
+              Laufzeiten gib den Pfad eines Dockerfiles relativ zum Projekt an: AIdeation baut daraus vor jedem Start
+              das Image <code>aideation-review-&lt;projekt&gt;</code> mit dem gewählten Stand als Build-Kontext. Das
+              Dockerfile muss den Stand nach <code>/work</code> kopieren, einen eigenen Benutzer anlegen und mit
+              <code>USER</code> setzen (root wird abgelehnt) und <code>sh</code> enthalten; die Review-Befehle laufen
+              darin in <code>/work</code>.
             </p>
             <label class="wide"
               >Nach erfolgreichen Aufträgen ausführen (Deploy, optional)<textarea
@@ -198,7 +239,8 @@
               ></textarea>
             </label>
             <p class="muted wide">
-              Ein Befehl pro Zeile, im Projektordner. So laufen Container immer mit dem neuesten Stand.
+              Ein Befehl pro Zeile, im Projektordner. So laufen Container immer mit dem neuesten Stand. Argumente mit
+              Leerzeichen in Anführungszeichen setzen, z. B. <code>sh -c "npm run build &amp;&amp; npm test"</code>.
               @if (project.deployStatus) {
                 Letzter Lauf: {{ project.deployStatus }}
               }

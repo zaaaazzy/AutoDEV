@@ -96,10 +96,13 @@ export class SprintDetailComponent {
     return this.orders.approveAll(this.waiting(), this.sprintInput().id);
   }
 
-  protected readonly sprintProgress = computed(() => {
+  protected readonly sprintCounts = computed(() => {
     const orders = this.sprintItems();
-    const done = orders.filter((item) => item.status === DEVELOPMENT_STATUS.done).length;
-    return `${done} / ${orders.length} Aufträge erledigt`;
+    return { done: orders.filter((item) => item.status === DEVELOPMENT_STATUS.done).length, total: orders.length };
+  });
+  protected readonly sprintProgress = computed(() => {
+    const { done, total } = this.sprintCounts();
+    return `${done} / ${total} Aufträge erledigt`;
   });
 
   protected readonly sprintEstimate = computed<number | null>(() => {

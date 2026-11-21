@@ -7,6 +7,7 @@ import type { Agent } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { ModelIconComponent } from '../../shared/model-icon.component.js';
 import { AgentActionsEditorComponent } from './agent-actions-editor.component.js';
+import { joinShellLine } from '../../../../../src/core/shell-words.js';
 import {
   MODEL_PRESETS,
   modelLabel,
@@ -181,7 +182,7 @@ export class AgentSettingsComponent {
     this.form = {
       name: agent.name,
       instructions: agent.instructions,
-      command: agent.command?.join(' ') ?? '',
+      command: joinShellLine(agent.command ?? []),
       handoffTo: agent.handoffTo ?? null,
     };
     this.commands = this.effectiveCommands(agent);

@@ -512,7 +512,7 @@ dürfen keine Regeln für `.env`, `.ssh`, `.aws`, `.gnupg`, DevLog oder AIdeatio
 | --- | --- |
 | `.env` (Ordner `source`) | Zugänge, `DEV_LOG_SECRET_KEY`, Domain, Projektbereich, Backup-Optionen |
 | `~/.config/aideation/worker.env` | Worker auf dem Host (Rechte 600) |
-| Projekt-Einstellungen | Testbefehle, Review-Befehl, Vorschau-Adresse, Regeln für Agents, `review_mode`, `auto_bugfix` |
+| Projekt-Einstellungen | Testbefehle, Review-Befehle (Port, Health-Pfad, Dockerfile des Review-Containers), Vorschau-Adresse, Regeln für Agents, `review_mode`, `auto_bugfix` |
 | Einstellungen → Agents | Modell, Befehl (nur Administration), Rolle, Rechte, Schrittlimit |
 | Einstellungen → Budget | Limits je Tag, Sprint und Auftrag (Tokens oder USD); Modell-Routing |
 | Wartungs-Jobs (`GET`/`PATCH /api/scheduled-jobs`) | Takt, Zeitlimit und Ein-/Ausschalten je Job |
@@ -530,7 +530,7 @@ dürfen keine Regeln für `.env`, `.ssh`, `.aws`, `.gnupg`, DevLog oder AIdeatio
 | `DEV_LOG_BACKUP_USER` | Benutzer für den Backup-Container (Linux) | `70:70` |
 | `DEV_LOG_PG_RESTORE` | Pfad zu `pg_restore` auf dem Host | Systemstandard |
 | `DEV_LOG_BUG_CATEGORY_MODEL` | `off` schaltet das Modell für Bug-Kategorien ab | an |
-| `DEV_LOG_AGENT_COMMAND` | Standardbefehl der Agents | lokales Modell |
+| `DEV_LOG_AGENT_COMMAND` | Standardbefehl der Agents (JSON-Array oder Befehlszeile; Argumente mit Leerzeichen in Anführungszeichen) | lokales Modell |
 | `COMPOSE_PROFILES` | Profil `worker` (Worker im Container), `https` | je nach Einrichtung |
 
 ### 10.3 Takte und Grenzen

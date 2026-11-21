@@ -179,7 +179,7 @@ test('Defekter Arbeitscontainer wird erkannt, ein roter Test oder ein fehlendes 
   const { isSandboxFailure } = await import('./autofix.js');
   for (const output of [
     'Sandbox: Der Befehl ist im Image „aideation-agent“ nicht ausführbar (Exit-Code 127).',
-    'Arbeitscontainer: Abhängigkeiten liessen sich nicht installieren (Exit-Code 254). Befehl nicht gestartet.',
+    'Arbeitscontainer: node_modules-Volume „agents_demo_modules“ liess sich nicht vorbereiten. chown: Operation not permitted',
     'npm error Log files were not written due to an error writing to the directory: /home/agent/.npm/_logs',
     'Error response from daemon: No such exec instance: 7b6620d2a9e1',
   ]) {
@@ -192,4 +192,23 @@ test('Defekter Arbeitscontainer wird erkannt, ein roter Test oder ein fehlendes 
   ]) {
     assert.equal(isSandboxFailure(output), false, output);
   }
+});
+
+test('Gescheiterte Installation der Projekt-Abhängigkeiten ist ein Fehler im Auftrag, kein Sandbox-Defekt (pianotrainer, 21.11.2026)', async () => {
+  const { isSandboxFailure } = await import('./autofix.js');
+  const { dependencyFailureMessage } = await import('../core/sandbox-base.js');
+  const failure = (output: string): string =>
+    dependencyFailureMessage('npm', { exitCode: 1, durationMs: 1, output }, 'im Arbeitscontainer');
+  // pnpm-Workspace mit npm installiert, „workspace:*“-Protokoll, Versionskonflikt: alles Fehler im package.json.
+  for (const output of [
+    "npm error Cannot read properties of null (reading 'edgesOut')",
+    'npm error code EUNSUPPORTEDPROTOCOL\nnpm error Unsupported URL Type "workspace:": workspace:*',
+    'npm error code ERESOLVE\nnpm error ERESOLVE unable to resolve dependency tree',
+  ]) {
+    const message = failure(output);
+    assert.match(message, /^Projekt-Abhängigkeiten: „npm install“ im Arbeitscontainer scheiterte \(Exit-Code 1\)/);
+    assert.equal(isSandboxFailure(message), false, output);
+  }
+  // Ein echtes Infrastrukturmuster in der Installationsausgabe bleibt ein Sandbox-Defekt.
+  assert.equal(isSandboxFailure(failure('npm error Your cache folder contains root-owned files')), true);
 });

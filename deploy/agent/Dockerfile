@@ -5,7 +5,7 @@
 # Gebaut aus dem Wurzelordner: docker build -t aideation-agent -f deploy/agent/Dockerfile .
 
 # Wächter (agent-guard.ts) als eine Datei bündeln: der PreToolUse-Hook prüft auch im Container jeden Zugriff.
-FROM node:26.13.0-bookworm-slim AS guard
+FROM node:26.13.1-bookworm-slim AS guard
 WORKDIR /build
 COPY package*.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund && npm rebuild esbuild
@@ -21,7 +21,7 @@ RUN npx --no-install esbuild src/core/egress-proxy.ts --bundle --platform=node -
     && npx --no-install esbuild src/runner/visual-capture-cli.ts --bundle --platform=node --format=esm --target=node22 \
       --external:playwright --outfile=/out/visual-capture.mjs
 
-FROM node:26.13.0-bookworm-slim AS node
+FROM node:26.13.1-bookworm-slim AS node
 
 # Statische Docker-CLI samt Compose- und Buildx-Plugin.
 FROM docker:29-cli AS dockercli
@@ -52,10 +52,13 @@ ENV DISABLE_AUTOUPDATER=1 \
     HOME=/home/agent
 # Playwright in derselben Version wie die Browser des Basis-Images (für die Vorschau-Aufnahme des visuellen Testers).
 ARG PLAYWRIGHT_VERSION=1.64.1
+# Corepack in fester Version: lädt pnpm und Yarn eines Projekts (dependencyCommand in sandbox-base.ts) über die
+# npm-Registry. Node ab 25 bringt kein Corepack mehr mit, und das aus dem Playwright-Basis-Image ist Zufall.
+ARG COREPACK_VERSION=0.36.0
 # Der Build läuft als root mit HOME=/home/agent: ohne das rm gehört /home/agent/.npm root, und npm/npx im Container
 # (andere UID) scheitern mit EACCES. Zur Laufzeit liegt der npm-Cache ohnehin unter /tmp (sandbox.ts).
 RUN npm install -g --no-audit --no-fund "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-      "playwright@${PLAYWRIGHT_VERSION}" \
+      "playwright@${PLAYWRIGHT_VERSION}" "corepack@${COREPACK_VERSION}" \
     && npm cache clean --force \
     && rm -rf /home/agent/.npm /root/.npm
 COPY --from=guard /out/agent-guard.mjs /out/egress-proxy.mjs /out/visual-capture.mjs /opt/aideation/

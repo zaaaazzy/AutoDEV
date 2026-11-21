@@ -67,8 +67,15 @@ export interface Project {
   /** Docker-Sandbox für alle Agents und Projekttests; null = globaler Schalter DEV_LOG_AGENT_SANDBOX (Standard workbench). */
   agentSandbox?: 'off' | 'docker' | 'workbench' | null;
   reviewMode?: 'off' | 'ui' | 'always';
+  /** Review-Befehle, eine Zeile je Befehl (laufen nacheinander im Review-Container). */
   reviewCommand?: string[] | null;
   reviewUrl?: string | null;
+  /** Port, auf dem die App im Review-Container lauscht; null = 4200. */
+  reviewPort?: number | null;
+  /** Pfad der Bereitschaftsprüfung im Review-Container; null = „/“. */
+  reviewHealthPath?: string | null;
+  /** Dockerfile relativ zum Projekt für eine eigene Laufzeit im Review-Container; null = Standard-Image (Node). */
+  reviewDockerfile?: string | null;
   /** Kostenbremse je Auftrag (leer = keine Grenze). */
   /** AIdeation nach dem Sprint-Abschluss automatisch neu starten (AIdeation-Projekt). */
   restartAfterSprint?: boolean;

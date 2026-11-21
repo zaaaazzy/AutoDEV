@@ -1,53 +1,33 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import test from 'node:test';
-import type { Pool } from 'pg';
-import {
-  DEFAULT_TEST_COMMANDS,
-  loadTestCommandSet,
-  loadTestCommands,
-  NO_PACKAGE_NOTE,
-  skippedTestCommandsNote,
-} from './runner-selection.js';
+import { test } from 'node:test';
+import { defaultAgentCommand } from './runner-selection.js';
 
-function poolWith(testCommands: unknown): Pool {
-  return {
-    query: async (sql: string) => {
-      if (sql.includes('test_commands')) return { rows: [{ commands: testCommands }] };
-      return { rows: [] };
-    },
-  } as unknown as Pool;
-}
-
-test('Testbefehle mit Herkunft: Projekt vor Umgebung vor Standardwerten', async () => {
-  const environment = { DEV_LOG_TEST_COMMANDS: '[["make","check"]]' };
-  assert.deepEqual(await loadTestCommandSet(poolWith([['npm', 'run', 'test:unit']]), 'p', environment), {
-    commands: [['npm', 'run', 'test:unit']],
-    source: 'project',
-  });
-  assert.deepEqual(await loadTestCommandSet(poolWith(null), 'p', environment), {
-    commands: [['make', 'check']],
-    source: 'env',
-  });
-  const defaults = await loadTestCommandSet(poolWith(null), 'p', {});
-  assert.equal(defaults.source, 'default');
-  assert.deepEqual(defaults.commands, DEFAULT_TEST_COMMANDS);
-  // Ungültige Umgebungswerte fallen auf die Standardwerte zurück (wie bisher).
-  assert.equal((await loadTestCommandSet(poolWith(null), 'p', { DEV_LOG_TEST_COMMANDS: 'kaputt' })).source, 'default');
-  assert.deepEqual(await loadTestCommands(poolWith(null), 'p', {}), DEFAULT_TEST_COMMANDS);
+test('defaultAgentCommand: leer → null, JSON-Array → Array, sonst wie in der Shell zerlegt', () => {
+  assert.equal(defaultAgentCommand({}), null);
+  assert.equal(defaultAgentCommand({ DEV_LOG_AGENT_COMMAND: '   ' }), null);
+  assert.deepEqual(defaultAgentCommand({ DEV_LOG_AGENT_COMMAND: '["claude", "-p"]' }), ['claude', '-p']);
+  assert.deepEqual(defaultAgentCommand({ DEV_LOG_AGENT_COMMAND: 'claude -p --model opus' }), [
+    'claude',
+    '-p',
+    '--model',
+    'opus',
+  ]);
+  assert.deepEqual(
+    defaultAgentCommand({ DEV_LOG_AGENT_COMMAND: 'claude -p --append-system-prompt "kurz antworten"' }),
+    ['claude', '-p', '--append-system-prompt', 'kurz antworten'],
+  );
 });
 
-test('Standard-Testbefehle entfallen nur ohne package.json; hinterlegte Befehle nie', async () => {
-  const docsOnly = await mkdtemp(join(tmpdir(), 'selection-docs-'));
-  const node = await mkdtemp(join(tmpdir(), 'selection-node-'));
-  await writeFile(join(node, 'package.json'), '{}');
-  const defaults = await loadTestCommandSet(poolWith(null), 'p', {});
-  assert.equal(skippedTestCommandsNote(defaults, docsOnly), NO_PACKAGE_NOTE);
-  assert.equal(skippedTestCommandsNote(defaults, node), null);
-  const own = await loadTestCommandSet(poolWith([['npm', 'test']]), 'p', {});
-  assert.equal(skippedTestCommandsNote(own, docsOnly), null);
-  const env = await loadTestCommandSet(poolWith(null), 'p', { DEV_LOG_TEST_COMMANDS: '[["npm","test"]]' });
-  assert.equal(skippedTestCommandsNote(env, docsOnly), null);
+test('defaultAgentCommand: ungültiges JSON oder offene Anführungszeichen → Warnung und null', () => {
+  const warnings: string[] = [];
+  const warn = console.warn;
+  console.warn = (message: string) => warnings.push(message);
+  try {
+    assert.equal(defaultAgentCommand({ DEV_LOG_AGENT_COMMAND: '[kaputt' }), null);
+    assert.equal(defaultAgentCommand({ DEV_LOG_AGENT_COMMAND: 'claude -p "offen' }), null);
+  } finally {
+    console.warn = warn;
+  }
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[1] ?? '', /Anführungszeichen nicht geschlossen/);
 });

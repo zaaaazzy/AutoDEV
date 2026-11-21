@@ -25,7 +25,7 @@ export interface ProjectTemplate {
   project?: TemplateProjectSettings;
 }
 
-/** Vorbelegung der Projekt-Einstellungen (Befehle wie in den Einstellungen: ein Befehl je Eintrag, Wörter getrennt). */
+/** Vorbelegung der Projekt-Einstellungen (Testbefehle: ein Befehl je Eintrag, Wörter getrennt; Review: eine Zeile je Befehl). */
 export interface TemplateProjectSettings {
   testCommands?: string[][];
   orderTestCommands?: string[][];
@@ -279,7 +279,7 @@ volumes:
         ['npx', 'vitest', 'run', '{tests}'],
         ['npm', 'run', 'test:smoke'],
       ],
-      reviewCommand: ['npm', 'run', 'review'],
+      reviewCommand: ['npm run review'],
       previewUrl: PHASER_DEV_URL,
       guidelines: [
         'Browser-Spiel mit Phaser 3, TypeScript und Vite; Details in AGENTS.md.',

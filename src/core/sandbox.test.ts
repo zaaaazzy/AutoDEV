@@ -12,6 +12,7 @@ import {
   DEPENDENCY_STAMP,
   dependencyCommand,
   dependencyStamp,
+  packageManagerOf,
   dockerClientEnvironment,
   dockerHostPath,
   EGRESS_CONTAINER,
@@ -597,7 +598,8 @@ test('Sandbox: scheitert die Installation, startet der Befehl nicht; lesende Lä
     );
     const result = await runInSandbox(['npm', 'test'], worktree, { runId: 'r9', project: 'demo', docker });
     assert.equal(result.exitCode, 1);
-    assert.match(result.output, /Abhängigkeiten liessen sich nicht/);
+    assert.match(result.output, /^Projekt-Abhängigkeiten: „npm install“ im Volume „[^“]+“ scheiterte \(Exit-Code 1\)/m);
+    assert.doesNotMatch(result.output, /^(?:Sandbox|Arbeitscontainer): /m, 'kein Sandbox-Defekt, Fehler im Auftrag');
     assert.ok(!calls.some((call) => call.command.slice(-2).join(' ') === 'npm test'));
     const read = fakeDocker((command) => (command[1] === 'version' ? ok('27') : ok()));
     await runInSandbox(['npm', 'test'], worktree, {
@@ -618,4 +620,94 @@ test('Sandbox: localhost geht nie über den Egress-Proxy', () => {
   assert.ok(run.includes(`no_proxy=${SANDBOX_NO_PROXY}`));
   assert.match(SANDBOX_NO_PROXY, /localhost/);
   assert.match(SANDBOX_NO_PROXY, /127\.0\.0\.1/);
+});
+
+test('Paketmanager des Projekts: pnpm (Lockfile oder Workspace), Yarn klassisch oder ab 2, sonst npm – der Stempel unterscheidet sie', () => {
+  const worktree = mkdtempSync(join(tmpdir(), 'sandbox-pm-'));
+  try {
+    writeFileSync(join(worktree, 'package.json'), '{"name":"demo"}');
+    assert.equal(packageManagerOf(worktree), 'npm');
+    const npmStamp = dependencyStamp(worktree);
+    // pnpm-Monorepo ohne Lockfile (pianotrainer, 21.11.2026): npm scheiterte an „workspace:*“.
+    writeFileSync(join(worktree, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
+    assert.equal(packageManagerOf(worktree), 'pnpm');
+    const pnpmStamp = dependencyStamp(worktree);
+    assert.notEqual(pnpmStamp, npmStamp, 'gleiches package.json, anderer Paketmanager: neu installieren');
+    writeFileSync(join(worktree, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+    assert.notEqual(dependencyStamp(worktree), pnpmStamp, 'Lockfile zählt');
+    rmSync(join(worktree, 'pnpm-workspace.yaml'));
+    assert.equal(packageManagerOf(worktree), 'pnpm', 'pnpm-lock.yaml genügt');
+    rmSync(join(worktree, 'pnpm-lock.yaml'));
+    writeFileSync(join(worktree, 'yarn.lock'), '# yarn lockfile v1\n');
+    assert.equal(packageManagerOf(worktree), 'yarn');
+    writeFileSync(join(worktree, '.yarnrc.yml'), 'nodeLinker: node-modules\n');
+    assert.equal(packageManagerOf(worktree), 'yarn-berry');
+    // pnpm vor Yarn: Liegen beide Lockfiles herum, gewinnt das aktuelle pnpm-Monorepo.
+    writeFileSync(join(worktree, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+    assert.equal(packageManagerOf(worktree), 'pnpm');
+  } finally {
+    rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('Installationsbefehl je Paketmanager: Corepack über die npm-Registry, ohne Skripte, Caches im Volume, Stempel bleibt', () => {
+  const pnpm = dependencyCommand('abc', 'pnpm').at(-1) ?? '';
+  assert.match(pnpm, /^exec 9>node_modules\/\.aideation-install\.lock && flock 9 /, 'Sperre wie bei npm');
+  assert.match(
+    pnpm,
+    /corepack pnpm install --frozen-lockfile=false --ignore-scripts --store-dir node_modules\/\.cache\/pnpm-store/,
+  );
+  assert.match(pnpm, /COREPACK_NPM_REGISTRY=https:\/\/registry\.npmjs\.org/, 'Download über den freigegebenen Host');
+  assert.match(pnpm, /COREPACK_HOME="\$PWD\/node_modules\/\.cache\/corepack"/);
+  assert.match(pnpm, /echo abc > node_modules\/\.aideation-lock/);
+  assert.doesNotMatch(pnpm, /\bnpm install/);
+  const yarn = dependencyCommand('abc', 'yarn').at(-1) ?? '';
+  assert.match(
+    yarn,
+    /YARN_REGISTRY=https:\/\/registry\.npmjs\.org corepack yarn install --ignore-scripts --non-interactive/,
+  );
+  const berry = dependencyCommand('abc', 'yarn-berry').at(-1) ?? '';
+  assert.match(berry, /YARN_NPM_REGISTRY_SERVER=https:\/\/registry\.npmjs\.org/);
+  assert.match(berry, /YARN_ENABLE_IMMUTABLE_INSTALLS=false YARN_ENABLE_SCRIPTS=false corepack yarn install/);
+  assert.match(berry, /YARN_HTTPS_PROXY="\$\{HTTPS_PROXY-\}"/, 'Yarn ab 2 liest HTTPS_PROXY nicht selbst');
+  // Standard bleibt npm, unverändert zum bisherigen Befehl.
+  assert.equal(dependencyCommand('abc').at(-1), dependencyCommand('abc', 'npm').at(-1));
+  assert.match(dependencyCommand('abc').at(-1) ?? '', /npm install --ignore-scripts --no-audit --no-fund/);
+});
+
+test('Sandbox: ein pnpm-Workspace wird mit pnpm installiert, und scheitert das, meldet der Lauf einen Fehler im Auftrag', async () => {
+  const worktree = mkdtempSync(join(tmpdir(), 'sandbox-pnpm-'));
+  try {
+    writeFileSync(join(worktree, 'package.json'), '{"name":"demo","dependencies":{"@demo/core":"workspace:*"}}');
+    writeFileSync(join(worktree, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
+    const { calls, docker } = fakeDocker((command) => (command[1] === 'version' ? ok('27') : ok()));
+    const execute = sandboxExecutor(worktree, { runId: 'r-pnpm', project: 'demo', docker, name: 'aideation-r-pnpm' });
+    await execute(['pnpm', 'test'], worktree);
+    const runs = calls.filter((call) => call.command.includes('--cap-drop'));
+    assert.equal(runs.length, 2);
+    const install = runs[0]?.command.at(-1) ?? '';
+    assert.match(install, /corepack pnpm install --frozen-lockfile=false --ignore-scripts/);
+    assert.doesNotMatch(install, /\bnpm install/);
+    assert.deepEqual(runs[1]?.command.slice(-2), ['pnpm', 'test']);
+    // Scheitert pnpm (etwa am Lockfile), läuft der Befehl nicht; die Meldung nennt pnpm und ist kein Sandbox-Defekt.
+    const broken = fakeDocker((command) =>
+      command[1] === 'version'
+        ? ok('27')
+        : command.at(-1)?.includes('corepack pnpm install')
+          ? { ...ok('ERR_PNPM_OUTDATED_LOCKFILE'), exitCode: 1 }
+          : ok(),
+    );
+    const result = await runInSandbox(['pnpm', 'test'], worktree, {
+      runId: 'r-pnpm2',
+      project: 'demo',
+      docker: broken.docker,
+    });
+    assert.equal(result.exitCode, 1);
+    assert.match(result.output, /^Projekt-Abhängigkeiten: „pnpm install“ im Volume/m);
+    assert.match(result.output, /ERR_PNPM_OUTDATED_LOCKFILE/);
+    assert.equal(sandboxBadge('demo'), null, 'kein Sandbox-Problem im Badge');
+    assert.ok(!broken.calls.some((call) => call.command.slice(-2).join(' ') === 'pnpm test'));
+  } finally {
+    rmSync(worktree, { recursive: true, force: true });
+  }
 });

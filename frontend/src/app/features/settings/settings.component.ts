@@ -10,12 +10,14 @@ import { ProjectStore } from '../../core/project-store.js';
 import { NotificationSettingsComponent } from './notification-settings.component.js';
 import { ProductionSettingsComponent } from './production-settings.component.js';
 import { VisualSettingsComponent } from './visual-settings.component.js';
+import { joinShellLine } from '../../../../../src/core/shell-words.js';
 import { SecuritySettingsComponent } from './security-settings.component.js';
 import { UsersSettingsComponent } from './users-settings.component.js';
 import { BudgetSettingsComponent } from './budget-settings.component.js';
 import { AuthService } from '../../core/auth.service.js';
 import { PageSearchService } from '../../core/page-search.service.js';
 import { SettingsGroupDirective, SettingsGroups } from './settings-group.js';
+import { reviewContainerForm, reviewContainerPatch } from './review-container-form.js';
 
 @Component({
   selector: 'app-settings',
@@ -58,7 +60,7 @@ export class SettingsComponent {
     /** Leer = globaler Schalter. */
     agentSandbox: '' as '' | 'off' | 'docker' | 'workbench',
     reviewMode: 'off' as 'off' | 'ui' | 'always',
-    reviewCommand: '',
+    ...reviewContainerForm(undefined),
     restartAfterSprint: false,
     sprintMode: 'manual' as 'manual' | 'suggest' | 'autopilot',
     sprintCapacityHours: 4,
@@ -141,7 +143,7 @@ export class SettingsComponent {
           agentWorkspace: this.settings.agentWorkspace,
           agentSandbox: this.settings.agentSandbox || null,
           reviewMode: this.settings.reviewMode,
-          reviewCommand: this.settings.reviewCommand.trim(),
+          ...reviewContainerPatch(this.settings),
           restartAfterSprint: this.settings.restartAfterSprint,
           sprintMode: this.settings.sprintMode,
           sprintCapacityHours: this.settings.sprintCapacityHours,
@@ -211,7 +213,7 @@ export class SettingsComponent {
       agentWorkspace: project?.agentWorkspace ?? false,
       agentSandbox: project?.agentSandbox ?? '',
       reviewMode: project?.reviewMode ?? 'off',
-      reviewCommand: (project?.reviewCommand ?? []).join(' '),
+      ...reviewContainerForm(project),
       restartAfterSprint: project?.restartAfterSprint ?? false,
       sprintMode: project?.sprintMode ?? 'manual',
       sprintCapacityHours: project?.sprintCapacityHours ?? 4,
@@ -223,9 +225,10 @@ export class SettingsComponent {
       clearDatabase: false,
       githubMode: project?.githubMode ?? 'aus',
       githubRequireApproval: project?.githubRequireApproval ?? false,
-      deployCommands: (project?.deployCommands ?? []).map((command) => command.join(' ')).join('\n'),
-      testCommands: (project?.testCommands ?? []).map((command) => command.join(' ')).join('\n'),
-      orderTestCommands: (project?.orderTestCommands ?? []).map((command) => command.join(' ')).join('\n'),
+      // Argumente mit Leerzeichen wieder in Anführungszeichen, sonst zerfällt der Befehl beim nächsten Speichern.
+      deployCommands: (project?.deployCommands ?? []).map(joinShellLine).join('\n'),
+      testCommands: (project?.testCommands ?? []).map(joinShellLine).join('\n'),
+      orderTestCommands: (project?.orderTestCommands ?? []).map(joinShellLine).join('\n'),
     };
   }
 

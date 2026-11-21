@@ -11,7 +11,9 @@ import {
   credentialProblem,
   dockerClientEnvironment,
   dependencyCommand,
+  dependencyFailureMessage,
   dependencyStamp,
+  packageManagerOf,
   ensureAgentNetwork,
   INSTALL_TIMEOUT_MS,
   KILL_TIMEOUT_MS,
@@ -72,7 +74,7 @@ function ensureDependencies(
   const key = `${modulesVolume(options.project)}:${stamp}`;
   let install = installs.get(key);
   if (!install) {
-    install = runInSandbox(dependencyCommand(stamp), worktree, {
+    install = runInSandbox(dependencyCommand(stamp, packageManagerOf(worktree)), worktree, {
       runId: options.runId,
       project: options.project,
       platform: options.platform,
@@ -140,9 +142,10 @@ export async function runInSandbox(
   if (options.workspace !== false && !options.readOnly && options.dependencies !== false) {
     const installed = await ensureDependencies(worktree, { ...options, environment: source });
     if (installed && installed.exitCode !== 0) {
-      const message = `Sandbox: Abhängigkeiten liessen sich nicht ins Volume „${modulesVolume(options.project)}“ installieren (Exit-Code ${installed.exitCode}). Befehl nicht gestartet.\n${installed.output.trim().slice(-800)}`;
-      noteProblem(options.project, message.split('\n')[0]);
-      return blocked(message, redactWith);
+      // Docker, Image und Volume sind in Ordnung: kein Sandbox-Problem fürs Badge, der Fehler gehört zum Auftrag.
+      noteProblem(options.project, null);
+      const where = `im Volume „${modulesVolume(options.project)}“`;
+      return blocked(dependencyFailureMessage(packageManagerOf(worktree), installed, where), redactWith);
     }
   }
   if ((options.network ?? SANDBOX_NETWORK) === SANDBOX_NETWORK) {

@@ -1,10 +1,23 @@
 import { decryptSecret } from '../core/secrets.js';
 import { logged } from '../core/log.js';
 import { maskSecrets } from '../core/secret-mask.js';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
+import {
+  REVIEW_DEFAULT_PORT,
+  reviewCommandLines,
+  reviewDockerfileError,
+  reviewHealthUrl,
+  reviewPort,
+  reviewProjectImage,
+  reviewScript,
+  reviewUrl,
+} from '../core/review-config.js';
 import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
+import { findReviewProject } from '../db/project-repository.js';
 import { sprintBranchOf } from './git-sync.js';
 import { gitEnvironment } from './project-command.js';
 import { defined } from '../core/defined.js';
@@ -17,13 +30,9 @@ import { defined } from '../core/defined.js';
  * Projekt und bekommt nur den eigenen Review-DB-User, nie die Haupt-Zugänge.
  */
 export const REVIEW_IMAGE = 'aideation-review:latest';
-const PORT_BASE = 4200;
-/** Port im Container, auf dem der Review-Befehl die Oberfläche ausliefert. */
-const INNER_PORT = 4200;
+export { reviewPort, reviewUrl };
 
-export const reviewPort = (slot: number): number => PORT_BASE + slot;
 export const reviewContainer = (slot: number): string => `aideation_review_${slot}`;
-export const reviewUrl = (slot: number): string => `http://localhost:${reviewPort(slot)}`;
 
 export interface ReviewSlot {
   slot: number;
@@ -37,9 +46,17 @@ export interface ReviewSlot {
   startedAt: Date | null;
 }
 
-interface ProjectInfo {
+/** Einstellungen des Projekts für den Container (projects.review_*), Standardwerte schon eingesetzt. */
+export interface ProjectInfo {
   folder: string;
+  /** Review-Befehle, eine Zeile je Befehl. */
   command: string[];
+  /** Port, auf dem die App im Container lauscht (REVIEW_FRONTEND_PORT). */
+  port: number;
+  /** Pfad der Bereitschaftsprüfung, z. B. „/“ oder „/health“. */
+  healthPath: string | null;
+  /** Dockerfile relativ zum Projekt für eine eigene Laufzeit; null = Standard-Image (Node). */
+  dockerfile: string | null;
   databaseUrl: string | null;
 }
 
@@ -233,6 +250,77 @@ interface EmptyRetry {
 const emptyDatabaseNote = (cause: string): string =>
   `Leere Datenbank: die Kopie der Projektdatenbank passte nicht zu diesem Stand (${cause}).`;
 
+/** Gebautes Image für den Start: das Standard-Image (Node, Entrypoint checkt aus) oder das projekteigene. */
+type ImageResult = { ok: true; image: string; custom: boolean } | { ok: false; error: string };
+
+/** USER eines Images (docker image inspect): leer, „root“ oder UID 0 heisst root. */
+export function runsAsRoot(user: string): boolean {
+  const name = user.trim().split(':')[0] ?? '';
+  return name === '' || name === 'root' || name === '0';
+}
+
+/** Umgebung des Containers: Stand, Befehle (eine Zeile je Befehl, `sh -e`), Ports, Adressen und Datenbank. */
+export function containerEnv(slot: ReviewSlot, project: ProjectInfo, databaseUrl: string | undefined): string[] {
+  return [
+    `REVIEW_COMMIT=${slot.commit ?? ''}`,
+    `REVIEW_COMMAND=${reviewScript(project.command)}`,
+    `REVIEW_LABEL=${slot.label ?? ''}`,
+    `REVIEW_PUBLIC_URL=${reviewUrl(slot.slot)}`,
+    `REVIEW_FRONTEND_PORT=${project.port}`,
+    'REVIEW_BACKEND_PORT=3000',
+    'REVIEW_HOST=0.0.0.0',
+    'REVIEW_TLS=off',
+    'DEV_LOG_REVIEW=1',
+    'DEV_LOG_REVIEW_CONTAINER=1',
+    ...(databaseUrl
+      ? [`REVIEW_DATABASE_URL=${databaseUrl}`, `DATABASE_URL=${databaseUrl}`, 'DEV_LOG_REVIEW_DATABASE_READY=1']
+      : []),
+  ];
+}
+
+/**
+ * Argumente für `docker run` nach dem Namen. Standard-Image: Benutzer node, Git-Objekte schreibgeschützt, npm-Cache je
+ * Projekt, der Entrypoint checkt den Stand nach /work aus. Projekteigenes Image: der Stand steckt schon im Image
+ * (Build-Kontext), gestartet wird `sh -e` mit den Review-Befehlen in /work als der Benutzer des Images.
+ */
+export function runArguments(
+  slot: ReviewSlot,
+  project: ProjectInfo,
+  env: readonly string[],
+  gitObjects: string,
+  image: { image: string; custom: boolean },
+): string[] {
+  const shared = [
+    '--label',
+    `aideation.review=${slot.slot}`,
+    // Keine Zusatzrechte: Lifecycle-Skripte und Startbefehle stammen aus Agent-Commits.
+    '--cap-drop',
+    'ALL',
+    '--security-opt',
+    'no-new-privileges',
+    '-p',
+    `127.0.0.1:${reviewPort(slot.slot)}:${project.port}`,
+    '--add-host',
+    'host.docker.internal:host-gateway',
+    ...env.flatMap((entry) => ['-e', entry]),
+  ];
+  if (image.custom) {
+    return [...shared, '-w', '/work', '--entrypoint', 'sh', image.image, '-ec', reviewScript(project.command)];
+  }
+  return [
+    // Kein root: der Container läuft als Benutzer „node“ (deploy/review/Dockerfile).
+    '--user',
+    'node',
+    ...shared,
+    '-v',
+    `${gitObjects}:/source/objects:ro`,
+    '-v',
+    // Eigenes npm-Cache-Volume je Projekt, das alte gehört root.
+    `${reviewNpmVolume(slot.projectSlug ?? 'ohne-projekt')}:/home/node/.npm`,
+    image.image,
+  ];
+}
+
 export class ReviewSlots {
   private imageReady = false;
   private readonly emptyRetries = new Map<number, EmptyRetry>();
@@ -257,37 +345,36 @@ export class ReviewSlots {
     return this.execute(['docker', ...args], this.installRoot, { timeoutMs });
   }
 
-  private async ensureImage(): Promise<string | null> {
-    if (this.imageReady) return null;
+  private async ensureImage(): Promise<ImageResult> {
+    const ready = { ok: true, image: REVIEW_IMAGE, custom: false } as const;
+    if (this.imageReady) return ready;
     // Einmal je Worker-Start bauen (mit Cache schnell): so gilt immer der aktuelle Stand von deploy/review.
     const built = await this.docker(
       ['build', '-q', '-t', REVIEW_IMAGE, join(this.installRoot, 'deploy', 'review')],
       10 * 60_000,
     );
-    if (built.exitCode !== 0) return `Review-Image nicht gebaut: ${built.output.slice(-300)}`;
+    if (built.exitCode !== 0) return { ok: false, error: `Review-Image nicht gebaut: ${built.output.slice(-300)}` };
     this.imageReady = true;
-    return null;
+    return ready;
   }
 
   private async project(slug: string): Promise<ProjectInfo | null> {
-    const row = (
-      await this.pool.query<{ folder: string; command: unknown; databaseUrl: string | null }>(
-        `SELECT repository AS folder, review_command AS command, database_url AS "databaseUrl" FROM projects WHERE slug = $1`,
-        [slug],
-      )
-    ).rows[0];
+    const row = await findReviewProject(this.pool, slug);
     if (!row) return null;
-    const command =
-      Array.isArray(row.command) && row.command.every((part) => typeof part === 'string')
-        ? (row.command as string[])
-        : [];
     let databaseUrl: string | null = null;
     try {
       databaseUrl = row.databaseUrl ? decryptSecret(row.databaseUrl) : null;
     } catch (error) {
       logged(`database-url:${slug}`)(error);
     }
-    return { folder: row.folder, command, databaseUrl };
+    return {
+      folder: row.folder,
+      command: reviewCommandLines(row.command),
+      port: row.port ?? REVIEW_DEFAULT_PORT,
+      healthPath: row.healthPath,
+      dockerfile: row.dockerfile?.trim() || null,
+      databaseUrl,
+    };
   }
 
   /** Wartende Aufträge (Review-Freigabe) bekommen automatisch einen freien Container. */
@@ -434,7 +521,7 @@ export class ReviewSlots {
         });
         return;
       }
-      if (slot.status === 'starting' && (await this.fetchUrl(reviewUrl(slot.slot)))) {
+      if (slot.status === 'starting' && (await this.fetchUrl(reviewHealthUrl(slot.slot, project.healthPath)))) {
         const retry = this.emptyRetries.get(slot.slot);
         await update(this.pool, slot.slot, {
           status: 'running',
@@ -450,39 +537,17 @@ export class ReviewSlots {
    */
   private async start(slot: ReviewSlot, project: ProjectInfo, emptyDatabaseCause: string | null = null): Promise<void> {
     const name = reviewContainer(slot.slot);
-    if (!project.command.length) {
-      await update(this.pool, slot.slot, {
-        status: 'failed',
-        message: 'Für dieses Projekt ist kein Review-Befehl eingestellt (Einstellungen → Review).',
-      });
-      return;
-    }
-    if (!slot.commit) {
-      await update(this.pool, slot.slot, { status: 'failed', message: 'Kein Commit gewählt.' });
-      return;
-    }
     const fail = (message: string) => update(this.pool, slot.slot, { status: 'failed', message });
+    if (!project.command.length) {
+      return fail('Für dieses Projekt sind keine Review-Befehle eingestellt (Einstellungen → Review & Deploy).');
+    }
+    const commit = slot.commit;
+    if (!commit) return fail('Kein Commit gewählt.');
     // Projekte ohne eigene Datenbank bekommen eine leere Slot-Datenbank des Review-Users – nie die Haupt-Datenbank.
     const database = project.databaseUrl ? reviewDatabase(project.databaseUrl, slot.slot) : null;
     const slotDatabase = database ? null : reviewSlotDatabase(this.databases, slot.slot);
     if (typeof slotDatabase === 'string') return fail(slotDatabase);
-    const databaseUrl = (database ?? slotDatabase)?.target.toString();
-    const env: string[] = [
-      `REVIEW_COMMIT=${slot.commit}`,
-      // Der Stand liegt im Container unter /work; ältere Befehle verweisen noch auf /source.
-      `REVIEW_COMMAND=${project.command.join(' ').replaceAll('/source/', '/work/')}`,
-      `REVIEW_LABEL=${slot.label ?? ''}`,
-      `REVIEW_PUBLIC_URL=${reviewUrl(slot.slot)}`,
-      `REVIEW_FRONTEND_PORT=${INNER_PORT}`,
-      'REVIEW_BACKEND_PORT=3000',
-      'REVIEW_HOST=0.0.0.0',
-      'REVIEW_TLS=off',
-      'DEV_LOG_REVIEW=1',
-      'DEV_LOG_REVIEW_CONTAINER=1',
-      ...(databaseUrl
-        ? [`REVIEW_DATABASE_URL=${databaseUrl}`, `DATABASE_URL=${databaseUrl}`, 'DEV_LOG_REVIEW_DATABASE_READY=1']
-        : []),
-    ];
+    const env = containerEnv(slot, project, (database ?? slotDatabase)?.target.toString());
     // Vor jedem Docker-Aufruf: weder Haupt-Zugänge noch die DB „postgres“ dürfen in den Container.
     const leak = containerEnvProblem(env, this.databases.mainUrl);
     if (leak) return fail(leak);
@@ -493,15 +558,19 @@ export class ReviewSlots {
       { env: gitEnvironment() },
     );
     if (gitDir.exitCode !== 0 || !gitDir.output.trim()) return fail('Projektordner ist kein Git-Repository.');
-    const imageProblem = await this.ensureImage();
-    if (imageProblem) return fail(imageProblem);
     await update(this.pool, slot.slot, {
       status: 'starting',
-      commit_sha: slot.commit,
+      commit_sha: commit,
       message: emptyDatabaseCause
         ? `Kopie der Projektdatenbank passte nicht zu diesem Stand (${emptyDatabaseCause}) – zweiter Start mit leerer Datenbank …`
-        : 'Container wird vorbereitet …',
+        : project.dockerfile
+          ? `Baut das Review-Image aus ${project.dockerfile} …`
+          : 'Container wird vorbereitet …',
     });
+    const image = project.dockerfile
+      ? await this.buildProjectImage(slot, project, project.dockerfile, commit)
+      : await this.ensureImage();
+    if (!image.ok) return fail(image.error);
     await this.docker(['rm', '-f', name]);
     const prepared = database
       ? emptyDatabaseCause
@@ -511,32 +580,8 @@ export class ReviewSlots {
         ? await this.createSlotDatabase(slotDatabase.base, slotDatabase.target)
         : null;
     if (prepared) return fail(prepared);
-    const run = await this.docker([
-      'run',
-      '-d',
-      '--name',
-      name,
-      '--label',
-      `aideation.review=${slot.slot}`,
-      // Kein root, keine Zusatzrechte: Lifecycle-Skripte aus Agent-Commits laufen als Benutzer „node“.
-      '--user',
-      'node',
-      '--cap-drop',
-      'ALL',
-      '--security-opt',
-      'no-new-privileges',
-      '-p',
-      `127.0.0.1:${reviewPort(slot.slot)}:${INNER_PORT}`,
-      '--add-host',
-      'host.docker.internal:host-gateway',
-      '-v',
-      `${join(gitDir.output.trim(), 'objects')}:/source/objects:ro`,
-      '-v',
-      // Container läuft als node (deploy/review/Dockerfile); eigenes Volume je Projekt, das alte gehört root.
-      `${reviewNpmVolume(slot.projectSlug ?? 'ohne-projekt')}:/home/node/.npm`,
-      ...env.flatMap((entry) => ['-e', entry]),
-      REVIEW_IMAGE,
-    ]);
+    const objects = join(gitDir.output.trim(), 'objects');
+    const run = await this.docker(['run', '-d', '--name', name, ...runArguments(slot, project, env, objects, image)]);
     await update(
       this.pool,
       slot.slot,
@@ -544,10 +589,67 @@ export class ReviewSlots {
         ? {
             status: 'starting',
             started_at: new Date(),
-            message: `Installiert Abhängigkeiten und startet …${emptyDatabaseCause ? ' (leere Datenbank)' : ''}`,
+            message: `${project.dockerfile ? 'Startet' : 'Installiert Abhängigkeiten und startet'} …${emptyDatabaseCause ? ' (leere Datenbank)' : ''}`,
           }
         : { status: 'failed', message: `docker run fehlgeschlagen: ${maskSecrets(run.output.slice(-400))}` },
     );
+  }
+
+  /**
+   * Projekteigenes Image aus dem Stand bauen: `git archive` des Commits als Build-Kontext (kein Arbeitsordner, keine
+   * .env), Dockerfile aus demselben Stand. Das Image muss als eigener Benutzer laufen (USER im Dockerfile), sonst
+   * startet der Container nicht – der Code stammt aus Agent-Commits.
+   */
+  private async buildProjectImage(
+    slot: ReviewSlot,
+    project: ProjectInfo,
+    dockerfile: string,
+    commit: string,
+  ): Promise<ImageResult> {
+    const pathProblem = reviewDockerfileError(dockerfile);
+    if (pathProblem) return { ok: false, error: pathProblem };
+    const exists = await this.execute(['git', 'cat-file', '-e', `${commit}:${dockerfile}`], project.folder, {
+      env: gitEnvironment(),
+    });
+    if (exists.exitCode !== 0) {
+      return { ok: false, error: `Review-Dockerfile „${dockerfile}“ fehlt im Stand ${commit.slice(0, 8)}.` };
+    }
+    const image = reviewProjectImage(slot.projectSlug ?? 'ohne-projekt');
+    const context = await mkdtemp(join(tmpdir(), 'aideation-review-'));
+    try {
+      const archive = join(context, 'stand.tar');
+      const tree = join(context, 'stand');
+      await mkdir(tree);
+      const exported = await this.execute(['git', 'archive', '--format=tar', '-o', archive, commit], project.folder, {
+        env: gitEnvironment(),
+      });
+      if (exported.exitCode !== 0)
+        return { ok: false, error: `Stand nicht exportiert: ${exported.output.slice(-300)}` };
+      const unpacked = await this.execute(['tar', '-xf', archive, '-C', tree], context);
+      if (unpacked.exitCode !== 0) return { ok: false, error: `Stand nicht entpackt: ${unpacked.output.slice(-300)}` };
+      const built = await this.docker(
+        ['build', '-t', image, '-f', join(tree, dockerfile), '--label', `aideation.review-image=${image}`, tree],
+        20 * 60_000,
+      );
+      if (built.exitCode !== 0) {
+        return {
+          ok: false,
+          error: `Review-Image aus ${dockerfile} nicht gebaut:\n${maskSecrets(built.output.slice(-600))}`,
+        };
+      }
+    } finally {
+      await rm(context, { recursive: true, force: true }).catch(logged('review-image-context'));
+    }
+    const user = await this.docker(['image', 'inspect', '-f', '{{.Config.User}}', image], 15_000);
+    if (user.exitCode !== 0 || runsAsRoot(user.output)) {
+      return {
+        ok: false,
+        error: `Das Review-Image aus ${dockerfile} läuft als root. Im Dockerfile einen eigenen Benutzer anlegen und mit USER setzen (siehe docs/betrieb.md, „Beliebige Anwendung reviewen“).`,
+      };
+    }
+    // Vorherige Fassungen des Images (ohne Tag) aufräumen; schlägt das fehl, läuft der Review trotzdem.
+    await this.docker(['image', 'prune', '-f', '--filter', `label=aideation.review-image=${image}`], 60_000);
+    return { ok: true, image, custom: true };
   }
 
   /** Slot-Datenbank des Review-Users anlegen (falls nötig) in einem kurzlebigen Postgres-Container. */

@@ -211,7 +211,7 @@ export class ProjectWizardComponent implements OnDestroy {
     if (!project) return '';
     const parts = [
       project.testCommands?.length ? 'Testbefehle' : '',
-      project.reviewCommand?.length ? `Review-Befehl „${project.reviewCommand.join(' ')}“` : '',
+      project.reviewCommand?.length ? `Review-Befehle „${project.reviewCommand.join(' && ')}“` : '',
       project.previewUrl ? `Vorschau-Adresse ${project.previewUrl}` : '',
     ].filter(Boolean);
     return parts.length ? `Beim Anlegen vorbelegt: ${parts.join(', ')}.` : '';
