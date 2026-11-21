@@ -1571,3 +1571,55 @@ test('Gegenprobe: normales Scheitern ohne Abbruch startet weiter „Bei abgelehn
   assert.equal(result, 'failed');
   assert.deepEqual(calls, ['dev', 'rejected']);
 });
+
+test('Projekt-Pause im selben Takt: Nach der Pause des ersten Auftrags startet der zweite gewählte Auftrag nicht (pianotrainer, 21.11.2026)', async () => {
+  // Die Datenbank-Attrappe führt nur die Pause: Steht ein retry_after in der Zukunft, trifft ein Start-UPDATE, das die
+  // projektweite Pause prüft, keine Zeile mehr – ein UPDATE ohne diese Prüfung würde den Auftrag starten.
+  let paused = false;
+  let runs = 0;
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: `run-${(runs += 1)}` }], rowCount: 1 };
+      if (sql.includes('SET retry_after = $2')) paused = true;
+      if (sql.includes("SET status = 'in_progress'")) {
+        const checksProject =
+          /NOT EXISTS \(SELECT 1 FROM development_items x WHERE x\.project_slug = d\.project_slug AND x\.retry_after > NOW\(\)\)/.test(
+            sql,
+          );
+        return { rows: [], rowCount: paused && checksProject ? 0 : 1 };
+      }
+      return { rows: [{ id: 'step-row' }], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const execute: CommandExecutor = async (command) => ({
+    exitCode: command[0] === 'b' ? 1 : 0,
+    durationMs: 1,
+    output: command[0] === 'b' ? 'npm error Your cache folder contains root-owned files' : '',
+  });
+  const agents = [agent('a', 'pre_task', 1, ['a']), agent('b', 'while_task', 1, ['b'])];
+  const items = [
+    { ...item, id: 'erster' },
+    { ...item, id: 'zweiter' },
+  ];
+  const results = await runSelectedItems(items, (next) =>
+    runWorkItem(pool, next, agents, { cwd: '/repo', timeoutMs: 1000, execute }),
+  );
+  assert.deepEqual(results, [
+    { itemId: 'erster', result: 'failed' },
+    { itemId: 'zweiter', result: 'skipped' },
+  ]);
+  assert.ok(paused, 'der erste Auftrag hat das Projekt pausiert');
+  // Der verworfene Lauf des zweiten Auftrags wird gelöscht, kein Agent gestartet, kein Schritt angelegt.
+  assert.ok(
+    queries.some((query) => query.sql.includes('DELETE FROM agent_runs') && query.values[0] === 'run-2'),
+    'Lauf des zweiten Auftrags verworfen',
+  );
+  const starts = queries.filter((query) => query.sql.includes("SET status = 'in_progress'"));
+  assert.equal(starts.length, 2);
+  // Dieselbe Bedingung wie in der Auswahl (selectItems), damit beide Stellen gleich entscheiden.
+  const { projectPausedSql } = await import('./runner-selection.js');
+  assert.ok(starts.every((query) => query.sql.includes(`NOT ${projectPausedSql('d')}`)));
+  assert.deepEqual(starts[1]?.values, ['zweiter', false], 'kein gezielter Start (--item), die Pause gilt');
+});

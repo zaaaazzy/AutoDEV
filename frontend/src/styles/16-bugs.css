@@ -23,24 +23,24 @@
 
 /* Bug-Friedhof: geschlossene Bugs, ruhiger dargestellt */
 .panel.graveyard {
-  border-top: 3px solid #8a8f8b;
-  background: #f6f6f4;
+  border-top: 3px solid var(--text-faint-dark);
+  background: var(--surface-subtle);
 }
 .graveyard-heading h2 {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #4d5550;
+  color: var(--text-strong);
 }
 .graveyard-cross {
   font-size: 1.1em;
-  color: #6d746f;
+  color: var(--muted);
 }
 .graveyard-heading p {
   margin-top: 2px;
 }
 .panel.graveyard tbody tr {
-  color: #5d655f;
+  color: var(--text-secondary);
 }
 .graveyard-note {
   max-width: 420px;
@@ -107,7 +107,7 @@
   background: var(--orange);
 }
 .bug-stats-bar .buried {
-  background: #9aa29c;
+  background: var(--text-faint-dark);
 }
 /* Tabelle Kategorie × Sprint: bei vielen Sprints seitlich scrollen statt die Seite zu verbreitern */
 .bug-category-sprints {
@@ -157,7 +157,7 @@
 }
 
 .production-ok {
-  background: #e3f3ea;
+  background: var(--success-soft-alt);
   color: var(--success-text);
   white-space: nowrap;
 }
@@ -212,7 +212,7 @@
 }
 .production-bar:hover > span,
 .production-bar:focus-visible > span {
-  background: #1b5fb8;
+  background: var(--info-bright);
 }
 .production-bar:hover::after,
 .production-bar:focus-visible::after {
@@ -224,8 +224,8 @@
   width: max-content;
   padding: 5px 8px;
   border-radius: 6px;
-  background: var(--ink-deep);
-  color: var(--surface);
+  background: var(--inverse-bg-soft);
+  color: var(--on-accent);
   font-size: 12px;
   transform: translateX(-50%);
   pointer-events: none;
@@ -280,14 +280,14 @@
   margin: 10px 0;
   padding: 10px;
   border-radius: 8px;
-  background: #fbf3ef;
+  background: var(--error-surface);
 }
 .production-rollback p {
   flex-basis: 100%;
   margin: 0;
 }
 .production-rollback-warning {
-  color: #9a3412;
+  color: var(--error-text-deep);
 }
 .production-rollback-reason {
   flex: 1 1 200px;

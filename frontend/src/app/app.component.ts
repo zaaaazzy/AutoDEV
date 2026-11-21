@@ -23,6 +23,7 @@ import { SettingsComponent } from './features/settings/settings.component.js';
 import { StatsComponent } from './features/stats/stats.component.js';
 import { SprintsComponent } from './features/sprints/sprints.component.js';
 import { NavIconComponent } from './shared/nav-icon.component.js';
+import { ThemeSwitchComponent } from './shared/theme-switch.component.js';
 import { firstStepsTour } from './features/tour/first-steps.tour.js';
 import { TourOverlayComponent } from './features/tour/tour-overlay.component.js';
 import { TourService } from './features/tour/tour.service.js';
@@ -62,6 +63,7 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
     TourOverlayComponent,
     WelcomeDialogComponent,
     NavIconComponent,
+    ThemeSwitchComponent,
     AgentListComponent,
     ProjectWizardComponent,
     ProjectSwitcherComponent,

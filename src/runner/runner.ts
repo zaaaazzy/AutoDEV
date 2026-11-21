@@ -19,7 +19,7 @@ import { goLive } from './go-live.js';
 import { acquireTree } from '../core/project-lock.js';
 import { generateSprintReport } from '../api/reports.js';
 import { materializeAttachments } from '../api/attachments.js';
-import { selectItems, loadWorkflow, defaultAgentCommand } from './runner-selection.js';
+import { selectItems, loadWorkflow, defaultAgentCommand, projectPausedSql } from './runner-selection.js';
 import {
   blockForBudget,
   type BudgetState,
@@ -226,13 +226,16 @@ export async function runWorkItem(
   // Ein gezielt gestarteter Auftrag (--item) läuft unabhängig davon, ausser sein Bug stammt aus einer fremden Quelle
   // und ist nicht freigegeben (Prompt-Injection aus Betrieb oder GitHub). Scheitert schon der Start (z. B. Datenbank kurz
   // weg), den Lauf verwerfen: sonst hält er claimRun stundenlang auf.
+  // Projektweite Pause (retry_after eines anderen Auftrags, z. B. defekter Arbeitscontainer): Hat sie der vorige Auftrag
+  // dieses Takts gesetzt, lag die Auswahl schon vor – darum hier erneut, im selben UPDATE (pianotrainer, 21.11.2026).
   const started = await pool
     .query(
       `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.inProgress}', budget_blocked = NULL, retry_after = NULL, updated_at = NOW()
       WHERE d.id = $1 AND NOT ${awaitsBugApprovalSql('d')} AND ($2 OR (d.status = '${DEVELOPMENT_STATUS.planned}' AND d.kind <> 'express'
         AND (d.retry_after IS NULL OR d.retry_after <= NOW()) AND (
         d.agent_id IS NOT NULL OR (
-          NOT EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.paused_at IS NOT NULL)
+          NOT ${projectPausedSql('d')}
+          AND NOT EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.paused_at IS NOT NULL)
           AND ((d.auto_run AND d.sprint_id IS NULL) OR EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.status = '${SPRINT_STATUS.active}'))))))`,
       [item.id, Boolean(options.itemId)],
     )
@@ -244,7 +247,7 @@ export async function runWorkItem(
   if (started.rowCount === 0) {
     await pool.query(`DELETE FROM agent_runs WHERE id = $1`, [runId]).catch(logged('runner'));
     heldRuns.delete(runId);
-    console.info(`Skipping ${item.id}: der Auftrag ist nicht mehr eingeplant.`);
+    console.info(`Skipping ${item.id}: der Auftrag ist nicht mehr eingeplant oder das Projekt pausiert.`);
     return 'skipped';
   }
 

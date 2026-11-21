@@ -93,13 +93,13 @@
   background: var(--line);
 }
 .test-bar .pass {
-  background: #3f8a63;
+  background: var(--success-strong);
 }
 .test-bar .fail {
   background: var(--error-muted);
 }
 .test-bar .skip {
-  background: #b9c0b8;
+  background: var(--neutral-solid);
 }
 .test-filter-note {
   margin: 12px 0 0;
@@ -112,9 +112,9 @@
   display: grid;
   gap: 8px;
   padding: 12px 14px;
-  border: 1px solid #f0d8d0;
+  border: 1px solid var(--error-border);
   border-radius: 12px;
-  background: #fdf8f6;
+  background: var(--error-surface);
 }
 .test-finding-head {
   flex-wrap: wrap;
@@ -154,8 +154,8 @@
   object-position: top;
 }
 .test-thumb.video {
-  background: var(--ink);
-  color: var(--surface);
+  background: var(--inverse-bg);
+  color: var(--on-accent);
   font-weight: 700;
 }
 .test-thumbs video {
@@ -180,7 +180,7 @@
 .test-gallery video {
   width: 100%;
   border-radius: 8px;
-  background: var(--ink);
+  background: var(--inverse-bg);
 }
 .test-gallery figcaption {
   display: grid;
@@ -224,7 +224,7 @@
   gap: 10px;
   align-items: center;
   justify-content: space-between;
-  color: var(--surface);
+  color: var(--on-accent);
   font-size: 13px;
 }
 .test-viewer-actions {
@@ -272,7 +272,7 @@
   border-radius: 3px;
 }
 .test-history-bars .bar.passed {
-  background: #3f8a63;
+  background: var(--success-strong);
 }
 .test-history-bars .bar.failed {
   background: var(--error-muted);
@@ -290,7 +290,7 @@
   width: 6px;
   height: 2px;
   border-radius: 1px;
-  background: var(--ink);
+  background: var(--inverse-bg);
   content: '';
 }
 
@@ -310,7 +310,7 @@
   z-index: 1;
 }
 .test-findings > li.clickable:hover {
-  border-color: #e3b9ad;
+  border-color: var(--error-border-soft);
 }
 .test-finding-summary {
   margin: 0;
@@ -400,14 +400,14 @@
   gap: 6px;
   align-items: baseline;
   padding: 6px 10px;
-  border-left: 3px solid #d7a64e;
+  border-left: 3px solid var(--accent-amber);
   border-radius: 6px;
-  background: #fbf7ee;
+  background: var(--notice-surface);
   overflow-wrap: anywhere;
 }
 .step-issues li.issue-error {
   border-left-color: var(--error-muted);
-  background: #fdf3f0;
+  background: var(--error-surface);
 }
 .issue-level {
   font-size: 11px;
