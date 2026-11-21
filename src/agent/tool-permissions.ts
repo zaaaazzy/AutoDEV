@@ -273,6 +273,9 @@ export const WORKTREE_TOOLS = ['EnterWorktree', 'ExitWorktree'];
 function agentSettings(hook: string | null, matcher: string): object {
   return {
     permissions: { deny: [...SECRET_READ_DENY, ...WORKTREE_TOOLS] },
+    // Claude Code 2.1 isoliert Hintergrund-Agents sonst in einem Worktree unter .claude/worktrees/ und verlangt dafür
+    // EnterWorktree – das ist gesperrt, der Agent hinge am Wächter.
+    worktree: { bgIsolation: 'none' },
     ...(hook ? { hooks: { PreToolUse: [{ matcher, hooks: [{ type: 'command', command: hook, timeout: 90 }] }] } } : {}),
   };
 }
