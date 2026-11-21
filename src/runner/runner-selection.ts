@@ -5,6 +5,7 @@ import { isUuid } from '../core/validation.js';
 import { awaitsBugApprovalSql } from '../core/bug-trust.js';
 import type { RunnerOptions, WorkItem, WorkflowAgent } from './runner-types.js';
 import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
+import { splitShellLine } from '../core/shell-words.js';
 
 /** Höchstes Zeitlimit eines Agent-Schritts (--timeout-minutes); daraus leitet sich die Schwelle für verwaiste Läufe ab. */
 export const MAX_TIMEOUT_MINUTES = 240;
@@ -206,7 +207,15 @@ export function defaultAgentCommand(environment: NodeJS.ProcessEnv = process.env
       ? (parsed as string[])
       : null;
   }
-  return raw.split(/\s+/);
+  // Wie in der Shell: Anführungszeichen gruppieren Argumente mit Leerzeichen. Ein Fehler darf den Start nicht werfen.
+  try {
+    return splitShellLine(raw);
+  } catch (error) {
+    console.warn(
+      `[runner] DEV_LOG_AGENT_COMMAND: ${error instanceof Error ? error.message : String(error)} – Wert wird ignoriert.`,
+    );
+    return null;
+  }
 }
 
 export function parseTestCommands(parsed: unknown): string[][] | null {

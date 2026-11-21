@@ -23,6 +23,7 @@ export const PROJECT_COLUMNS = `slug, name, repository, git_remote AS "gitRemote
   test_commands AS "testCommands", order_test_commands AS "orderTestCommands", deploy_commands AS "deployCommands",
   deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_workspace AS "agentWorkspace",
   agent_sandbox AS "agentSandbox", review_mode AS "reviewMode", review_command AS "reviewCommand", review_url AS "reviewUrl",
+  review_port AS "reviewPort", review_health_path AS "reviewHealthPath", review_dockerfile AS "reviewDockerfile",
   restart_after_sprint AS "restartAfterSprint", agent_permissions AS "agentPermissions",
   definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode",
   sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd",
@@ -55,6 +56,26 @@ export async function encryptProjectSecrets(pool: Pool): Promise<number> {
     ]);
   }
   return rows.length;
+}
+
+/** Einstellungen des Review-Containers eines Projekts, wie der Worker sie liest (database_url verschlüsselt). */
+export interface ReviewProjectRow {
+  folder: string;
+  command: unknown;
+  port: number | null;
+  healthPath: string | null;
+  dockerfile: string | null;
+  databaseUrl: string | null;
+}
+
+export async function findReviewProject(pool: Pool, slug: string): Promise<ReviewProjectRow | undefined> {
+  const result = await pool.query<ReviewProjectRow>(
+    `SELECT repository AS folder, review_command AS command, review_port AS port, review_health_path AS "healthPath",
+            review_dockerfile AS dockerfile, database_url AS "databaseUrl"
+       FROM projects WHERE slug = $1`,
+    [slug],
+  );
+  return result.rows[0];
 }
 
 /** Mandantentrennung: null = Administrator (alle Projekte), sonst nur die freigeschalteten. */

@@ -6,6 +6,7 @@ import { ProjectStore } from '../../core/project-store.js';
 import { BudgetMeterComponent } from '../../shared/budget-meter.component.js';
 import { SettingsGroupDirective } from './settings-group.js';
 import { defined } from '../../../../../src/core/defined.js';
+import { joinShellLine, splitShellLine } from '../../../../../src/core/shell-words.js';
 
 export const PERIODS: { key: BudgetPeriod; label: string; hint: string }[] = [
   { key: 'day', label: 'Je Tag', hint: 'Agents und Assistent zusammen; wird am Folgetag wieder frei.' },
@@ -123,7 +124,7 @@ export class BudgetSettingsComponent {
     this.display = { currency: overview.currency, chfPerUsd: overview.chfPerUsd };
     this.routing = {
       localModel: overview.routing.localModel ?? '',
-      strongCommand: (overview.routing.strongCommand ?? []).join(' '),
+      strongCommand: joinShellLine(overview.routing.strongCommand ?? []),
       customized: overview.routing.customized,
     };
     this.rules = overview.routing.rules.map(toForm);
@@ -174,7 +175,7 @@ export class BudgetSettingsComponent {
           // Unverändert die Standardregeln: nicht als eigene Regeln speichern (so gelten spätere Standards weiter).
           rules: this.routing.customized ? this.rules.map(fromForm) : null,
           localModel: this.routing.localModel.trim() || null,
-          strongCommand: this.routing.strongCommand.trim() ? this.routing.strongCommand.trim().split(/\s+/) : null,
+          strongCommand: this.routing.strongCommand.trim() ? splitShellLine(this.routing.strongCommand) : null,
         });
         if (this.store.isActive(slug)) this.fill(saved);
       },

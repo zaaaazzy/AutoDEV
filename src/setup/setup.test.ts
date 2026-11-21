@@ -233,7 +233,7 @@ test('Vorlage belegt Testbefehle, Review-Befehl, Vorschau-Adresse und Regeln vor
   ]);
   assert.ok(JSON.parse(String(columns.get('order_test_commands')?.value)).some((c: string[]) => c.includes('{tests}')));
   assert.equal(columns.get('review_command')?.cast, '::jsonb');
-  assert.deepEqual(JSON.parse(String(columns.get('review_command')?.value)), ['npm', 'run', 'review']);
+  assert.deepEqual(JSON.parse(String(columns.get('review_command')?.value)), ['npm run review']);
   assert.deepEqual(columns.get('preview_url'), { column: 'preview_url', value: PHASER_DEV_URL, cast: '' });
   assert.match(String(columns.get('guidelines')?.value), /src\/logic/);
 });

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import pg from 'pg';
-import { MIGRATIONS, MIGRATION_LOCK, runMigrations, type Migration } from './migrations.js';
+import { MIGRATIONS, MIGRATION_LOCK, REVIEW_CONTAINER_SETTINGS, runMigrations, type Migration } from './migrations.js';
 import { SCHEMA } from './schema.js';
 import { coverageHistory, coverageOverview } from '../api/coverage.js';
 import { COVERAGE_AREA_ALIASES, COVERAGE_AREA_KEYS, coverageAreaKey } from '../core/coverage-areas.js';
@@ -200,8 +200,8 @@ test('Migration 29: Bug-Kategorie auf PostgreSQL – nur die acht Werte, Zustand
       client.query(`INSERT INTO bugs (project_slug, title, category) VALUES ('shop', 'Bereich', 'git-sync')`),
       /bugs_category_check/,
     );
-    // Danach bleiben die Folgevorschlag-Migration (30), die Abhängigkeit (31) und der Schritt-Commit (32) offen.
-    assert.deepEqual(await runMigrations(client), [30, 31, 32]);
+    // Danach bleiben Folgevorschläge (30), Review-Container (31), Abhängigkeit (32) und Schritt-Commit (33) offen.
+    assert.deepEqual(await runMigrations(client), [30, 31, 32, 33]);
   } finally {
     client.release();
     await pool.end();
@@ -537,19 +537,85 @@ test('Migrationen: Restore-Probe kommt per Migration auch in bestehende Datenban
   assert.match(migration?.sql ?? '', /ON CONFLICT \(key\) DO NOTHING/);
 });
 
-test('Migrationen 31 und 32: Abhängigkeit „Hängt ab von“ und Commit am Schritt, beide idempotent', () => {
-  const dependency = MIGRATIONS.find((step) => step.version === 31);
+test('Migration 31: Review-Spalten per Migration, review_command wird vom Wort-Array zur Zeile', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 31);
+  assert.equal(migration?.name, 'review-container-konfigurierbar');
+  assert.equal(migration?.sql, REVIEW_CONTAINER_SETTINGS);
+  for (const column of ['review_port', 'review_health_path', 'review_dockerfile']) {
+    assert.match(REVIEW_CONTAINER_SETTINGS, new RegExp(`ADD COLUMN IF NOT EXISTS ${column}`));
+    assert.doesNotMatch(SCHEMA, new RegExp(column));
+  }
+  assert.match(REVIEW_CONTAINER_SETTINGS, /review_port BETWEEN 1 AND 65535/);
+  assert.match(REVIEW_CONTAINER_SETTINGS, /string_agg\(word, ' '\)/);
+});
+
+test('Migration 31 auf PostgreSQL: Wort-Array wird eine Zeile, Einzelwort bleibt, Leeres wird NULL, Port geprüft', async (t) => {
+  const admin = await adminPool(t);
+  if (!admin) return;
+  const name = `devlog_migr_review_${process.pid}`;
+  await dropDatabase(admin, name);
+  await admin.query(`CREATE DATABASE ${name}`);
+  const pool = new pg.Pool({ connectionString: databaseUrl(name), max: 1 });
+  const client = await pool.connect();
+  try {
+    await runMigrations(
+      client,
+      MIGRATIONS.filter((step) => step.version <= 30),
+    );
+    const insert = (slug: string, command: string | null) =>
+      client.query(`INSERT INTO projects (slug, name, repository, review_command) VALUES ($1, $1, '/p', $2::jsonb)`, [
+        slug,
+        command,
+      ]);
+    await insert('aideation', JSON.stringify(['sh', 'deploy/review/aideation-review.sh']));
+    await insert('spiel', JSON.stringify(['npm', 'run', 'review']));
+    await insert('einzeln', JSON.stringify(['start.sh']));
+    await insert('leer', JSON.stringify([]));
+    await insert('ohne', null);
+    // Nur bis 31: Spätere Migrationen (Abhängigkeit, Schritt-Commit) gehören nicht zu dieser Prüfung.
+    assert.deepEqual(
+      await runMigrations(
+        client,
+        MIGRATIONS.filter((step) => step.version <= 31),
+      ),
+      [31],
+    );
+    const rows = (
+      await client.query<{ slug: string; command: unknown }>(
+        'SELECT slug, review_command AS command FROM projects ORDER BY slug',
+      )
+    ).rows;
+    assert.deepEqual(Object.fromEntries(rows.map((row) => [row.slug, row.command])), {
+      aideation: ['sh deploy/review/aideation-review.sh'],
+      einzeln: ['start.sh'],
+      leer: null,
+      ohne: null,
+      spiel: ['npm run review'],
+    });
+    await client.query(`UPDATE projects SET review_port = 8080, review_health_path = '/health' WHERE slug = 'spiel'`);
+    await assert.rejects(client.query(`UPDATE projects SET review_port = 0 WHERE slug = 'spiel'`), /review_port/);
+    await assert.rejects(client.query(`UPDATE projects SET review_port = 70000 WHERE slug = 'spiel'`), /review_port/);
+  } finally {
+    client.release();
+    await pool.end();
+    await dropDatabase(admin, name);
+    await admin.end();
+  }
+});
+
+test('Migrationen 32 und 33: Abhängigkeit „Hängt ab von“ und Commit am Schritt, beide idempotent', () => {
+  const dependency = MIGRATIONS.find((step) => step.version === 32);
   assert.equal(dependency?.name, 'auftrag-haengt-ab-von');
   assert.match(
     dependency?.sql ?? '',
     /ALTER TABLE development_items ADD COLUMN IF NOT EXISTS depends_on UUID\s+REFERENCES development_items\(id\) ON DELETE SET NULL/,
   );
   assert.match(dependency?.sql ?? '', /CREATE INDEX IF NOT EXISTS development_items_depends_on_idx/);
-  const commit = MIGRATIONS.find((step) => step.version === 32);
+  const commit = MIGRATIONS.find((step) => step.version === 33);
   assert.equal(commit?.name, 'schritt-commit');
   assert.match(commit?.sql ?? '', /ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS commit_sha TEXT/);
   // Keine frühere Migration kennt die Spalten.
-  for (const step of MIGRATIONS.filter((other) => other.version < 31)) {
+  for (const step of MIGRATIONS.filter((other) => other.version < 32)) {
     assert.doesNotMatch(step.sql, /depends_on|commit_sha TEXT;\s*$/, `Version ${step.version}`);
   }
 });

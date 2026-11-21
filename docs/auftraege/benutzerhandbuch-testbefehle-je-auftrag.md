@@ -8,6 +8,8 @@ Projekte aus der Phaser-Vorlage, und ändert nichts an den Befehlen, die du scho
 **Einstellungen → Qualität & Tests → „Testbefehle je Auftrag (ein Befehl pro Zeile)“.**
 
 - Jede Zeile ist ein eigener Befehl. Die Befehle laufen nacheinander im Tester-Schritt eines Auftrags.
+- Argumente mit Leerzeichen in Anführungszeichen setzen, z. B. `sh -c "npm run build && npm test"`. Ein nicht
+  geschlossenes Anführungszeichen lehnt das Speichern mit Angabe der Zeile ab.
 - Leer lassen: Es gilt dieselbe Liste wie für „Testbefehle beim Live schalten“.
 - Das Feld „Testbefehle beim Live schalten“ hat damit nichts zu tun. Es gilt nur beim Live schalten.
 

@@ -1,6 +1,6 @@
 # Weniger Doppelarbeit der Agents im Worker (2026-11-21)
 
-Branch `fix/worker-doppelarbeit`, aufgesetzt auf `main` nach PR #85 (Sandbox-Heuristik) und #86.
+Branch `fix/worker-doppelarbeit`, aufgesetzt auf `main` nach PR #85 (Sandbox-Heuristik) und #86; `main` bis PR #92 (Review-Container, Migration 31) eingemergt.
 
 ## Anlass
 
@@ -54,7 +54,7 @@ Fehlschlag, Rückmeldung, Nachbesserung, Beobachter, keine Läufe). Die bestehen
 
 ### 2. Tester nicht wiederholen, wenn nichts geändert wurde
 
-- Migration 32: `agent_run_steps.commit_sha`. Nach dem Commit jedes Agent-Schritts speichert `recordStepCommit` den
+- Migration 33: `agent_run_steps.commit_sha`. Nach dem Commit jedes Agent-Schritts speichert `recordStepCommit` den
   Stand des Auftrags-Branchs (`git rev-parse HEAD`) am Schritt (`settleOutcome` in `runner-steps.ts`).
 - Vor einem Tester-Schritt prüft `takeOverUnchangedTester` (in `runWorkItem`, nach dem Wechsel auf den
   Auftrags-Branch), ob ein bestandener Tester-Schritt desselben Einsatzes mit genau diesem `commit_sha` existiert. Dann
@@ -71,7 +71,7 @@ Tester-Urteil übernommen. In der Praxis läuft davor der Entwickler, der dann m
 
 ### 3. Abhängigkeiten zwischen Aufträgen
 
-- Migration 31: `development_items.depends_on UUID REFERENCES development_items(id) ON DELETE SET NULL` mit Teil-Index.
+- Migration 32: `development_items.depends_on UUID REFERENCES development_items(id) ON DELETE SET NULL` mit Teil-Index.
 - Repository (`src/db/development-repository.ts`): `DEV_COLUMNS` liefert `dependsOn`, `dependsOnTitle`,
   `dependsOnStatus`; neu `dependencyAllowed` (gleiches Projekt, nicht selbst, kein Kreis per rekursivem CTE),
   `findOrderByTitle` (ohne Gross-/Kleinschreibung, Anführungszeichen, Leerraum), `loadOpenOrderTitles`, `setDependency`.
@@ -93,7 +93,7 @@ Tester-Urteil übernommen. In der Praxis läuft davor der Entwickler, der dann m
 
 Tests: `src/runner/dependency-selection.test.ts` (PostgreSQL: Auswahl, `--item`, erledigte Abhängigkeit,
 `findOrderByTitle`, Kreise über eine und zwei Stufen, `ON DELETE SET NULL`), `requirements.test.ts` (`splitDependency`,
-Auflösen und Setzen beim Entwurf, unbekannter Titel), `migrations.test.ts` (31/32), `dependency.spec.ts` (Frontend).
+Auflösen und Setzen beim Entwurf, unbekannter Titel), `migrations.test.ts` (32/33), `dependency.spec.ts` (Frontend).
 
 ### 4. Claude-Worktrees der Agents (`src/runner/git-sync/order-branch.ts`)
 
@@ -136,7 +136,7 @@ die lokale PostgreSQL), `ng build --configuration production` für die Angular-T
 
 ## Nach dem Merge
 
-- Worker neu starten (Migrationen 31/32 laufen beim Start).
+- Worker neu starten (Migrationen 32/33 laufen beim Start; 31 ist der Review-Container aus PR #92).
 - Blockierte bzw. abgelehnte pianotrainer-Aufträge von Hand erneut starten; „Spotify-Login“ im Auftrag unter
   „Bearbeiten“ auf „Monorepo-Grundgerüst“ setzen.
 - Offen: Abhängigkeiten in der Sprintplanung (`sprint_rank`) berücksichtigen, damit ein abhängiger Auftrag hinter

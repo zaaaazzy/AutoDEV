@@ -1,6 +1,7 @@
 import { logged } from '../core/log.js';
 import type { Request, Response, Router } from 'express';
 import type { Pool } from 'pg';
+import { reviewUrl } from '../core/review-config.js';
 import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../core/status.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 import { approveWaitingOrders, findSprintProject, type ApprovalScope } from '../db/development-repository.js';
@@ -10,7 +11,6 @@ import { DEV_COLUMNS, ORDER_NOT_FOUND, retryAutoRunSql, retryComment, retrySprin
 import { guardGit } from './git-state.js';
 import { assertInProject } from './tenancy.js';
 
-const PORT_BASE = 4200;
 /** Sprints, deren Stände die Kopfzeile anbietet (laufender Sprint zuerst). */
 const REVIEW_COMMIT_SPRINTS = 3;
 
@@ -93,7 +93,7 @@ async function loadSlots(pool: Pool, allowed: Set<string> | null | undefined): P
     const visible = !allowed || !row.projectSlug || allowed.has(row.projectSlug);
     return {
       ...row,
-      url: `http://localhost:${PORT_BASE + row.slot}`,
+      url: reviewUrl(row.slot),
       projectSlug: visible ? row.projectSlug : null,
       label: visible ? row.label : 'anderes Projekt',
       message: visible ? row.message : null,

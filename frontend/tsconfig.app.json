@@ -26,7 +26,8 @@
     "../src/core/coverage-areas.ts",
     "../src/core/shared-types.ts",
     "../src/core/status.ts",
-    "../src/core/defined.ts"
+    "../src/core/defined.ts",
+    "../src/core/shell-words.ts"
   ],
   "exclude": ["src/**/*.spec.ts"]
 }

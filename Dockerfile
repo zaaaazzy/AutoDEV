@@ -1,4 +1,4 @@
-FROM node:26.13.0-bookworm-slim
+FROM node:26.13.1-bookworm-slim
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*

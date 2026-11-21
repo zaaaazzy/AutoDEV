@@ -523,7 +523,7 @@ Repo-Dokumentation spiegeln (`syncRepoDocs`), Sprint-Bericht für den aktiven Sp
 
 ## Deploy beim Live schalten
 
-Pro Projekt lassen sich in den Einstellungen Deploy-Befehle hinterlegen (z. B. `docker compose up -d --build`). Der Worker führt sie im Projektordner aus, wenn ein Sprint live geschaltet wird (`goLive` in `src/runner/go-live.ts`, nach Test-Gate, Merge nach `main`, Tag und Push) und beim bestätigten Rollback (Abschnitt 5b). Nach einzelnen Aufträgen wird nicht deployt. Live ist damit immer der freigegebene Stand von `main`; das Ergebnis steht in den Einstellungen und in `production_deploys`.
+Pro Projekt lassen sich in den Einstellungen Deploy-Befehle hinterlegen (z. B. `docker compose up -d --build`), ein Befehl pro Zeile; Argumente mit Leerzeichen stehen in Anführungszeichen wie in der Shell (`sh -c "npm run build && npm test"`), ohne Variablen-Expansion. Das gilt ebenso für Testbefehle, Testbefehle je Auftrag und den Review-Befehl. Der Worker führt sie im Projektordner aus, wenn ein Sprint live geschaltet wird (`goLive` in `src/runner/go-live.ts`, nach Test-Gate, Merge nach `main`, Tag und Push) und beim bestätigten Rollback (Abschnitt 5b). Nach einzelnen Aufträgen wird nicht deployt. Live ist damit immer der freigegebene Stand von `main`; das Ergebnis steht in den Einstellungen und in `production_deploys`.
 
 ## Sprint-Ablauf: vom Start bis Live
 

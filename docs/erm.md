@@ -102,6 +102,7 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 
 ## Erweiterung: Visuelle Abnahme (Screenshots vor und nach dem Auftrag)
 
+- `projects`: Review-Container: `review_command` (JSONB-Array von Zeilen, ein Befehl je Zeile; seit Migration 31, davor Wort-Array eines Befehls), `review_port` (Port der App im Container, 1–65535, NULL = 4200), `review_health_path` (Pfad der Bereitschaftsprüfung, NULL = `/`), `review_dockerfile` (Dockerfile relativ zum Projekt für eine eigene Laufzeit, NULL = Standard-Image); `review_url` ist ungenutzt.
 - `projects`: `preview_url` (http(s), ohne Zugangsdaten; leer = Schritt übersprungen), `preview_pages` (JSONB-Liste von Pfaden wie `/#dashboard`), `visual_settings` (JSONB: `tolerance` in Prozent, `threshold` Farbabstand, `masks` CSS-Selektoren, `login` mit Seite, Selektoren und den **Namen** der Testwerte aus der `.env.example`, `aiJudge`, `visionModel`).
 - `agents.role` zusätzlich `visual_tester`; `acceptance_checks.kind` zusätzlich `visual` (Befunde der visuellen Prüfung, ersetzt bei jedem Lauf; der Tester lässt sie stehen).
 - `development_items`: `visual_approved_at`, `visual_approved_by` (Anzeigename) – „Optisch freigeben“ im Reiter „Ansicht“.

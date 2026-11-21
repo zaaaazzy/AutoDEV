@@ -62,6 +62,22 @@ const LEGACY_DATA = `
    WHERE order_token_limit IS NOT NULL OR order_cost_limit IS NOT NULL;
 `;
 
+/** Migration 31 (auch einzeln getestet): neue Spalten und Umwandlung von review_command in Zeilen. */
+export const REVIEW_CONTAINER_SETTINGS = `
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS review_port INTEGER
+    CHECK (review_port IS NULL OR review_port BETWEEN 1 AND 65535);
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS review_health_path TEXT;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS review_dockerfile TEXT;
+  UPDATE projects
+     SET review_command = jsonb_build_array(
+           (SELECT string_agg(word, ' ') FROM jsonb_array_elements_text(review_command) AS word))
+   WHERE review_command IS NOT NULL AND jsonb_typeof(review_command) = 'array'
+     AND jsonb_array_length(review_command) > 1;
+  UPDATE projects SET review_command = NULL
+   WHERE review_command IS NOT NULL
+     AND (jsonb_typeof(review_command) <> 'array' OR jsonb_array_length(review_command) = 0);
+`;
+
 /**
  * Nummerierte Schritte, jeder läuft genau einmal (vermerkt in schema_migrations). Bestehende Schritte nie ändern
  * oder umnummerieren, Neues hinten anhängen.
@@ -680,11 +696,19 @@ export const MIGRATIONS: readonly Migration[] = [
         WHERE status = 'proposed';
     `,
   },
+  // Review-Container je Projekt konfigurierbar: Port der App im Container, Pfad der Bereitschaftsprüfung, eigenes
+  // Dockerfile. review_command wird vom Wort-Array eines Befehls (['npm','run','review']) zu einer Zeile je Befehl
+  // (['npm run review']); mehrere Zeilen laufen nacheinander unter `sh -e`.
+  {
+    version: 31,
+    name: 'review-container-konfigurierbar',
+    sql: REVIEW_CONTAINER_SETTINGS,
+  },
   // Abhängigkeit zwischen Aufträgen: Der Worker startet einen Auftrag erst, wenn der Auftrag, von dem er abhängt,
   // erledigt ist (pianotrainer, 21.11.2026: „Spotify-Login“ lief vor dem „Monorepo-Grundgerüst“ und baute es doppelt).
   // Setzt der Auftragsautor („Hängt ab von: <Titel>“) oder ein Mensch über PATCH /development/:id.
   {
-    version: 31,
+    version: 32,
     name: 'auftrag-haengt-ab-von',
     sql: `
       ALTER TABLE development_items ADD COLUMN IF NOT EXISTS depends_on UUID
@@ -696,7 +720,7 @@ export const MIGRATIONS: readonly Migration[] = [
   // Stand des Auftrags-Branchs nach einem Agent-Schritt: Hat der Tester denselben Commit schon bestanden, übernimmt
   // der nächste Lauf sein Ergebnis, statt die Tests erneut laufen zu lassen.
   {
-    version: 32,
+    version: 33,
     name: 'schritt-commit',
     sql: `
       ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS commit_sha TEXT;
