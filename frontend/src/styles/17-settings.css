@@ -36,7 +36,7 @@
   padding: 0;
   border: 0;
   border-radius: 999px;
-  background: #d5dcd3;
+  background: var(--border-default);
   appearance: none;
   cursor: pointer;
   transition: background 0.2s;
@@ -80,7 +80,7 @@
   background:
     radial-gradient(70% 50% at 10% 0%, rgb(215 134 78 / 30%), transparent 60%),
     radial-gradient(60% 50% at 100% 100%, rgb(47 138 87 / 38%), transparent 65%),
-    linear-gradient(165deg, #22302a, #141b18);
+    linear-gradient(165deg, var(--inverse-bg-soft), var(--inverse-bg-deep));
 }
 .login-card {
   display: grid;
@@ -138,7 +138,7 @@
   margin: 0;
   padding: 10px 14px;
   border-radius: 12px;
-  background: #fbefec;
+  background: var(--error-soft);
   color: var(--error-text-deep);
 }
 .login-submit {
@@ -150,7 +150,7 @@
 }
 .login-foot {
   margin: 0;
-  color: #8a938c;
+  color: var(--text-faint-dark);
   font-size: 12px;
   text-align: center;
 }
@@ -184,7 +184,7 @@
   font-weight: 700;
 }
 .security-badge.on {
-  background: #e3f2e9;
+  background: var(--success-soft-alt);
   color: var(--green-light);
 }
 .totp-setup {
@@ -307,7 +307,7 @@
 }
 .role-option:has(input:checked) {
   border-color: var(--success-border-soft);
-  background: #f3faf6;
+  background: var(--success-surface-faint);
 }
 .role-option input {
   width: auto;
@@ -357,7 +357,7 @@
 }
 .user-row.system .user-avatar {
   background: var(--orange);
-  color: var(--ink);
+  color: var(--on-warm);
 }
 .user-main {
   display: grid;
@@ -382,7 +382,7 @@
   color: var(--warn);
 }
 .danger-zone {
-  border-color: #efc2b8;
+  border-color: var(--error-border-soft);
 }
 .danger-zone h2 {
   color: var(--error-text-deep);
@@ -394,8 +394,8 @@
   background: var(--surface);
 }
 .permission-list li.custom {
-  border-color: #cfe0d5;
-  background: #f6faf7;
+  border-color: var(--border-default);
+  background: var(--success-surface-faint);
 }
 .permission-head {
   flex-wrap: wrap;
@@ -457,7 +457,7 @@
   gap: 8px;
   align-items: center;
   padding: 6px 0;
-  border-bottom: 1px solid #edf0eb;
+  border-bottom: 1px solid var(--surface-hover-alt);
   font-size: 12px;
 }
 
@@ -517,7 +517,7 @@
   text-decoration: none;
 }
 .routing-rule .rule-actions .link-button:hover:not(:disabled) {
-  background: #eef2ed;
+  background: var(--surface-hover-alt);
   color: var(--green);
 }
 .routing-rule .rule-actions .link-button:disabled {
@@ -546,7 +546,7 @@
   color: var(--green);
 }
 .github-auth.missing {
-  color: #b54708;
+  color: var(--notice-text-warm);
 }
 .settings-page {
   display: grid;
@@ -644,7 +644,7 @@
   padding: 10px 14px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: rgb(255 255 255 / 94%);
+  background: rgb(var(--surface-rgb) / 94%);
   box-shadow: 0 -4px 14px rgb(0 0 0 / 5%);
 }
 
