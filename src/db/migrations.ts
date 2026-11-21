@@ -680,6 +680,28 @@ export const MIGRATIONS: readonly Migration[] = [
         WHERE status = 'proposed';
     `,
   },
+  // Abhängigkeit zwischen Aufträgen: Der Worker startet einen Auftrag erst, wenn der Auftrag, von dem er abhängt,
+  // erledigt ist (pianotrainer, 21.11.2026: „Spotify-Login“ lief vor dem „Monorepo-Grundgerüst“ und baute es doppelt).
+  // Setzt der Auftragsautor („Hängt ab von: <Titel>“) oder ein Mensch über PATCH /development/:id.
+  {
+    version: 31,
+    name: 'auftrag-haengt-ab-von',
+    sql: `
+      ALTER TABLE development_items ADD COLUMN IF NOT EXISTS depends_on UUID
+        REFERENCES development_items(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS development_items_depends_on_idx ON development_items (depends_on)
+        WHERE depends_on IS NOT NULL;
+    `,
+  },
+  // Stand des Auftrags-Branchs nach einem Agent-Schritt: Hat der Tester denselben Commit schon bestanden, übernimmt
+  // der nächste Lauf sein Ergebnis, statt die Tests erneut laufen zu lassen.
+  {
+    version: 32,
+    name: 'schritt-commit',
+    sql: `
+      ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS commit_sha TEXT;
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

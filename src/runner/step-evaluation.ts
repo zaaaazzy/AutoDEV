@@ -10,7 +10,14 @@ import { sendPush } from '../core/push.js';
 import { EVIDENCE_ROLES } from './runner-prompts.js';
 import { ruleRefusal } from './autofix.js';
 import type { CommandExecutor } from '../core/command.js';
-import { changedFilesSection, conflictPrompt, type OrderBranch, unresolvedConflicts } from './git-sync.js';
+import {
+  changedFilesSection,
+  conflictPrompt,
+  gitHelpers,
+  type OrderBranch,
+  trackedChanges,
+  unresolvedConflicts,
+} from './git-sync.js';
 import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
 import { measureCoverage, mergeCoverage } from './measured-coverage.js';
 import { parseReview } from './review.js';
@@ -137,6 +144,34 @@ export async function refusedByRule(pool: RunContext['pool'], stepId: string, ou
   const refused = ruleRefusal(output) !== null;
   if (refused) await logEvent(pool, stepId, 'Abgelehnt wegen Projektregel');
   return refused;
+}
+
+/**
+ * Lehnt der Entwickler per @@REGEL ab, obwohl die Arbeit des Auftrags schon auf seinem Branch liegt (Commits gegenüber
+ * der Basis, Arbeitsbaum sauber), gab es für ihn nichts mehr zu tun – etwa nach einem fortgesetzten Lauf oder bei
+ * einem Dokumentationsauftrag ohne package.json. Dann gilt der Schritt als bestanden, mit Hinweis statt „abgelehnt“.
+ * Liefert den Hinweis für die Ausgabe oder null, wenn die Ablehnung gilt. Scheitert git, gilt die Ablehnung.
+ */
+export async function finishedWorkDespiteRefusal(
+  ctx: RunContext,
+  agent: Pick<WorkflowAgent, 'role'>,
+  stepId: string,
+  output: string,
+): Promise<string | null> {
+  const rule = ruleRefusal(output);
+  if (!rule || agent.role !== 'developer' || !ctx.branch) return null;
+  const { git } = gitHelpers(ctx.execute, ctx.options.cwd);
+  const ahead = await git('rev-list', '--count', `${ctx.branch.base}..HEAD`);
+  const commits = ahead.exitCode === 0 ? Number(ahead.output) : 0;
+  if (!Number.isInteger(commits) || commits < 1) return null;
+  const open = await trackedChanges(git);
+  if (open.length) return null;
+  const note =
+    `Hinweis: Der Agent hat mit „@@REGEL: ${rule}“ abgelehnt, die Arbeit des Auftrags liegt aber schon auf dem ` +
+    `Branch (${commits} Commit${commits === 1 ? '' : 's'} gegenüber ${ctx.branch.base}, Arbeitsbaum sauber) – es gab ` +
+    'nichts mehr zu tun. Der Schritt gilt als bestanden.';
+  await logEvent(ctx.pool, stepId, `@@REGEL trotz fertiger Arbeit auf dem Branch (${commits} Commits) – bestanden`);
+  return note;
 }
 
 /**

@@ -261,10 +261,15 @@ export function agentRights(
   };
 }
 
-/** Einstellungen für --settings: Deny-Regeln für Geheimnisse und (falls startbar) der Wächter als PreToolUse-Hook. */
+/**
+ * Einstellungen für --settings: Deny-Regeln für Geheimnisse, (falls startbar) der Wächter als PreToolUse-Hook und keine
+ * Worktree-Isolation für Hintergrund-Agents: Die CLI legt sonst unter .claude/worktrees/ des Projekts einen Git-Worktree
+ * samt Branch an, der dem nächsten Auftrag als fremde Änderung erschiene.
+ */
 function agentSettings(hook: string | null, matcher: string): object {
   return {
     permissions: { deny: SECRET_READ_DENY },
+    worktree: { bgIsolation: 'none' },
     ...(hook ? { hooks: { PreToolUse: [{ matcher, hooks: [{ type: 'command', command: hook, timeout: 90 }] }] } } : {}),
   };
 }

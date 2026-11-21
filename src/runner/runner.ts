@@ -19,7 +19,13 @@ import { goLive } from './go-live.js';
 import { acquireTree } from '../core/project-lock.js';
 import { generateSprintReport } from '../api/reports.js';
 import { materializeAttachments } from '../api/attachments.js';
-import { selectItems, loadWorkflow, defaultAgentCommand, projectPausedSql } from './runner-selection.js';
+import {
+  defaultAgentCommand,
+  dependencyDoneSql,
+  loadWorkflow,
+  projectPausedSql,
+  selectItems,
+} from './runner-selection.js';
 import {
   blockForBudget,
   type BudgetState,
@@ -31,6 +37,7 @@ import { setActionTodo } from './action-todo.js';
 import { blockForOverrun, guardedOverrunGate, type OverrunState, overrunTodo } from './estimate-overrun.js';
 import { pauseForFolderProblem } from './folder-pause.js';
 import { leftItsSprint } from './runner-settle.js';
+import { LOOP_BACK_ROLES, resumePosition, takeOverUnchangedTester } from './runner-resume.js';
 import {
   claimRun,
   guardedBudgetGate,
@@ -52,7 +59,6 @@ export {
   parseTestCommands,
 } from './runner-selection.js';
 export { BUDGET_CHECK_RETRY_MS, runBuiltinAgent } from './runner-steps.js';
-import type { StepSummary as ResumedStep } from './runner-types.js';
 import { currentWorkerId, liveWorkerSql, WORKER_STALE_SECONDS } from './worker-identity.js';
 
 export type {
@@ -78,91 +84,6 @@ export function changesWorkingTree(agent: Pick<WorkflowAgent, 'phase' | 'role'>)
 function waitingForTree(itemId: string, cwd: string): () => void {
   return () =>
     console.info(`[${itemId}] wartet auf Arbeitsordner ${cwd} – ein anderer Lauf ändert dort gerade Dateien.`);
-}
-
-/**
- * After a failed run only the failed agent and the ones after it run again: leading agents that already passed in the
- * previous run are skipped and their output is handed on to the following agents.
- */
-async function resumePosition(
-  pool: Pool,
-  itemId: string,
-  currentRunId: string,
-  ordered: WorkflowAgent[],
-  done: ResumedStep[],
-): Promise<number> {
-  const previous = (
-    await pool.query<{ id: string; status: string }>(
-      `SELECT id, status FROM agent_runs WHERE development_id = $1 AND id <> $2 ORDER BY started_at DESC LIMIT 1`,
-      [itemId, currentRunId],
-    )
-  ).rows[0];
-  if (previous?.status !== AGENT_RUN_STATUS.failed) return 0;
-  const rows = (
-    await pool.query<{
-      agent_id: string;
-      workflow_step_id: string | null;
-      agent_name: string;
-      phase: string;
-      status: string;
-      output: string;
-      interrupted?: boolean | null;
-    }>(
-      `SELECT agent_id, workflow_step_id, agent_name, phase, status, output, interrupted
-         FROM agent_run_steps WHERE run_id = $1 ORDER BY position`,
-      [previous.id],
-    )
-  ).rows;
-  // Schlüssel je Einsatz: derselbe Agent kann im Workflow mehrfach vorkommen.
-  const keyOf = (row: { agent_id: string; workflow_step_id: string | null }) => row.workflow_step_id ?? row.agent_id;
-  const keyOfAgent = (agent: WorkflowAgent) => agent.stepId ?? agent.id;
-  // Nach einer Nachbesserung im Lauf zählt je Einsatz nur sein letzter Schritt – auch wenn der Lauf danach früh
-  // abbrach und daher nicht mehr Zeilen als Agents hat. Erkannt wird sie daran, dass ein Einsatz öfter vorkommt als
-  // im Ablauf; sonst gilt die Position (derselbe Agent ohne eigenen Workflow-Schritt kann mehrfach vorkommen).
-  const latest = new Map(rows.map((row) => [keyOf(row), row]));
-  const count = <T>(keys: T[]) =>
-    keys.reduce((map, key) => map.set(key, (map.get(key) ?? 0) + 1), new Map<T, number>());
-  const planned = count(ordered.map(keyOfAgent));
-  const corrected = [...count(rows.map(keyOf))].some(([key, times]) => times > (planned.get(key) ?? times));
-  const steps = corrected ? ordered.map((agent) => latest.get(keyOfAgent(agent))) : rows;
-  let position = 0;
-  while (position < ordered.length) {
-    const step = steps[position];
-    const agent = ordered[position];
-    if (!step || !agent || keyOf(step) !== keyOfAgent(agent)) break;
-    if (step.status !== AGENT_STEP_STATUS.passed) break;
-    done.push({ agentName: step.agent_name, phase: step.phase, status: 'passed', output: step.output });
-    position += 1;
-  }
-  // Lehnen Tester oder Reviewer ab, beginnt der nächste Versuch wieder beim Entwickler – mit deren Rückmeldung.
-  // Wurde der Schritt nur unterbrochen (Worker beendet, Ordner weg, Nutzungslimit), setzt derselbe Agent fort.
-  const failed = steps[position];
-  const failedAgent = ordered[position];
-  if (
-    failed &&
-    failed.status !== AGENT_STEP_STATUS.passed &&
-    !failed.interrupted &&
-    failedAgent &&
-    LOOP_BACK_ROLES.has(failedAgent.role)
-  ) {
-    const restart = ordered.findIndex((agent) => agent.phase === 'while_task');
-    if (restart >= 0 && restart < position) {
-      done.splice(restart);
-      done.push({
-        agentName: failed.agent_name,
-        phase: failed.phase,
-        status: 'failed',
-        output: `Rückmeldung aus dem letzten Versuch – bitte beheben:\n${failed.output}`,
-      });
-      return restart;
-    }
-  }
-  // If everything passed already, repeat at least the last agent.
-  if (position === ordered.length && position > 0) {
-    done.pop();
-    position -= 1;
-  }
-  return position;
 }
 
 /**
@@ -205,9 +126,6 @@ export async function sprintPaused(pool: Pool, item: Pick<WorkItem, 'sprintId' |
   return row?.paused === true || ['completed', 'cancelled', 'review'].includes(row?.status ?? '');
 }
 
-/** Rollen, deren Ablehnung den Auftrag zurück zum Entwickler schickt. */
-const LOOP_BACK_ROLES = new Set(['tester', 'reviewer']);
-
 export async function runWorkItem(
   pool: Pool,
   item: WorkItem,
@@ -234,7 +152,7 @@ export async function runWorkItem(
       WHERE d.id = $1 AND NOT ${awaitsBugApprovalSql('d')} AND ($2 OR (d.status = '${DEVELOPMENT_STATUS.planned}' AND d.kind <> 'express'
         AND (d.retry_after IS NULL OR d.retry_after <= NOW()) AND (
         d.agent_id IS NOT NULL OR (
-          NOT ${projectPausedSql('d')}
+          NOT ${projectPausedSql('d')} AND ${dependencyDoneSql('d')}
           AND NOT EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.paused_at IS NOT NULL)
           AND ((d.auto_run AND d.sprint_id IS NULL) OR EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.status = '${SPRINT_STATUS.active}'))))))`,
       [item.id, Boolean(options.itemId)],
@@ -374,6 +292,12 @@ export async function runWorkItem(
         const sprint = await sprintOf(pool, item);
         ctx.sprintName = sprint?.name ?? null;
         ctx.branch = await enterOrderBranch(options.cwd, item, sprint, ctx.execute);
+      }
+      // Tester: Hat er genau diesen Stand des Auftrags-Branchs schon bestanden, gilt sein Ergebnis weiter.
+      if (await takeOverUnchangedTester(ctx, agent, stepPosition).catch(logged('runner', false))) {
+        stepPosition += 1;
+        position += 1;
+        continue;
       }
       const canCorrect =
         !corrected && !item.agentId && LOOP_BACK_ROLES.has(agent.role) && developerAt >= 0 && developerAt < position;

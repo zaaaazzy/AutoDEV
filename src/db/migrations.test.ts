@@ -200,8 +200,8 @@ test('Migration 29: Bug-Kategorie auf PostgreSQL – nur die acht Werte, Zustand
       client.query(`INSERT INTO bugs (project_slug, title, category) VALUES ('shop', 'Bereich', 'git-sync')`),
       /bugs_category_check/,
     );
-    // Danach bleibt nur noch die Folgevorschlag-Migration (30) offen.
-    assert.deepEqual(await runMigrations(client), [30]);
+    // Danach bleiben die Folgevorschlag-Migration (30), die Abhängigkeit (31) und der Schritt-Commit (32) offen.
+    assert.deepEqual(await runMigrations(client), [30, 31, 32]);
   } finally {
     client.release();
     await pool.end();
@@ -535,4 +535,21 @@ test('Migrationen: Restore-Probe kommt per Migration auch in bestehende Datenban
   const migration = MIGRATIONS.find((step) => step.version === 22);
   assert.match(migration?.sql ?? '', /'restore_probe', TRUE, 604800, 'restore_probe'/);
   assert.match(migration?.sql ?? '', /ON CONFLICT \(key\) DO NOTHING/);
+});
+
+test('Migrationen 31 und 32: Abhängigkeit „Hängt ab von“ und Commit am Schritt, beide idempotent', () => {
+  const dependency = MIGRATIONS.find((step) => step.version === 31);
+  assert.equal(dependency?.name, 'auftrag-haengt-ab-von');
+  assert.match(
+    dependency?.sql ?? '',
+    /ALTER TABLE development_items ADD COLUMN IF NOT EXISTS depends_on UUID\s+REFERENCES development_items\(id\) ON DELETE SET NULL/,
+  );
+  assert.match(dependency?.sql ?? '', /CREATE INDEX IF NOT EXISTS development_items_depends_on_idx/);
+  const commit = MIGRATIONS.find((step) => step.version === 32);
+  assert.equal(commit?.name, 'schritt-commit');
+  assert.match(commit?.sql ?? '', /ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS commit_sha TEXT/);
+  // Keine frühere Migration kennt die Spalten.
+  for (const step of MIGRATIONS.filter((other) => other.version < 31)) {
+    assert.doesNotMatch(step.sql, /depends_on|commit_sha TEXT;\s*$/, `Version ${step.version}`);
+  }
 });

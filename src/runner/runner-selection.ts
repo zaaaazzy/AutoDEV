@@ -147,11 +147,39 @@ export async function selectItems(pool: Pool, options: RunnerOptions): Promise<W
         AND (d.agent_id IS NOT NULL OR NOT ${projectPausedSql('d')})
         -- Pausierter Sprint: keine Aufträge starten (ausser ein einzelner Agent wurde von Hand gestartet).
         AND (s.paused_at IS NULL OR d.agent_id IS NOT NULL)
+        -- „Hängt ab von“: erst, wenn der Auftrag, auf dem dieser aufbaut, erledigt ist (sonst baut er ihn doppelt).
+        AND ${dependencyDoneSql('d')}
       ORDER BY d.sprint_rank NULLS LAST, CASE d.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, d.created_at
       LIMIT $2`,
     [options.project, options.limit],
   );
+  await logWaitingItems(pool, options.project).catch(() => undefined);
   return result.rows;
+}
+
+/** SQL-Bedingung: Der Auftrag `alias` hat keine Abhängigkeit, oder der Auftrag, von dem er abhängt, ist erledigt. */
+export const dependencyDoneSql = (alias: string): string =>
+  `(${alias}.depends_on IS NULL OR EXISTS (SELECT 1 FROM development_items p WHERE p.id = ${alias}.depends_on AND p.status = '${DEVELOPMENT_STATUS.done}'))`;
+
+/** Aufträge, deren Warten auf ihre Abhängigkeit schon im Log steht (einmal je Auftrag und Worker-Laufzeit). */
+const loggedWaiting = new Set<string>();
+
+/** Geplante Aufträge, die nur wegen ihrer Abhängigkeit nicht starten, einmal je Auftrag melden. */
+async function logWaitingItems(pool: Pool, project: string): Promise<void> {
+  const waiting = await pool.query<{ id: string; title: string; dependsOnTitle: string; dependsOnStatus: string }>(
+    `SELECT d.id, d.title, p.title AS "dependsOnTitle", p.status AS "dependsOnStatus"
+       FROM development_items d JOIN development_items p ON p.id = d.depends_on
+      WHERE d.project_slug = $1 AND d.status = '${DEVELOPMENT_STATUS.planned}' AND d.kind <> 'express'
+        AND p.status <> '${DEVELOPMENT_STATUS.done}'`,
+    [project],
+  );
+  for (const item of waiting.rows) {
+    if (loggedWaiting.has(item.id)) continue;
+    loggedWaiting.add(item.id);
+    console.info(
+      `[${item.id}] „${item.title}“ wartet auf „${item.dependsOnTitle}“ (${item.dependsOnStatus}) – startet erst, wenn dieser erledigt ist.`,
+    );
+  }
 }
 
 /**

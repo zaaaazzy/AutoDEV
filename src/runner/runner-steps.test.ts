@@ -388,3 +388,72 @@ test('runStep: vor dem neuen Versuch wird das Budget geprüft – erreicht, häl
   assert.equal(freeCalls, 2);
   assert.equal(retried.passed, true);
 });
+
+/** git-Antworten des Auftrags-Branchs: `ahead` Commits gegenüber der Basis, `open` offene versionierte Dateien. */
+function branchExecutor(
+  ahead: number,
+  open: string,
+  agentOutput: string,
+): { execute: CommandExecutor; calls: string[][] } {
+  const calls: string[][] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command);
+    if (command[0] !== 'git') return { exitCode: 0, durationMs: 1, output: agentOutput };
+    if (command.includes('rev-list')) return { exitCode: 0, durationMs: 1, output: `${ahead}\n` };
+    if (command.includes('status')) return { exitCode: 0, durationMs: 1, output: open };
+    if (command.includes('symbolic-ref')) return { exitCode: 0, durationMs: 1, output: 'auftrag/x' };
+    if (command.includes('rev-parse')) return { exitCode: 0, durationMs: 1, output: 'abc1234' };
+    return { exitCode: 0, durationMs: 1, output: '' };
+  };
+  return { execute, calls };
+}
+
+test('runStep: @@REGEL des Entwicklers bei fertiger Arbeit auf dem Branch gilt als bestanden mit Hinweis', async () => {
+  const { pool, queries } = fakePool((sql) =>
+    sql.includes('INSERT INTO agent_run_steps') ? [{ id: 'step-1' }] : undefined,
+  );
+  const { execute } = branchExecutor(2, '', 'Es gibt kein package.json.\n@@REGEL: Keine Tests ohne package.json');
+  const ctx = context(pool, execute, { branch: { branch: 'auftrag/x', base: 'main' } });
+  const outcome = await runStep(ctx, agent('Dev', { role: 'developer', command: ['dev'] }), 0, 1);
+  assert.equal(outcome.passed, true);
+  const saved = queries.find((query) => query.sql.includes('SET status = $2, exit_code = $3'));
+  assert.equal(saved?.values[1], 'passed');
+  assert.match(
+    String(saved?.values[4]),
+    /Hinweis: Der Agent hat mit „@@REGEL: Keine Tests ohne package\.json“ abgelehnt/,
+  );
+  assert.match(String(saved?.values[4]), /2 Commits gegenüber main, Arbeitsbaum sauber/);
+  const events = queries
+    .filter((query) => query.sql.includes('events = events ||'))
+    .map((query) => String(query.values[1]));
+  assert.ok(events.some((event) => event.includes('@@REGEL trotz fertiger Arbeit auf dem Branch')));
+  assert.ok(!events.some((event) => event.includes('Abgelehnt wegen Projektregel')));
+  assert.ok(!queries.some((query) => query.sql.includes("status = 'rejected'")), 'nicht abgelehnt');
+});
+
+test('runStep: @@REGEL ohne Commits oder mit offenen Änderungen bleibt eine Ablehnung', async () => {
+  for (const [ahead, open] of [
+    [0, ''],
+    [3, ' M src/a.ts'],
+  ] as const) {
+    const { pool, queries } = fakePool((sql) =>
+      sql.includes('INSERT INTO agent_run_steps') ? [{ id: 'step-1' }] : undefined,
+    );
+    const { execute } = branchExecutor(ahead, open, '@@REGEL: Keine Tests ohne package.json');
+    const ctx = context(pool, execute, { branch: { branch: 'auftrag/x', base: 'main' } });
+    const outcome = await runStep(ctx, agent('Dev', { role: 'developer', command: ['dev'] }), 0, 1);
+    assert.equal(outcome.passed, false, `ahead=${ahead} open=${JSON.stringify(open)}`);
+    assert.ok(
+      queries.some((query) => query.sql.includes("status = 'rejected'")),
+      'Auftrag abgelehnt',
+    );
+  }
+});
+
+test('runStep: @@REGEL des Testers zählt auch mit Commits auf dem Branch als Ablehnung', async () => {
+  const { pool } = fakePool((sql) => (sql.includes('INSERT INTO agent_run_steps') ? [{ id: 'step-1' }] : undefined));
+  const { execute } = branchExecutor(2, '', '@@REGEL: Keine Tests ohne package.json');
+  const ctx = context(pool, execute, { branch: { branch: 'auftrag/x', base: 'main' } });
+  const outcome = await runStep(ctx, agent('Test', { role: 'tester', command: ['test'] }), 1, 2);
+  assert.equal(outcome.passed, false);
+});
