@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
-import { loadOrderTestCommands, loadTestCommands } from './runner-selection.js';
+import { loadOrderTestCommands, loadTestCommandSet, skippedTestCommandsNote } from './runner-selection.js';
 
 /**
  * Tests im Tester-Schritt eines Auftrags: nur zu den Dateien, die der Auftrag geändert hat. Die vollständigen
@@ -93,6 +93,24 @@ export interface TesterPlan {
   scoped: boolean;
   files: string[];
   tests: string[];
+  /** Ausgabe der übersprungenen Schritte: warum sie nicht gelaufen sind. */
+  skipNote: string;
+}
+
+/**
+ * Testbefehle des Projekts als Plan für einen vollen Lauf. Die Standardwerte entfallen ohne package.json: alle
+ * Schritte werden als übersprungen festgehalten, der Lauf gilt als bestanden.
+ */
+export async function projectTestPlan(pool: Pool, project: string, cwd: string): Promise<TesterPlan> {
+  const set = await loadTestCommandSet(pool, project);
+  const note = skippedTestCommandsNote(set, cwd);
+  return {
+    commands: set.commands.map((command) => ({ command, skipped: note !== null })),
+    scoped: false,
+    files: [],
+    tests: [],
+    skipNote: note ?? SKIPPED_NOTE,
+  };
 }
 
 /**
@@ -106,10 +124,7 @@ export async function testerPlan(
   changed: string[] | undefined,
 ): Promise<TesterPlan> {
   const order = changed ? await loadOrderTestCommands(pool, project) : null;
-  if (!order || !changed) {
-    const commands = await loadTestCommands(pool, project);
-    return { commands: commands.map((command) => ({ command, skipped: false })), scoped: false, files: [], tests: [] };
-  }
+  if (!order || !changed) return projectTestPlan(pool, project, cwd);
   const exists = (path: string): boolean => existsSync(join(cwd, path));
   const files = changed.filter(exists);
   const tests = relatedTestFiles(changed, exists);
@@ -120,12 +135,22 @@ export async function testerPlan(
       return isPlaywrightTest(path);
     }
   };
-  return { commands: expandOrderCommands(order, files, tests, isPlaywright), scoped: true, files, tests };
+  return {
+    commands: expandOrderCommands(order, files, tests, isPlaywright),
+    scoped: true,
+    files,
+    tests,
+    skipNote: SKIPPED_NOTE,
+  };
 }
 
 /** Kurzer Hinweis über den Umfang des Testlaufs für die Ausgabe des Tester-Schritts. */
 export function planSummary(plan: TesterPlan): string {
-  if (!plan.scoped) return '';
+  if (!plan.scoped) {
+    return plan.commands.length && plan.commands.every((command) => command.skipped)
+      ? 'Keine package.json im Projekt – die Standard-Testbefehle entfallen; eigene Testbefehle unter Projekt → Einstellungen hinterlegen. Schritt bestanden.'
+      : '';
+  }
   const tests = plan.tests.length ? plan.tests.map((path) => `- ${path}`).join('\n') : '- keine';
   const lines = [
     `Tests beschränkt auf die ${plan.files.length} geänderte(n) Datei(en) des Auftrags (Testbefehle je Auftrag).`,

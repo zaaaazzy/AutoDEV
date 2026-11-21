@@ -4,7 +4,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
-import { expandOrderCommands, planSummary, relatedTestFiles, SKIPPED_NOTE, testerPlan } from './order-tests.js';
+import {
+  expandOrderCommands,
+  planSummary,
+  projectTestPlan,
+  relatedTestFiles,
+  SKIPPED_NOTE,
+  testerPlan,
+} from './order-tests.js';
+import { NO_PACKAGE_NOTE } from './runner-selection.js';
 import { runBuiltinAgent } from './runner-steps.js';
 import type { WorkflowAgent } from './runner-types.js';
 
@@ -149,6 +157,71 @@ test('eingebauter Tester: keine passenden Tests – Befehl übersprungen, Schrit
   );
   assert.match(result.output, /übersprungen – keine passenden Tests zu den geänderten Dateien/);
   assert.match(result.output, /Alle Testbefehle übersprungen/);
+});
+
+test('eingebauter Tester: keine package.json und nur Standard-Testbefehle – Schritte übersprungen, bestanden', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'order-nopkg-'));
+  await writeFile(join(cwd, 'README.md'), '# Konzept');
+  const { pool, steps } = poolWith(null, null);
+  const result = await runBuiltinAgent({
+    pool,
+    item: { id: 'item-1', projectSlug: 'p', title: 'Konzept und Aufgabenplan', description: '' },
+    agent: tester,
+    prompt: '',
+    cwd,
+    timeoutMs: 30_000,
+    changedFiles: ['README.md', 'docs/konzept.md'],
+  });
+  assert.equal(result.exitCode, 0, result.output);
+  assert.deepEqual(
+    steps.map((step) => [step.command, step.status, step.output]),
+    [
+      ['npm run build', 'passed', NO_PACKAGE_NOTE],
+      ['npm test', 'passed', NO_PACKAGE_NOTE],
+    ],
+  );
+  assert.match(result.output, /\$ npm test → übersprungen – keine package.json im Projekt/);
+  assert.match(result.output, /Keine package.json im Projekt – die Standard-Testbefehle entfallen/);
+  assert.match(result.output, /Projekt → Einstellungen hinterlegen/);
+});
+
+test('eingebauter Tester: keine package.json, aber eigene Testbefehle – laufen wie bisher und scheitern ehrlich', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'order-nopkg-own-'));
+  const { pool, steps } = poolWith(null, [['node', '-e', 'process.exit(1)']]);
+  const result = await runBuiltinAgent({
+    pool,
+    item: { id: 'item-1', projectSlug: 'p', title: 'T', description: '' },
+    agent: tester,
+    prompt: '',
+    cwd,
+    timeoutMs: 30_000,
+    changedFiles: ['README.md'],
+  });
+  assert.equal(result.exitCode, 1);
+  assert.deepEqual(
+    steps.map((step) => step.status),
+    ['failed'],
+  );
+  assert.doesNotMatch(result.output, /keine package.json/);
+});
+
+test('Projekt-Testplan: mit package.json laufen die Standard-Testbefehle wie bisher', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'order-pkg-'));
+  await writeFile(join(cwd, 'package.json'), '{}');
+  const plan = await projectTestPlan(poolWith(null, null).pool, 'p', cwd);
+  assert.deepEqual(plan.commands, [
+    { command: ['npm', 'run', 'build'], skipped: false },
+    { command: ['npm', 'test'], skipped: false },
+  ]);
+  assert.equal(plan.skipNote, SKIPPED_NOTE);
+  assert.equal(planSummary(plan), '');
+  const docsOnly = await projectTestPlan(
+    poolWith(null, null).pool,
+    'p',
+    await mkdtemp(join(tmpdir(), 'order-nopkg2-')),
+  );
+  assert.ok(docsOnly.commands.every((command) => command.skipped));
+  assert.equal(docsOnly.skipNote, NO_PACKAGE_NOTE);
 });
 
 test('Platzhalter {tests}: Playwright-Dateien nur für Playwright-Befehle, nie für Vitest & Co.', () => {
