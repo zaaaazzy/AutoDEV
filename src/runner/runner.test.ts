@@ -1623,3 +1623,86 @@ test('Projekt-Pause im selben Takt: Nach der Pause des ersten Auftrags startet d
   assert.ok(starts.every((query) => query.sql.includes(`NOT ${projectPausedSql('d')}`)));
   assert.deepEqual(starts[1]?.values, ['zweiter', false], 'kein gezielter Start (--item), die Pause gilt');
 });
+
+test('Tester: hat er denselben Stand des Auftrags-Branchs schon bestanden, wird sein Ergebnis übernommen statt erneut getestet', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { runCommand } = await import('../core/command.js');
+  const cwd = mkdtempSync(join(tmpdir(), 'tester-takeover-'));
+  const run = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  run('init', '-b', 'main');
+  run('config', 'user.email', 'a@b.c');
+  run('config', 'user.name', 'a');
+  writeFileSync(join(cwd, 'base.txt'), 'base');
+  run('add', '-A');
+  run('commit', '-m', 'base');
+  // Der Tester hat genau diesen Stand (HEAD) in einem früheren Lauf bestanden.
+  let passedSha = run('rev-parse', 'HEAD');
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-2' }] };
+      if (sql.includes('FROM agent_runs WHERE development_id')) return { rows: [] };
+      if (sql.includes('s.commit_sha = $3')) {
+        return {
+          rows:
+            values[2] === passedSha
+              ? [{ output: 'Tests grün (alter Lauf)', started_at: new Date('2026-11-21T10:00:00Z') }]
+              : [],
+        };
+      }
+      return { rows: [{ id: 'step-row' }], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  let developerWrites = false;
+  const execute: CommandExecutor = async (command, directory, options) => {
+    if (command[0] !== 'dev') return runCommand(command, directory, options);
+    if (developerWrites) writeFileSync(join(cwd, 'neu.ts'), 'export {}');
+    return { exitCode: 0, durationMs: 1, output: 'Nichts zu tun.' };
+  };
+  let testerRuns = 0;
+  const builtin: BuiltinAgent = async () => {
+    testerRuns += 1;
+    return { exitCode: 0, durationMs: 1, output: 'Tests grün' };
+  };
+  const developer = { ...agent('Entwickler', 'while_task', 1, ['dev']), role: 'developer' };
+  const tester = { ...agent('Tester', 'while_task', 2, null), role: 'tester' };
+  const doc = { ...agent('Doku', 'after_task', 1, ['doc']), role: 'documenter' };
+  const docPrompts: string[] = [];
+  const executeAll: CommandExecutor = async (command, directory, options) => {
+    if (command[0] === 'doc') {
+      docPrompts.push(command.at(-1) ?? '');
+      return { exitCode: 0, durationMs: 1, output: 'Doku' };
+    }
+    return execute(command, directory, options);
+  };
+  // Der Entwickler ändert nichts: HEAD bleibt, der Tester wird übernommen.
+  assert.equal(
+    await runWorkItem(pool, item, [developer, tester, doc], { cwd, timeoutMs: 5000, execute: executeAll, builtin }),
+    'passed',
+  );
+  assert.equal(testerRuns, 0, 'Tester nicht erneut gelaufen');
+  const takeover = queries.find(
+    (query) => query.sql.includes('INSERT INTO agent_run_steps') && query.sql.includes('commit_sha'),
+  );
+  assert.equal(takeover?.values[3], 'Tester');
+  assert.match(String(takeover?.values[6]), /^Bestanden \(unverändert seit .*\): Der Tester hat den Stand/);
+  assert.match(String(takeover?.values[6]), /Tests grün \(alter Lauf\)/);
+  assert.equal(takeover?.values[7], passedSha);
+  assert.match(docPrompts[0] ?? '', /Tests grün \(alter Lauf\)/, 'alte Ausgabe geht an den Dokumentierer');
+  // Nach jedem Schritt steht der Stand des Branchs am Schritt.
+  assert.ok(queries.some((query) => query.sql.includes('SET commit_sha = $2') && query.values[1] === passedSha));
+
+  // Ändert der Entwickler etwas, ist der Stand neu: der Tester läuft.
+  developerWrites = true;
+  passedSha = 'nicht-mehr-aktuell';
+  queries.length = 0;
+  assert.equal(
+    await runWorkItem(pool, item, [developer, tester, doc], { cwd, timeoutMs: 5000, execute: executeAll, builtin }),
+    'passed',
+  );
+  assert.equal(testerRuns, 1);
+});

@@ -200,8 +200,8 @@ test('Migration 29: Bug-Kategorie auf PostgreSQL – nur die acht Werte, Zustand
       client.query(`INSERT INTO bugs (project_slug, title, category) VALUES ('shop', 'Bereich', 'git-sync')`),
       /bugs_category_check/,
     );
-    // Danach bleiben nur noch Folgevorschläge (30) und Review-Container (31) offen.
-    assert.deepEqual(await runMigrations(client), [30, 31]);
+    // Danach bleiben Folgevorschläge (30), Review-Container (31), Abhängigkeit (32) und Schritt-Commit (33) offen.
+    assert.deepEqual(await runMigrations(client), [30, 31, 32, 33]);
   } finally {
     client.release();
     await pool.end();
@@ -572,7 +572,14 @@ test('Migration 31 auf PostgreSQL: Wort-Array wird eine Zeile, Einzelwort bleibt
     await insert('einzeln', JSON.stringify(['start.sh']));
     await insert('leer', JSON.stringify([]));
     await insert('ohne', null);
-    assert.deepEqual(await runMigrations(client), [31]);
+    // Nur bis 31: Spätere Migrationen (Abhängigkeit, Schritt-Commit) gehören nicht zu dieser Prüfung.
+    assert.deepEqual(
+      await runMigrations(
+        client,
+        MIGRATIONS.filter((step) => step.version <= 31),
+      ),
+      [31],
+    );
     const rows = (
       await client.query<{ slug: string; command: unknown }>(
         'SELECT slug, review_command AS command FROM projects ORDER BY slug',
@@ -593,5 +600,22 @@ test('Migration 31 auf PostgreSQL: Wort-Array wird eine Zeile, Einzelwort bleibt
     await pool.end();
     await dropDatabase(admin, name);
     await admin.end();
+  }
+});
+
+test('Migrationen 32 und 33: Abhängigkeit „Hängt ab von“ und Commit am Schritt, beide idempotent', () => {
+  const dependency = MIGRATIONS.find((step) => step.version === 32);
+  assert.equal(dependency?.name, 'auftrag-haengt-ab-von');
+  assert.match(
+    dependency?.sql ?? '',
+    /ALTER TABLE development_items ADD COLUMN IF NOT EXISTS depends_on UUID\s+REFERENCES development_items\(id\) ON DELETE SET NULL/,
+  );
+  assert.match(dependency?.sql ?? '', /CREATE INDEX IF NOT EXISTS development_items_depends_on_idx/);
+  const commit = MIGRATIONS.find((step) => step.version === 33);
+  assert.equal(commit?.name, 'schritt-commit');
+  assert.match(commit?.sql ?? '', /ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS commit_sha TEXT/);
+  // Keine frühere Migration kennt die Spalten.
+  for (const step of MIGRATIONS.filter((other) => other.version < 32)) {
+    assert.doesNotMatch(step.sql, /depends_on|commit_sha TEXT;\s*$/, `Version ${step.version}`);
   }
 });

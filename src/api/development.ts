@@ -12,6 +12,7 @@ import {
   agentInOrderProject,
   confirmManualAcceptance,
   deleteOrder,
+  dependencyAllowed,
   findOrderSprintStatus,
   findOrderState,
   findOrderSummary,
@@ -398,6 +399,13 @@ const update =
         response.status(400).json({ message: 'Der Agent gehört nicht zum Projekt dieses Auftrags.' });
         return;
       }
+    }
+    const dependsOn = fields.find((field) => field.column === 'depends_on')?.value;
+    if (typeof dependsOn === 'string' && !(await dependencyAllowed(pool, id, dependsOn))) {
+      response.status(400).json({
+        message: 'Die Abhängigkeit muss ein anderer Auftrag desselben Projekts sein und darf keinen Kreis bilden.',
+      });
+      return;
     }
     const item = await updateOrder(pool, id, fields, from, developmentUpdateExtras(fields, targetSprintStatus));
     if (!item) {

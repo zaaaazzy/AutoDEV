@@ -147,6 +147,15 @@
             <option value="high">Hoch</option>
           </select>
         </label>
+        <label class="wide"
+          >Hängt ab von<select name="dependsOn" [ngModel]="item.dependsOn ?? ''">
+            <option value="">Keine Abhängigkeit</option>
+            @for (candidate of dependencyOptions(); track candidate.id) {
+              <option [value]="candidate.id">{{ candidate.title }} ({{ candidate.status | statusLabel }})</option>
+            }
+          </select>
+          <small class="muted">Der Worker startet diesen Auftrag erst, wenn der gewählte Auftrag erledigt ist.</small>
+        </label>
         <label
           >Aufwand (Agent-Std.)<input
             name="effortHours"
@@ -170,6 +179,22 @@
         <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
         <button class="button secondary" type="button" (click)="editCancelled.emit()">Abbrechen</button>
       </form>
+    }
+    @if (item.dependsOn) {
+      <p class="dependency-ref" [class.waiting]="waitsForDependency()">
+        {{ waitsForDependency() ? '⏳' : '✓' }} Hängt ab von
+        @if (dependency(); as dep) {
+          <a href="#development" (click)="$event.preventDefault(); openPrevious(dep.id)">„{{ dep.title }}“</a>
+        } @else {
+          „{{ item.dependsOnTitle ?? 'einem anderen Auftrag' }}“
+        }
+        @if (waitsForDependency()) {
+          ({{ dependency()?.status ?? item.dependsOnStatus ?? 'planned' | statusLabel }}) – der Worker startet diesen
+          Auftrag erst, wenn jener erledigt ist.
+        } @else {
+          – erledigt, der Auftrag kann starten.
+        }
+      </p>
     }
     @if (item.followUpOf) {
       <p class="follow-up-ref">

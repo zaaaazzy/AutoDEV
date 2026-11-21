@@ -25,6 +25,8 @@ export const DEV_FIELDS = {
   status: { column: 'status', parse: parseOption(DEVELOPMENT_STATUSES) },
   sprintId: { column: 'sprint_id', parse: parseNullableUuid },
   agentId: { column: 'agent_id', parse: parseNullableUuid },
+  /** „Hängt ab von“: der Worker startet den Auftrag erst, wenn dieser Auftrag erledigt ist (null = keine). */
+  dependsOn: { column: 'depends_on', parse: parseNullableUuid },
 };
 
 const parseUuid: Parser = (value) => (isUuid(value) ? value : INVALID);

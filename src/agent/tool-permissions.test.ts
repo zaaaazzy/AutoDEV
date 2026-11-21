@@ -1012,3 +1012,13 @@ test('loadProjectPermissions: alte Regeln mit Wrappern und Schreib-Werkzeugen ge
   const loaded = await loadProjectPermissions(pool, 'p');
   assert.deepEqual(loaded.custom[0]?.rules, ['Bash(git log:*)']);
 });
+
+test('withAgentPermissions: keine Worktree-Isolation für Hintergrund-Agents (kein .claude/worktrees im Projekt)', () => {
+  for (const command of [
+    withAgentPermissions(CLAUDE, 'developer', all, null),
+    withAgentPermissions(['claude', '--dangerously-skip-permissions', '-p'], 'assistant', all, ['files']),
+  ]) {
+    const settings = JSON.parse(option(command, '--settings') ?? 'null') as { worktree?: { bgIsolation?: string } };
+    assert.equal(settings.worktree?.bgIsolation, 'none');
+  }
+});

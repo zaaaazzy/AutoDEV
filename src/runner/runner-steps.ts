@@ -13,6 +13,7 @@ import type { WorkflowAgent } from './runner-types.js';
 import { logEvent, orderFilePaths, recordBudgetCheckFailure, type RunContext } from './runner-context.js';
 import { type AgentResult, configuredCommand, routeStep, stepModel } from './runner-agent.js';
 import { afterStep, MANUAL_TITLE, USER_MANUAL_TITLE } from './runner-settle.js';
+import { recordStepCommit } from './runner-resume.js';
 import { type Invocation, invokeWithRetry } from './step-invocation.js';
 import { probeBugfixOrder } from './counter-probe.js';
 import { gateExecutor, projectSandbox } from './test-sandbox.js';
@@ -22,6 +23,7 @@ import {
   appendChangedFiles,
   collectHandoffs,
   conflictSection,
+  finishedWorkDespiteRefusal,
   type Handoff,
   judgeAcceptance,
   judgeConflicts,
@@ -302,7 +304,10 @@ async function judgeStep(
     passed = passed && acceptance.passed;
   }
   const approved = await judgeReview(ctx.pool, agent, stepId, result, text);
-  const refused = await refusedByRule(ctx.pool, stepId, text);
+  // „Nichts zu tun“ ist keine Ablehnung: Liegt die Arbeit schon auf dem Branch, besteht der Entwickler mit Hinweis.
+  const finished = cancelled ? null : await finishedWorkDespiteRefusal(ctx, agent, stepId, text).catch(() => null);
+  if (finished) text = `${text.trimEnd()}\n\n${finished}`;
+  const refused = finished ? false : await refusedByRule(ctx.pool, stepId, text);
   const conflicts = await judgeConflicts(ctx, stepId, hadConflicts, cancelled, text);
   return {
     output: conflicts.output,
@@ -367,6 +372,8 @@ async function settleOutcome(
       ctx.branch.branch,
     );
     if (sha) await logEvent(pool, stepId, `Commit ${sha} (Änderungen von ${agent.name})`);
+    // Stand des Branchs am Schritt: Ein Tester, der denselben Stand schon bestanden hat, muss nicht erneut laufen.
+    await recordStepCommit(ctx, stepId).catch(logged('runner-steps'));
   };
   if (stepOptions.observer) {
     await commit();

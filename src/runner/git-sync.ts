@@ -15,6 +15,7 @@ export {
   sprintTag,
   stageAll,
   taskCommitMessage,
+  trackedChanges,
 } from './git-sync/git-helpers.js';
 export {
   type ChangedFile,
