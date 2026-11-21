@@ -10,6 +10,7 @@ import { ProjectStore } from '../../core/project-store.js';
 import { NotificationSettingsComponent } from './notification-settings.component.js';
 import { ProductionSettingsComponent } from './production-settings.component.js';
 import { VisualSettingsComponent } from './visual-settings.component.js';
+import { joinShellLine } from '../../../../../src/core/shell-words.js';
 import { SecuritySettingsComponent } from './security-settings.component.js';
 import { UsersSettingsComponent } from './users-settings.component.js';
 import { BudgetSettingsComponent } from './budget-settings.component.js';
@@ -211,7 +212,7 @@ export class SettingsComponent {
       agentWorkspace: project?.agentWorkspace ?? false,
       agentSandbox: project?.agentSandbox ?? '',
       reviewMode: project?.reviewMode ?? 'off',
-      reviewCommand: (project?.reviewCommand ?? []).join(' '),
+      reviewCommand: joinShellLine(project?.reviewCommand ?? []),
       restartAfterSprint: project?.restartAfterSprint ?? false,
       sprintMode: project?.sprintMode ?? 'manual',
       sprintCapacityHours: project?.sprintCapacityHours ?? 4,
@@ -223,9 +224,10 @@ export class SettingsComponent {
       clearDatabase: false,
       githubMode: project?.githubMode ?? 'aus',
       githubRequireApproval: project?.githubRequireApproval ?? false,
-      deployCommands: (project?.deployCommands ?? []).map((command) => command.join(' ')).join('\n'),
-      testCommands: (project?.testCommands ?? []).map((command) => command.join(' ')).join('\n'),
-      orderTestCommands: (project?.orderTestCommands ?? []).map((command) => command.join(' ')).join('\n'),
+      // Argumente mit Leerzeichen wieder in Anführungszeichen, sonst zerfällt der Befehl beim nächsten Speichern.
+      deployCommands: (project?.deployCommands ?? []).map(joinShellLine).join('\n'),
+      testCommands: (project?.testCommands ?? []).map(joinShellLine).join('\n'),
+      orderTestCommands: (project?.orderTestCommands ?? []).map(joinShellLine).join('\n'),
     };
   }
 
