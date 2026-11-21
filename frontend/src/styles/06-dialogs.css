@@ -6,7 +6,7 @@
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgb(32 40 36 / 45%);
+  background: rgb(var(--shadow-rgb) / 45%);
 }
 .help-dialog {
   width: min(1100px, 100%);
@@ -61,7 +61,7 @@
   flex: none;
   place-items: center;
   border-radius: 14px;
-  background: #fdf1e8;
+  background: var(--notice-surface);
   font-size: 24px;
 }
 .guide-steps {
@@ -88,8 +88,8 @@
   height: 30px;
   place-items: center;
   border-radius: 50%;
-  background: var(--green);
-  color: var(--surface);
+  background: var(--accent-bg);
+  color: var(--on-accent);
   content: counter(guide);
   font-size: 13px;
   font-weight: 700;
@@ -100,7 +100,7 @@
   bottom: -4px;
   left: 14px;
   width: 2px;
-  background: #e3e8e0;
+  background: var(--line);
   content: '';
 }
 .guide-steps small {
@@ -109,9 +109,9 @@
 .guide-key {
   display: inline-block;
   padding: 0 6px;
-  border: 1px solid #d9e0d6;
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  background: #f6f7f4;
+  background: var(--surface-muted);
   font-weight: 600;
 }
 .guide-warn {
@@ -240,7 +240,7 @@
 }
 .welcome-card p {
   margin: 0;
-  color: #56625a;
+  color: var(--text-secondary);
 }
 .welcome-mark {
   width: 56px;

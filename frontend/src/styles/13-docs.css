@@ -27,8 +27,8 @@
 }
 .doc-link:hover,
 .doc-link.selected {
-  border-color: #cbdacf;
-  background: #f0f5f1;
+  border-color: var(--border-default);
+  background: var(--surface-cool);
 }
 .doc-reader {
   display: grid;
@@ -57,7 +57,7 @@
 }
 .book-toggle:hover {
   border-color: var(--success-border);
-  background: #f0f5f1;
+  background: var(--surface-cool);
 }
 .book-toggle svg {
   width: 18px;
@@ -120,7 +120,7 @@
 .search-snippet mark {
   padding: 0 2px;
   border-radius: 3px;
-  background: #fdf1d6;
+  background: var(--notice-soft);
   color: var(--ink);
 }
 .doc-reader .meta {
@@ -167,7 +167,7 @@
   padding: 14px 16px;
   border: 1px solid var(--notice-border);
   border-radius: 14px;
-  background: #fffaf3;
+  background: var(--notice-surface-faint);
 }
 .revision-card header {
   display: flex;
@@ -202,12 +202,12 @@
   display: block;
 }
 .diff-added {
-  background: #e6f4ea;
-  color: #1e5c33;
+  background: var(--success-soft-alt);
+  color: var(--success-text);
 }
 .diff-removed {
   background: var(--error-soft-alt);
-  color: #8a2f1c;
+  color: var(--error-text-deep);
   text-decoration: line-through;
   text-decoration-color: rgb(138 47 28 / 40%);
 }
@@ -215,7 +215,7 @@
   color: var(--muted);
 }
 .diff-gap {
-  color: #9aa39c;
+  color: var(--text-faint-dark);
   font-style: italic;
   text-align: center;
 }
@@ -242,7 +242,7 @@
   text-align: center;
 }
 .history-approved .history-status {
-  background: #e3f2e9;
+  background: var(--success-soft-alt);
   color: var(--green-light);
 }
 .history-rejected .history-status {
@@ -335,7 +335,7 @@ a.doc-link {
   vertical-align: top;
 }
 .ap-table thead th {
-  background: #eef2ec;
+  background: var(--surface-hover-alt);
 }
 .ap-table tbody th {
   min-width: 170px;

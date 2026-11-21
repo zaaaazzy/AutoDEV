@@ -42,8 +42,8 @@
   background:
     radial-gradient(120% 60% at 0% 0%, rgb(215 134 78 / 28%), transparent 60%),
     radial-gradient(90% 50% at 100% 100%, rgb(47 138 87 / 35%), transparent 65%),
-    linear-gradient(165deg, #22302a, #18211d);
-  color: #eef2ee;
+    linear-gradient(165deg, var(--inverse-bg-soft), var(--inverse-bg-deep));
+  color: var(--inverse-text);
 }
 .wizard-brand {
   display: flex;
@@ -59,10 +59,10 @@
 }
 .wizard-brand .eyebrow {
   margin: 0 0 2px;
-  color: #e8a87c;
+  color: var(--inverse-accent);
 }
 .wizard-brand h2 {
-  color: var(--surface);
+  color: var(--on-accent);
   font-family: Georgia, 'Times New Roman', serif;
   font-size: 21px;
   font-weight: 400;
@@ -100,7 +100,7 @@
   border: 0;
   border-radius: 12px;
   background: transparent;
-  color: #b9c3bc;
+  color: var(--inverse-muted);
   text-align: left;
   transition:
     background 0.2s,
@@ -114,7 +114,7 @@
 }
 .wizard-steps li.active button {
   background: rgb(255 255 255 / 10%);
-  color: var(--surface);
+  color: var(--on-accent);
 }
 .wizard-step-number {
   display: inline-grid;
@@ -131,13 +131,13 @@
 .wizard-steps li.active .wizard-step-number {
   border-color: var(--orange);
   background: var(--orange);
-  color: var(--ink);
+  color: var(--on-warm);
   box-shadow: 0 0 0 5px rgb(215 134 78 / 22%);
 }
 .wizard-steps li.done .wizard-step-number {
   border-color: var(--success-light);
   background: var(--success-light);
-  color: #10301f;
+  color: var(--on-warm);
 }
 .wizard-step-text {
   display: grid;
@@ -148,7 +148,7 @@
 }
 .wizard-step-text small {
   overflow: hidden;
-  color: #8f9b93;
+  color: var(--inverse-muted);
   font-size: 11.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -159,7 +159,7 @@
   border: 1px solid rgb(255 255 255 / 10%);
   border-radius: 12px;
   background: rgb(255 255 255 / 4%);
-  color: #a9b4ac;
+  color: var(--inverse-muted);
   font-size: 12px;
 }
 
@@ -170,7 +170,7 @@
   grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
-  background: linear-gradient(180deg, #fbfcf9, var(--surface) 140px);
+  background: linear-gradient(180deg, var(--surface-soft), var(--surface) 140px);
 }
 .wizard-head {
   position: relative;
@@ -261,7 +261,7 @@
 .wizard-intro {
   max-width: 62ch;
   margin: 0 0 20px;
-  color: #56625a;
+  color: var(--text-secondary);
   font-size: 14.5px;
 }
 .wizard-subtitle {
@@ -282,7 +282,7 @@
 .wizard input,
 .wizard select {
   min-height: 44px;
-  border-color: #d9e0d6;
+  border-color: var(--border-subtle);
   border-radius: 11px;
   font-size: 15px;
   transition:
@@ -312,8 +312,8 @@
   justify-self: start;
 }
 .wizard-hint.ok {
-  border-color: #cfe5d8;
-  background: #f1f8f4;
+  border-color: var(--success-soft);
+  background: var(--success-surface);
 }
 .wizard-hint.warn {
   border-color: var(--notice-border);
@@ -325,7 +325,7 @@
   padding: 10px 12px;
   overflow-x: auto;
   border-radius: 10px;
-  background: #1f2924;
+  background: var(--inverse-bg);
   color: var(--surface-track);
   font-size: 12px;
   white-space: pre-wrap;
@@ -333,7 +333,7 @@
 .wizard-error {
   padding: 10px 14px;
   border-radius: 12px;
-  background: #fbefec;
+  background: var(--error-soft);
   color: var(--error-text-deep);
 }
 .wizard-connection,
@@ -348,7 +348,7 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   padding: 12px 14px;
-  border: 1px solid #e3e8e0;
+  border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--surface);
   color: var(--text-medium);
@@ -386,9 +386,9 @@
   width: 20px;
   height: 20px;
   place-items: center;
-  border: 2px solid #cfd8ce;
+  border: 2px solid var(--border-default);
   border-radius: 50%;
-  color: var(--surface);
+  color: var(--on-accent);
   content: '';
   font-size: 11px;
   font-weight: 800;
@@ -396,7 +396,7 @@
 }
 .choice:hover:not(:disabled) {
   border-color: var(--success-border);
-  box-shadow: 0 8px 22px rgb(32 40 36 / 8%);
+  box-shadow: 0 8px 22px rgb(var(--shadow-rgb) / 8%);
   transform: translateY(-2px);
 }
 .choice.selected {
@@ -451,7 +451,7 @@
   gap: 12px;
   padding: 16px 30px calc(16px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--surface-tint-alt);
-  background: rgb(255 255 255 / 92%);
+  background: rgb(var(--surface-rgb) / 92%);
   backdrop-filter: blur(8px);
 }
 .wizard-foot .button {
@@ -486,7 +486,7 @@
   padding: 20px;
   border-left: 1px solid var(--border-light-alt);
   background: var(--surface-soft);
-  box-shadow: -18px 0 40px rgb(32 40 36 / 12%);
+  box-shadow: -18px 0 40px rgb(var(--shadow-rgb) / 12%);
   transform: translateX(105%);
   visibility: hidden;
   transition:
@@ -528,8 +528,8 @@
 .wizard-chat-msg.mine {
   justify-self: end;
   border-radius: 14px 14px 4px 14px;
-  background: var(--wz-accent, var(--green-light));
-  color: var(--surface);
+  background: var(--wz-accent, var(--accent-bg-light));
+  color: var(--on-accent);
 }
 .wizard-chat-form {
   display: flex;
@@ -737,7 +737,7 @@
     height: 78%;
     border-left: 0;
     border-radius: 22px 22px 0 0;
-    box-shadow: 0 -18px 40px rgb(32 40 36 / 18%);
+    box-shadow: 0 -18px 40px rgb(var(--shadow-rgb) / 18%);
     transform: translateY(105%);
   }
 }
