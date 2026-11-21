@@ -22,7 +22,7 @@ import {
   modulesVolume,
   readOnlyWorkspace,
   removeLeftoverContainers,
-  replaceLinkedModules,
+  ensureModulesMountpoint,
   resetAgentNetwork,
   runInSandbox,
   SANDBOX_GUARD,
@@ -497,11 +497,32 @@ function linkedWorktree(): { worktree: string; target: string } {
 
 test('Sandbox: verlinktes node_modules wird zum leeren Ordner, das Ziel bleibt unberührt', () => {
   const { worktree, target } = linkedWorktree();
-  replaceLinkedModules(worktree);
+  ensureModulesMountpoint(worktree);
   const stat = lstatSync(join(worktree, 'node_modules'));
   assert.ok(!stat.isSymbolicLink() && stat.isDirectory(), 'Einhängepunkt für das Volume');
   assert.ok(existsSync(join(target, 'bleibt.txt')), 'Ziel des Links nicht gelöscht');
-  replaceLinkedModules(join(worktree, 'fehlt'));
+  ensureModulesMountpoint(join(worktree, 'fehlt'));
+});
+
+test('Sandbox: fehlendes node_modules wird als leerer Ordner angelegt (Einhängepunkt bei :ro)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'sandbox-fresh-'));
+  try {
+    // Frisches Projekt ohne Abhängigkeiten, wie es Visionär und Auftragsautor nur lesend einhängen.
+    const project = join(root, 'projekt');
+    mkdirSync(join(project, '.git'), { recursive: true });
+    writeFileSync(join(project, 'README.md'), '# neu');
+    ensureModulesMountpoint(project);
+    assert.ok(lstatSync(join(project, 'node_modules')).isDirectory(), 'Ordner im Projektordner der Menschen');
+    const worktree = join(root, 'agent');
+    mkdirSync(worktree);
+    writeFileSync(join(worktree, '.git'), 'gitdir: x\n');
+    ensureModulesMountpoint(worktree);
+    assert.ok(lstatSync(join(worktree, 'node_modules')).isDirectory(), 'Ordner im Git-Worktree');
+    ensureModulesMountpoint(worktree);
+    assert.ok(lstatSync(join(worktree, 'node_modules')).isDirectory(), 'zweiter Aufruf ändert nichts');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('Sandbox: im Projektordner der Menschen (.git als Ordner) bleibt ein node_modules-Symlink', () => {
@@ -510,7 +531,7 @@ test('Sandbox: im Projektordner der Menschen (.git als Ordner) bleibt ein node_m
     mkdirSync(join(folder, '.git'));
     mkdirSync(join(folder, 'vendor'));
     symlinkSync(join(folder, 'vendor'), join(folder, 'node_modules'), 'dir');
-    replaceLinkedModules(folder);
+    ensureModulesMountpoint(folder);
     assert.ok(lstatSync(join(folder, 'node_modules')).isSymbolicLink());
   } finally {
     rmSync(folder, { recursive: true, force: true });

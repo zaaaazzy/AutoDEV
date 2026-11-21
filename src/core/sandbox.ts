@@ -31,19 +31,28 @@ import { runInWorkbench } from './workbench.js';
 export * from './sandbox-base.js';
 
 /**
- * Eigene Agent-Worktrees verlinken node_modules des Hauptordners (agent-workspace.ts). Im Container zeigt der Link auf
- * einen Host-Pfad: Docker hängt das Volume dann dort ein, und npm scheitert an „/workspace/node_modules“ (ENOTDIR).
- * Der Link wird darum durch einen leeren Ordner ersetzt (nur der Link, nie sein Ziel); linkDependencies stellt ihn
- * ohne Sandbox wieder her. Nur in einem Git-Worktree (.git ist eine Datei): Projektordner der Menschen bleiben unberührt.
+ * node_modules im Worktree muss ein echter Ordner sein: der Einhängepunkt für das node_modules-Volume.
+ * - Fehlt er (frisches Projekt ohne Abhängigkeiten), legt Docker ihn sonst im Bind-Mount an – bei :ro (lesende Rollen
+ *   wie Visionär, Container mit --read-only) scheitert das mit Exit-Code 125 („create mountpoint … read-only file
+ *   system“). Darum wird er hier leer angelegt, auch im Projektordner der Menschen: Git kennt keine leeren Ordner.
+ * - Eigene Agent-Worktrees verlinken node_modules des Hauptordners (agent-workspace.ts). Im Container zeigt der Link
+ *   auf einen Host-Pfad: Docker hängt das Volume dann dort ein, und npm scheitert an „/workspace/node_modules“
+ *   (ENOTDIR). Der Link wird durch einen leeren Ordner ersetzt (nur der Link, nie sein Ziel); linkDependencies stellt
+ *   ihn ohne Sandbox wieder her. Nur in einem Git-Worktree (.git ist eine Datei): Links der Menschen bleiben unberührt.
  */
-export function replaceLinkedModules(worktree: string): void {
+export function ensureModulesMountpoint(worktree: string): void {
   const path = join(worktree, 'node_modules');
   try {
-    if (!lstatSync(join(worktree, '.git')).isFile() || !lstatSync(path).isSymbolicLink()) return;
+    const stat = lstatSync(path, { throwIfNoEntry: false });
+    if (!stat) {
+      mkdirSync(path);
+      return;
+    }
+    if (!stat.isSymbolicLink() || !lstatSync(join(worktree, '.git')).isFile()) return;
     rmSync(path);
     mkdirSync(path);
   } catch {
-    // Kein node_modules oder nicht änderbar: Der Lauf geht trotzdem weiter.
+    // Worktree fehlt oder nicht änderbar: Der Lauf geht trotzdem weiter.
   }
 }
 
@@ -120,7 +129,7 @@ export async function runInSandbox(
     return blocked(missing, redactWith);
   }
   if (options.workspace !== false) {
-    replaceLinkedModules(worktree);
+    ensureModulesMountpoint(worktree);
     const volume = await prepareModulesVolume(docker, options, env, worktree);
     if (volume.exitCode !== 0) {
       const message = `Sandbox: node_modules-Volume „${modulesVolume(options.project)}“ liess sich nicht vorbereiten (Exit-Code ${volume.exitCode}). Der Agent wurde nicht gestartet.\n${volume.output.trim().slice(-500)}`;

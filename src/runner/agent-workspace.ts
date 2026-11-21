@@ -113,8 +113,8 @@ export function linkDependencies(folder: string, workspace: string): void {
     if (!existsSync(source) || !existsSync(join(workspace, directory))) continue;
     try {
       const stat = lstatSync(target);
-      // Leerer Ordner: Die Docker-Sandbox hat den Link ersetzt (replaceLinkedModules). Nur im Notfallmodus ohne
-      // Sandbox wieder verlinken – sonst ist der Ordner Einhängepunkt des node_modules-Volumes laufender Container.
+      // Leerer Ordner: Die Docker-Sandbox hat ihn angelegt oder den Link ersetzt (ensureModulesMountpoint). Nur im
+      // Notfallmodus ohne Sandbox wieder verlinken – sonst ist er Einhängepunkt des node_modules-Volumes laufender Container.
       if (usesSandbox(sandboxMode(null)) || !stat.isDirectory() || readdirSync(target).length) continue;
       rmdirSync(target);
     } catch {
