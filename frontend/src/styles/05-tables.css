@@ -566,6 +566,7 @@ input.dt-select:disabled {
     text-transform: uppercase;
   }
   .dt-table tbody td.title-cell,
+  .dt-table tbody td[data-label='Titel'],
   .dt-table tbody td:first-child:not(.dt-select-cell) {
     display: block;
     grid-column: 1 / 3;
@@ -582,6 +583,7 @@ input.dt-select:disabled {
     grid-column: 2;
   }
   .dt-table tbody td.title-cell::before,
+  .dt-table tbody td[data-label='Titel']::before,
   .dt-table tbody td:first-child::before,
   .dt-table tbody td.dt-select-cell::before,
   .dt-table tbody td.expand-cell::before,
