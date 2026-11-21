@@ -109,6 +109,15 @@ export async function loadWorkflow(pool: Pool, projectSlug: string): Promise<Wor
 }
 
 /**
+ * SQL-Bedingung: Das Projekt des Auftrags `alias` pausiert (irgendein Auftrag trägt ein retry_after in der Zukunft –
+ * Nutzungslimit, defekter Arbeitscontainer, unsauberer Arbeitsordner, nicht prüfbares Budget). Gilt für die Auswahl
+ * und noch einmal für den Start jedes gewählten Auftrags: Der Worker wählt mehrere Aufträge je Takt, und eine Pause
+ * aus dem ersten muss den zweiten desselben Takts noch aufhalten.
+ */
+export const projectPausedSql = (alias: string): string =>
+  `EXISTS (SELECT 1 FROM development_items x WHERE x.project_slug = ${alias}.project_slug AND x.retry_after > NOW())`;
+
+/**
  * Planned items of the active sprint or assigned directly to an agent, most important first. Aufträge zu Bugs aus
  * fremden Quellen (Betrieb, GitHub) ohne Freigabe durch einen Menschen werden nie gewählt, auch nicht gezielt (--item).
  */
@@ -135,8 +144,7 @@ export async function selectItems(pool: Pool, options: RunnerOptions): Promise<W
         -- für das ganze Projekt, nicht nur für den Auftrag, der es bemerkt hat – sonst liefe jeder weitere Auftrag in
         -- dieselbe Wand (ein von Hand gestarteter Agent läuft trotzdem).
         AND (d.retry_after IS NULL OR d.retry_after <= NOW())
-        AND (d.agent_id IS NOT NULL OR NOT EXISTS (
-              SELECT 1 FROM development_items x WHERE x.project_slug = d.project_slug AND x.retry_after > NOW()))
+        AND (d.agent_id IS NOT NULL OR NOT ${projectPausedSql('d')})
         -- Pausierter Sprint: keine Aufträge starten (ausser ein einzelner Agent wurde von Hand gestartet).
         AND (s.paused_at IS NULL OR d.agent_id IS NOT NULL)
       ORDER BY d.sprint_rank NULLS LAST, CASE d.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, d.created_at
