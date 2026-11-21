@@ -51,7 +51,7 @@ ENV DISABLE_AUTOUPDATER=1 \
     NPM_CONFIG_UPDATE_NOTIFIER=false \
     HOME=/home/agent
 # Playwright in derselben Version wie die Browser des Basis-Images (für die Vorschau-Aufnahme des visuellen Testers).
-ARG PLAYWRIGHT_VERSION=1.64.1
+ARG PLAYWRIGHT_VERSION=1.65.1
 # Corepack in fester Version: lädt pnpm und Yarn eines Projekts (dependencyCommand in sandbox-base.ts) über die
 # npm-Registry. Node ab 25 bringt kein Corepack mehr mit, und das aus dem Playwright-Basis-Image ist Zufall.
 ARG COREPACK_VERSION=0.36.0
