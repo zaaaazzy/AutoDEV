@@ -10,6 +10,7 @@ import { fileBugs, stepBug } from '../core/test-bugs.js';
 import { dropReportCopies } from './git-sync/report-copies.js';
 import { gitEnvironment, projectEnvironment, runProjectCommand } from './project-command.js';
 import type { RunnerOptions } from './runner-types.js';
+import { projectTestPlan, SKIPPED_NOTE } from './order-tests.js';
 import { runTestAgent } from './test-agent.js';
 import { afterBugCreated } from '../agent/bug-classifier.js';
 import { isAllowedCommand, shellWords, withIgnoreScripts } from '../agent/command-checks.js';
@@ -18,10 +19,6 @@ import { AGENT_RUN_STATUS, TEST_RUN_STATUS } from '../core/status.js';
 
 /** Ein Komplettlauf mit Playwright dauert; danach gilt er als hängend. */
 const TEST_TIMEOUT_MS = 60 * 60_000;
-const DEFAULT_COMMANDS = [
-  ['npm', 'run', 'build'],
-  ['npm', 'test'],
-];
 
 interface Claimed {
   id: string;
@@ -200,19 +197,16 @@ export async function processTestRequest(
         if (outcome.exitCode !== 0 && !linked) throw new Error(failureTail(outcome.output));
         return { passed: outcome.exitCode === 0, output: outcome.output };
       }
-      const commands = evidenceArgs
-        ? [evidenceArgs]
-        : ((
-            await pool.query<{ commands: string[][] | null }>(
-              'SELECT test_commands AS commands FROM projects WHERE slug = $1',
-              [options.project],
-            )
-          ).rows[0]?.commands ?? DEFAULT_COMMANDS);
+      const plan = evidenceArgs
+        ? { commands: [{ command: evidenceArgs, skipped: false }], skipNote: SKIPPED_NOTE }
+        : await projectTestPlan(pool, options.project, options.cwd);
       const runId = await runAgent(
         {
           project: options.project,
           cwd: options.cwd,
-          commands,
+          commands: plan.commands.map((entry) => entry.command),
+          skipped: plan.commands.map((entry) => entry.skipped),
+          skipNote: plan.skipNote,
           existingProject: true,
           env: projectEnvironment(options.cwd),
           timeoutMs: TEST_TIMEOUT_MS,

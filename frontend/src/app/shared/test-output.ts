@@ -19,6 +19,9 @@ const count = (raw: string, pattern: RegExp): number | null => {
 
 /** Fasst die Rohausgabe eines Test- oder Build-Befehls in wenigen Worten zusammen. */
 export function summarizeTestOutput(raw: string, status: string): string {
+  // Übersprungener Schritt (Testbefehle je Auftrag ohne passende Dateien, Standardbefehle ohne package.json): die
+  // Begründung ist die ganze Ausgabe und gehört in die Kopfzeile, nicht nur in die aufklappbare Rohausgabe.
+  if (/^übersprungen\b/i.test(raw.trim())) return raw.trim();
   // Node-Test-Runner (TAP: „# tests 69“, „ℹ pass 69“), Jest („69 total“) und Vitest („134 passed (136)“).
   const total =
     count(raw, /^\s*(?:#|ℹ)\s*tests\s+(\d+)/im) ??

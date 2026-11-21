@@ -37,6 +37,14 @@ test('Testausgabe wird in Befehle mit Kurzfazit zerlegt, Rohzeilen verschwinden 
 
 test('Kurzfazit für Vitest/Jest und Fehler', () => {
   assert.equal(summarizeTestOutput('Tests  2 failed | 134 passed (136)', 'failed'), '136 Tests · 2 fehlgeschlagen');
+  // Übersprungene Schritte zeigen die Begründung als Kopfzeile statt „erfolgreich“.
+  const skipped =
+    'übersprungen – keine package.json im Projekt: Standard-Testbefehle entfallen; eigene Testbefehle unter Projekt → Einstellungen hinterlegen';
+  assert.equal(summarizeTestOutput(`${skipped}\n`, 'passed'), skipped);
+  assert.equal(
+    summarizeTestOutput('übersprungen – keine passenden Tests zu den geänderten Dateien', 'passed'),
+    'übersprungen – keine passenden Tests zu den geänderten Dateien',
+  );
   assert.equal(
     summarizeTestOutput('Tests:       1 failed, 68 passed, 69 total', 'failed'),
     '69 Tests · 1 fehlgeschlagen',

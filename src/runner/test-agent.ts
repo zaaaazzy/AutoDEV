@@ -24,6 +24,8 @@ export interface TestAgentOptions {
   commands: string[][];
   /** Je Befehl: übersprungen (Testbefehle je Auftrag ohne passende Dateien); wird nur als Schritt vermerkt. */
   skipped?: boolean[];
+  /** Ausgabe der übersprungenen Schritte (Begründung); Standard: SKIPPED_NOTE. */
+  skipNote?: string;
   /** Vom Worker aufgerufen: Projekt nicht neu registrieren (sonst würde der gespeicherte Projektordner überschrieben). */
   existingProject?: boolean;
   timeoutMs?: number;
@@ -208,7 +210,8 @@ export async function runTestAgent(options: TestAgentOptions, pool: Pool): Promi
       category: categoryOfCommand(label),
     });
     if (options.skipped?.[position]) {
-      await finishTestRunStep(pool, { runId, position, exitCode: 0, durationMs: 0, output: SKIPPED_NOTE });
+      const output = options.skipNote ?? SKIPPED_NOTE;
+      await finishTestRunStep(pool, { runId, position, exitCode: 0, durationMs: 0, output });
       console.info(`SKIP ${label}`);
       continue;
     }

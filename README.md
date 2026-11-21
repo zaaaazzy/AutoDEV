@@ -61,7 +61,9 @@ Wichtig: Wer sich anmelden kann, kann über Agent-, Test- und Deploy-Befehle bel
 In der Oberfläche ein Projekt anlegen und unter **Projekteinstellungen** angeben:
 
 - **Projektordner**: absoluter Pfad. Dort lesen und schreiben die Agents, dort laufen die Tests und der Git-Sync.
-- **Testbefehle** (optional): ein Befehl pro Zeile, Standard `npm run build` + `npm test`.
+- **Testbefehle** (optional): ein Befehl pro Zeile, Standard `npm run build` + `npm test`. Die Standardwerte laufen nur,
+  wenn im Projektordner eine `package.json` liegt; sonst hält der Testlauf sie als übersprungen fest und gilt als
+  bestanden (etwa bei einem reinen Dokumentationsauftrag im frisch angelegten Projekt). Eigene Testbefehle laufen immer.
 - **GitHub-Repository** (optional): `git@github.com:user/repo.git`, Zugang über SSH-Key, nie Zugangsdaten in der URL.
 - **GitHub-Brücke** (optional, Standard aus): Issues mit Label `idea`/`bug` übernehmen und Status zurückmelden, wahlweise Sprint-Abschluss als Pull Request mit CI-Ampel. Braucht `gh auth login` des Worker-Benutzers bzw. im Worker-Container ein Token aus `DEV_LOG_WORKER_GITHUB_TOKEN_FILE` (siehe `docs/workflows.md`).
 

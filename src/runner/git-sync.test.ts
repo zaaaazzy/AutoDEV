@@ -8,6 +8,8 @@ import test from 'node:test';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { conflictSection, remainingConflicts } from './step-evaluation.js';
+import { runTestGate } from './git-sync/ci.js';
+import type { TestCommandSet } from './runner-selection.js';
 import type { HosterAdapter } from './hoster.js';
 import { goLive } from './go-live.js';
 import { syncGitHub } from './github-sync.js';
@@ -367,25 +369,56 @@ test('merges a finished sprint into main checked out elsewhere only when that fo
     };
     return { calls, execute };
   };
+  const stored: TestCommandSet = { commands: [['npm', 'test']], source: 'project' };
   const clean = run('');
-  assert.equal(
-    await mergeIntoCheckedOutMain(clean.execute, '/human', 'sprint/s1', 'S1', [['npm', 'test']], []),
-    'merged',
-  );
+  assert.equal(await mergeIntoCheckedOutMain(clean.execute, '/human', 'sprint/s1', 'S1', stored, []), 'merged');
   assert.ok(clean.calls.some((call) => call.startsWith('git merge --no-ff sprint/s1')));
 
   // Offene Änderungen: Der Mensch übernimmt selbst (wartet auf Merge), nichts angefasst.
   const busy = run(' M src/app.ts\n');
-  assert.equal(await mergeIntoCheckedOutMain(busy.execute, '/human', 'sprint/s1', 'S1', [], []), 'busy');
+  assert.equal(await mergeIntoCheckedOutMain(busy.execute, '/human', 'sprint/s1', 'S1', stored, []), 'busy');
   assert.ok(!busy.calls.some((call) => call.startsWith('git merge')));
 
   const red = run('', true);
-  assert.equal(
-    await mergeIntoCheckedOutMain(red.execute, '/human', 'sprint/s1', 'S1', [['npm', 'test']], []),
-    'failed',
-  );
+  assert.equal(await mergeIntoCheckedOutMain(red.execute, '/human', 'sprint/s1', 'S1', stored, []), 'failed');
   // Zurück auf den Stand vor dem Merge (nicht ORIG_HEAD, den das Test-Gate verschoben haben kann).
   assert.ok(red.calls.includes('git reset --keep abc1234'));
+});
+
+test('Test-Gate: Standard-Testbefehle entfallen ohne package.json mit Begründung, hinterlegte laufen weiter', async () => {
+  const gateRun = (folder: string, set: TestCommandSet) => {
+    const npm: string[] = [];
+    const log: string[] = [];
+    const execute: CommandExecutor = async (command) => {
+      if (command[0] === 'npm') npm.push(command.join(' '));
+      return { exitCode: command[0] === 'npm' ? 1 : 0, durationMs: 1, output: 'ENOENT package.json' };
+    };
+    return { npm, log, gate: () => runTestGate(execute, folder, set, log) };
+  };
+  const defaults: TestCommandSet = {
+    commands: [
+      ['npm', 'run', 'build'],
+      ['npm', 'test'],
+    ],
+    source: 'default',
+  };
+  const docsOnly = await mkdtemp(join(tmpdir(), 'gate-docs-'));
+  const skipped = gateRun(docsOnly, defaults);
+  await skipped.gate();
+  assert.deepEqual(skipped.npm, []);
+  assert.match(skipped.log.join('\n'), /Test-Gate übersprungen – keine package.json im Projekt/);
+
+  // Hinterlegte Befehle laufen auch ohne package.json und scheitern ehrlich.
+  const own = gateRun(docsOnly, { commands: [['npm', 'test']], source: 'project' });
+  await assert.rejects(own.gate(), /Push abgelehnt: `npm test`/);
+  assert.deepEqual(own.npm, ['npm test']);
+
+  // Mit package.json laufen auch die Standardwerte wie bisher.
+  const node = await mkdtemp(join(tmpdir(), 'gate-node-'));
+  await writeFile(join(node, 'package.json'), '{}');
+  const regular = gateRun(node, defaults);
+  await assert.rejects(regular.gate(), /Push abgelehnt: `npm run build`/);
+  assert.deepEqual(regular.npm, ['npm run build']);
 });
 
 /** Projekt mit main (gepusht auf ein lokales Bare-Repository als „GitHub“) und einem Sprint-Branch mit einem Auftrag. */
