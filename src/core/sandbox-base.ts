@@ -387,23 +387,94 @@ export async function prepareModulesVolume(
   ).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: String(error) }));
 }
 
-/** Stempel im node_modules-Volume: Hash der package-lock.json, mit dem zuletzt installiert wurde. */
+/** Stempel im node_modules-Volume: Hash von Paketmanager und Lockfile, mit dem zuletzt installiert wurde. */
 export const DEPENDENCY_STAMP = 'node_modules/.aideation-lock';
 export const INSTALL_TIMEOUT_MS = 15 * 60_000;
 
-/** Hash der package-lock.json (sonst package.json) im Worktree; null ohne package.json. */
+/** Paketmanager des Projekts; „yarn-berry“ ist Yarn ab Version 2 (.yarnrc.yml), „yarn“ das klassische 1.x. */
+export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'yarn-berry';
+
+/** Lockfile je Paketmanager (pnpm auch ohne Lockfile an der Workspace-Datei erkennbar). */
+const LOCKFILES: Record<PackageManager, string> = {
+  pnpm: 'pnpm-lock.yaml',
+  yarn: 'yarn.lock',
+  'yarn-berry': 'yarn.lock',
+  npm: 'package-lock.json',
+};
+
+/**
+ * Welcher Paketmanager das Projekt installiert: pnpm bei pnpm-lock.yaml oder pnpm-workspace.yaml (npm scheitert in
+ * einem pnpm-Workspace an „workspace:*“), Yarn bei yarn.lock, sonst npm.
+ */
+export function packageManagerOf(worktree: string): PackageManager {
+  const has = (file: string): boolean => existsSync(join(worktree, file));
+  if (has(LOCKFILES.pnpm) || has('pnpm-workspace.yaml')) return 'pnpm';
+  if (has(LOCKFILES.yarn)) return has('.yarnrc.yml') ? 'yarn-berry' : 'yarn';
+  return 'npm';
+}
+
+/** Lesbarer Name des Paketmanagers für Meldungen. */
+export const packageManagerLabel = (manager: PackageManager): string => (manager === 'yarn-berry' ? 'yarn' : manager);
+
+/**
+ * Hash aus Paketmanager und Lockfile (sonst package.json, bei pnpm zusätzlich pnpm-workspace.yaml) im Worktree; null
+ * ohne package.json. Ein Wechsel des Paketmanagers ändert den Stempel, auch wenn das Manifest gleich bleibt.
+ */
 export function dependencyStamp(worktree: string): string | null {
   const manifest = join(worktree, 'package.json');
   if (!existsSync(manifest)) return null;
-  const lock = join(worktree, 'package-lock.json');
-  return createHash('sha256')
-    .update(readFileSync(existsSync(lock) ? lock : manifest))
-    .digest('hex')
-    .slice(0, 16);
+  const manager = packageManagerOf(worktree);
+  const lock = join(worktree, LOCKFILES[manager]);
+  const hash = createHash('sha256')
+    .update(manager)
+    .update(readFileSync(existsSync(lock) ? lock : manifest));
+  const workspace = join(worktree, 'pnpm-workspace.yaml');
+  if (manager === 'pnpm' && existsSync(workspace)) hash.update(readFileSync(workspace));
+  return hash.digest('hex').slice(0, 16);
 }
 
 /** Sperrdatei im Volume: hält die Installation fest, solange sie läuft (flock, auch über Worker-Neustarts hinweg). */
 export const DEPENDENCY_LOCK = 'node_modules/.aideation-install.lock';
+
+/**
+ * Corepack lädt pnpm bzw. Yarn in der Version aus „packageManager“ (sonst seiner festen Standardversion) über die
+ * npm-Registry – auch Yarn ab 2 (COREPACK_NPM_REGISTRY), die der Egress-Proxy freigibt; repo.yarnpkg.com bleibt
+ * gesperrt. Caches liegen im Volume (node_modules/.cache), nicht in HOME.
+ */
+const COREPACK_ENVIRONMENT =
+  'COREPACK_HOME="$PWD/node_modules/.cache/corepack" COREPACK_NPM_REGISTRY=https://registry.npmjs.org ' +
+  'COREPACK_ENABLE_DOWNLOAD_PROMPT=0 COREPACK_DEFAULT_TO_LATEST=0';
+
+/**
+ * Installationsbefehl je Paketmanager, immer ohne Installationsskripte (wie bei den Agents) und ohne Lockfile-Zwang:
+ * ein Agent darf Abhängigkeiten ergänzt haben, ohne das Lockfile schon aktualisiert zu haben. Paketquelle ist stets
+ * die npm-Registry (registry.yarnpkg.com ist im Agent-Netzwerk gesperrt).
+ */
+function installCommand(manager: PackageManager): string {
+  switch (manager) {
+    case 'pnpm':
+      // Store im Volume (gleiches Dateisystem wie node_modules, also Hardlinks statt Kopien); Metadaten-Cache ebenso.
+      return (
+        `${COREPACK_ENVIRONMENT} XDG_CACHE_HOME="$PWD/node_modules/.cache/xdg" XDG_STATE_HOME="$PWD/node_modules/.cache/xdg" ` +
+        'corepack pnpm install --frozen-lockfile=false --ignore-scripts --store-dir node_modules/.cache/pnpm-store'
+      );
+    case 'yarn':
+      return (
+        `${COREPACK_ENVIRONMENT} YARN_REGISTRY=https://registry.npmjs.org ` +
+        'corepack yarn install --ignore-scripts --non-interactive --cache-folder node_modules/.cache/yarn'
+      );
+    case 'yarn-berry':
+      // Yarn ab 2 liest den Proxy nur aus seiner eigenen Konfiguration, nicht aus HTTPS_PROXY.
+      return (
+        `${COREPACK_ENVIRONMENT} YARN_NPM_REGISTRY_SERVER=https://registry.npmjs.org ` +
+        'YARN_HTTP_PROXY="${HTTP_PROXY-}" YARN_HTTPS_PROXY="${HTTPS_PROXY-}" ' +
+        'YARN_GLOBAL_FOLDER="$PWD/node_modules/.cache/yarn-berry" YARN_ENABLE_IMMUTABLE_INSTALLS=false ' +
+        'YARN_ENABLE_SCRIPTS=false corepack yarn install'
+      );
+    default:
+      return 'npm install --ignore-scripts --no-audit --no-fund --cache node_modules/.cache/npm';
+  }
+}
 
 /**
  * Installiert nur, wenn der Stempel im Volume nicht passt, und dann frisch (Reste eines abgebrochenen Laufs liessen
@@ -412,15 +483,33 @@ export const DEPENDENCY_LOCK = 'node_modules/.aideation-install.lock';
  * Container nicht beschreibbar). Die Sperre gilt für alle Container am selben Volume: Startet der Worker neu, während
  * npm im Arbeitscontainer weiterläuft, wartet die nächste Installation und prüft danach den Stempel (sonst ENOENT).
  */
-export function dependencyCommand(stamp: string): string[] {
+export function dependencyCommand(stamp: string, manager: PackageManager = 'npm'): string[] {
   return [
     'sh',
     '-c',
     `exec 9>${DEPENDENCY_LOCK} && flock 9 && ` +
       `{ [ "$(cat ${DEPENDENCY_STAMP} 2>/dev/null)" = "${stamp}" ] || ` +
       '{ find node_modules -mindepth 1 -maxdepth 1 ! -name .cache ! -name .aideation-install.lock -exec rm -rf {} + && ' +
-      `npm install --ignore-scripts --no-audit --no-fund --cache node_modules/.cache/npm && echo ${stamp} > ${DEPENDENCY_STAMP}; }; }`,
+      `${installCommand(manager)} && echo ${stamp} > ${DEPENDENCY_STAMP}; }; }`,
   ];
+}
+
+/**
+ * Kennzeichen einer gescheiterten Installation der Projekt-Abhängigkeiten. Bewusst nicht „Sandbox:“ oder
+ * „Arbeitscontainer:“: Ein Fehler aus dem eigenen package.json bzw. Workspace des Projekts (ERESOLVE, „workspace:“,
+ * kaputtes Lockfile) ist ein Fehler im Auftrag mit Bug-Bericht, kein Defekt des Containers, der das Projekt pausiert
+ * (isSandboxFailure in runner/autofix.ts). Echte Infrastrukturfehler in der Ausgabe (root-eigener Cache) erkennt die
+ * Heuristik weiterhin an ihren eigenen Mustern.
+ */
+export const PROJECT_INSTALL_PREFIX = 'Projekt-Abhängigkeiten:';
+
+/** Meldung für den Agent-Schritt, wenn die Installation der Projekt-Abhängigkeiten scheitert. */
+export function dependencyFailureMessage(manager: PackageManager, installed: CommandResult, where: string): string {
+  return (
+    `${PROJECT_INSTALL_PREFIX} „${packageManagerLabel(manager)} install“ ${where} scheiterte (Exit-Code ${installed.exitCode}). ` +
+    'Befehl nicht gestartet – Fehler im package.json, Lockfile oder Workspace des Projekts prüfen.\n' +
+    installed.output.trim().slice(-800)
+  );
 }
 
 /** Docker Hub: Registry, Anmeldung und CDN der Image-Schichten. */
