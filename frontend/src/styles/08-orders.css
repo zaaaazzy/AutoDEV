@@ -27,7 +27,7 @@
 .approval-box {
   margin: 12px 0;
   padding: 12px 14px;
-  border: 1px solid #b9d3c7;
+  border: 1px solid var(--success-border-soft-alt);
   border-left: 4px solid var(--green);
   border-radius: 8px;
   background: var(--success-surface);
@@ -55,7 +55,7 @@
   background: var(--muted);
 }
 .approval-dot.running {
-  background: #2e9b5f;
+  background: var(--success-bright);
 }
 .approval-dot.starting {
   background: var(--orange);
@@ -78,9 +78,9 @@
   min-width: 0;
 }
 .agent-cancel {
-  border: 1px solid #e4b4ae;
+  border: 1px solid var(--error-border-soft);
   background: var(--surface);
-  color: #b3382c;
+  color: var(--error-text-dark);
   border-radius: 8px;
   padding: 5px 10px;
   font: inherit;
@@ -89,14 +89,14 @@
   white-space: nowrap;
 }
 .agent-cancel:hover {
-  background: #fdeceb;
+  background: var(--error-soft-alt);
 }
 .live-progress {
   margin: 8px 0;
   padding: 7px 12px;
   border-radius: 8px;
-  background: #eef6f0;
-  color: #2a6b45;
+  background: var(--success-surface);
+  color: var(--success-text);
   font-size: 13.5px;
   min-width: 0;
 }
@@ -164,7 +164,7 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--green-light);
+  background: var(--accent-bg-light);
 }
 .timeline time {
   flex: none;
@@ -194,7 +194,7 @@
   background: var(--blue);
 }
 .timeline .event-write::after {
-  background: #c08a2a;
+  background: var(--accent-amber-deep);
 }
 .timeline .event-run::after {
   background: var(--accent-purple);
@@ -279,7 +279,7 @@
 .step-output code {
   padding: 1px 5px;
   border-radius: 5px;
-  background: #f2f4f0;
+  background: var(--surface-neutral);
 }
 .step-output pre code {
   padding: 0;
@@ -296,7 +296,7 @@
   background: var(--surface-muted);
 }
 .tool-call.failed {
-  border-color: #f0c7bb;
+  border-color: var(--error-border);
   background: var(--error-surface);
 }
 .tool-icon {
@@ -438,7 +438,7 @@
   color: var(--green);
 }
 .acceptance-unmet .acceptance-mark {
-  color: #b3261e;
+  color: var(--danger);
 }
 .acceptance-manual .acceptance-mark {
   font-size: 13px;
@@ -569,7 +569,7 @@
 }
 .test-step.failed {
   border-left-color: var(--error-bright);
-  background: #fdf5f3;
+  background: var(--error-surface);
 }
 .test-icon {
   flex: none;
@@ -631,7 +631,7 @@
   place-items: center;
   border-radius: 50%;
   background: var(--accent-orange-strong);
-  color: var(--surface);
+  color: var(--on-accent);
   font-size: 12px;
   font-weight: 800;
 }
@@ -647,7 +647,7 @@
   align-items: flex-start;
   gap: 10px;
   padding: 8px 10px;
-  border: 1px solid #f1d9b5;
+  border: 1px solid var(--notice-border);
   border-left: 3px solid var(--accent-orange-strong);
   border-radius: 8px;
   background: var(--notice-surface-faint);
@@ -655,7 +655,7 @@
 }
 .todo-list li.verifying {
   border-left-color: var(--info-bright);
-  background: #f4f8fe;
+  background: var(--info-soft);
 }
 .todo-list input[type='checkbox'] {
   flex: none;
@@ -711,12 +711,12 @@
   gap: 8px;
   margin-top: 8px;
   padding: 12px 14px;
-  border: 1px solid #e8c9a8;
+  border: 1px solid var(--notice-border);
   border-radius: 12px;
-  background: #fdf6ee;
+  background: var(--notice-surface);
 }
 .order-question-label {
-  color: #8a5420;
+  color: var(--notice-text-warm);
   font-size: 12px;
   font-weight: 600;
 }
@@ -807,7 +807,7 @@
   padding: 1px 8px;
   border-radius: 999px;
   background: var(--surface-cool);
-  color: #2f6b45;
+  color: var(--green-light);
   font-size: 12px;
   font-weight: 500;
 }
@@ -902,7 +902,7 @@
 }
 .visual-status.error {
   border-color: var(--danger);
-  background: #fbeceb;
+  background: var(--error-soft);
 }
 .visual-more > summary {
   cursor: pointer;
@@ -1000,11 +1000,11 @@
   cursor: pointer;
 }
 .visual-env.selectable:hover {
-  border-color: #c9d9cf;
+  border-color: var(--line-strong);
 }
 .visual-env.chosen {
-  border-color: #b9d6c8;
-  background: #f6faf8;
+  border-color: var(--success-border-soft-alt);
+  background: var(--success-surface-faint);
 }
 .visual-env-text {
   display: grid;
@@ -1032,11 +1032,11 @@
   background: var(--success-bright);
 }
 .visual-env-dot.busy {
-  background: #e0a33a;
+  background: var(--accent-amber);
   animation: visual-pulse 1.2s ease-in-out infinite;
 }
 .visual-env-dot.error {
-  background: #c8463b;
+  background: var(--error-bright);
 }
 .visual-env-dot.off {
   background: transparent;
@@ -1059,10 +1059,10 @@
   gap: 8px 12px;
   padding: 10px 12px;
   border-radius: 8px;
-  background: #fdf6ea;
+  background: var(--notice-surface);
 }
 .visual-approval.done {
-  background: #eef7f2;
+  background: var(--success-surface);
 }
 .visual-approval p {
   margin: 0;
@@ -1107,7 +1107,7 @@
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  color: #3c463f;
+  color: var(--text-medium);
   font-size: 13px;
   font-weight: 650;
   cursor: pointer;
@@ -1148,9 +1148,9 @@
   grid-template-columns: 26px minmax(0, 1fr);
   gap: 10px;
   padding: 10px 12px;
-  border: 1px solid #f0dcc6;
+  border: 1px solid var(--notice-peach);
   border-radius: 10px;
-  background: #fffaf4;
+  background: var(--notice-surface-faint);
 }
 .risk-icon {
   display: grid;
@@ -1158,8 +1158,8 @@
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: #fbe7d3;
-  color: #a85a22;
+  background: var(--notice-peach);
+  color: var(--notice-text-warm);
   font-size: 13px;
 }
 .risk-body {

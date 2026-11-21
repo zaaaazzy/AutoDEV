@@ -11,7 +11,7 @@
 .idea-table th,
 .idea-table td {
   padding: 10px 12px;
-  border-bottom: 1px solid var(--line, #e3e7e3);
+  border-bottom: 1px solid var(--line);
   text-align: left;
   vertical-align: top;
 }
@@ -99,7 +99,7 @@
 }
 .dt-count {
   margin: 0;
-  color: #8a938c;
+  color: var(--text-faint-dark);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -140,8 +140,8 @@
   outline-offset: 1px;
 }
 .dt-page.active {
-  background: var(--green);
-  color: var(--surface);
+  background: var(--accent-bg);
+  color: var(--on-accent);
   font-weight: 650;
 }
 .dt-page:disabled {
@@ -211,7 +211,7 @@
   background: var(--surface-tint);
 }
 .dt-sort-icon {
-  color: #b3bcb3;
+  color: var(--text-faint);
   font-size: 11px;
 }
 .dt-sort-icon.active {
@@ -228,7 +228,7 @@
   border: 0;
   border-radius: 5px;
   background: none;
-  color: #b3bcb3;
+  color: var(--text-faint);
 }
 .dt-filter-button:hover {
   background: var(--surface-tint);
@@ -300,7 +300,7 @@
 .sprint-progress-cell .sprint-bar span {
   display: block;
   height: 100%;
-  background: var(--green-light);
+  background: var(--accent-bg-light);
 }
 .closed-detail .sprint-card {
   margin: 0;
@@ -341,8 +341,8 @@
 }
 .dt-expand.open {
   border-color: var(--green-light);
-  background: var(--green-light);
-  color: var(--surface);
+  background: var(--accent-bg-light);
+  color: var(--on-accent);
 }
 .dt-expand.open svg {
   transform: rotate(90deg);
@@ -395,11 +395,11 @@
   color: var(--green-light);
 }
 .dt-table thead th.dt-filtered {
-  background: #e3efe7;
+  background: var(--success-soft);
 }
 .dt-table th.dt-filtered .dt-filter-button {
-  background: var(--green-light);
-  color: var(--surface);
+  background: var(--accent-bg-light);
+  color: var(--on-accent);
 }
 .dt-table th.dt-sorted .dt-sort {
   color: var(--green-light);
@@ -522,7 +522,7 @@ input.dt-select:disabled {
     border: 1px solid var(--line);
     border-radius: 14px;
     background: var(--surface);
-    box-shadow: 0 1px 2px rgb(32 40 36 / 4%);
+    box-shadow: 0 1px 2px rgb(var(--shadow-rgb) / 4%);
   }
   .dt-table tbody tr > td,
   .dt-table tbody td.title-cell,
@@ -634,7 +634,7 @@ input.dt-select:disabled {
   .dt-table th.dt-sorted .dt-head,
   .dt-table th.dt-filtered .dt-head {
     border-color: var(--green-light);
-    background: #e3efe7;
+    background: var(--success-soft);
     color: var(--green-light);
   }
   .order-table .order-title {

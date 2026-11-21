@@ -62,8 +62,8 @@
                 {
                   "type": "bundle",
                   "name": "styles",
-                  "maximumWarning": "185kB",
-                  "maximumError": "200kB"
+                  "maximumWarning": "205kB",
+                  "maximumError": "220kB"
                 }
               ],
               "outputHashing": "all",

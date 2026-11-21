@@ -5,7 +5,7 @@
   align-items: center;
   justify-content: center;
   padding: 0 12px;
-  border: 1px solid #d8ddd7;
+  border: 1px solid var(--border-subtle);
   border-radius: 7px;
   background: var(--surface);
   color: var(--ink);
@@ -16,13 +16,13 @@
   color: var(--green);
 }
 .button.primary {
-  border-color: var(--green);
-  background: var(--green);
-  color: var(--surface);
+  border-color: var(--accent-bg);
+  background: var(--accent-bg);
+  color: var(--on-accent);
 }
 .button.primary:hover:not(:disabled) {
-  background: #1d523f;
-  color: var(--surface);
+  background: var(--accent-bg-hover);
+  color: var(--on-accent);
 }
 .button.danger {
   border-color: var(--error-border);
@@ -35,14 +35,14 @@
 
 /* Hauptaktion, die etwas zerstört (Bestätigungsdialog): rot gefüllt statt grün. */
 .button.primary.danger {
-  border-color: var(--error-text);
-  background: var(--error-text);
-  color: var(--surface);
+  border-color: var(--danger-bg);
+  background: var(--danger-bg);
+  color: var(--on-accent);
 }
 .button.primary.danger:hover:not(:disabled) {
-  border-color: #823a2c;
-  background: #823a2c;
-  color: var(--surface);
+  border-color: var(--danger-deep);
+  background: var(--danger-deep);
+  color: var(--on-accent);
 }
 .button:disabled {
   opacity: 0.55;
@@ -180,7 +180,7 @@ label.check > input[type='checkbox'] {
   height: 18px;
   place-items: center;
   border-radius: 50%;
-  color: var(--surface);
+  color: var(--on-accent);
   font-size: 11px;
   font-weight: 800;
 }
@@ -222,7 +222,7 @@ label.check > input[type='checkbox'] {
   padding: 0;
   border: 0;
   border-radius: 999px;
-  background: #d5dcd3;
+  background: var(--border-default);
   appearance: none;
   cursor: pointer;
   transition: background 0.2s;
@@ -240,7 +240,7 @@ label.check > input[type='checkbox'] {
   transition: transform 0.22s cubic-bezier(0.3, 1.4, 0.5, 1);
 }
 .switch:checked {
-  background: var(--green);
+  background: var(--accent-bg);
 }
 .switch:checked::after {
   transform: translateX(20px);
@@ -342,8 +342,8 @@ label.check > input[type='checkbox'] {
   border-left: 1px solid var(--line);
 }
 .segmented button.active {
-  background: var(--green);
-  color: var(--surface);
+  background: var(--accent-bg);
+  color: var(--on-accent);
 }
 
 @media (max-width: 720px) {
