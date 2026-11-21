@@ -5,7 +5,13 @@ import type { CommandExecutor } from '../core/command.js';
 import { beginShutdown } from '../core/shutdown.js';
 import { shortTitle, TITLE_MAX } from '../core/validation.js';
 import { UNTRUSTED_HINT } from '../core/bug-trust.js';
-import { buildRequirementPrompt, draftRequirements, runAuthorAgent, splitTitle } from './requirements.js';
+import {
+  buildRequirementPrompt,
+  draftRequirements,
+  runAuthorAgent,
+  splitDependency,
+  splitTitle,
+} from './requirements.js';
 
 test('Auftragsautor: „@@TITEL:“ wird zum kurzen Titel und verschwindet aus der Anforderung', () => {
   const { title, text } = splitTitle('@@TITEL: „Dunkelmodus für Einstellungen“\n## Ziel\nDunkel.');
@@ -13,6 +19,17 @@ test('Auftragsautor: „@@TITEL:“ wird zum kurzen Titel und verschwindet aus d
   assert.equal(text, '## Ziel\nDunkel.');
   assert.deepEqual(splitTitle('## Ziel\nOhne Titel'), { title: null, text: '## Ziel\nOhne Titel' });
   assert.ok((splitTitle(`@@TITEL: ${'sehr lang '.repeat(20)}`).title ?? '').length <= TITLE_MAX);
+});
+
+test('splitDependency: „Hängt ab von: <Titel>“ wird erkannt und verschwindet aus der Anforderung', () => {
+  const { dependsOnTitle, text } = splitDependency('Hängt ab von: „Monorepo-Grundgerüst“.\n## Ziel\nLogin.');
+  assert.equal(dependsOnTitle, 'Monorepo-Grundgerüst');
+  assert.equal(text, '## Ziel\nLogin.');
+  assert.equal(splitDependency('@@Hängt ab von: keine\n## Ziel').dependsOnTitle, null, '„keine“ heisst keine');
+  assert.equal(splitDependency('hängt ab von: –\n## Ziel').dependsOnTitle, null);
+  assert.deepEqual(splitDependency('## Ziel\nOhne'), { dependsOnTitle: null, text: '## Ziel\nOhne' });
+  // Mitten im Fliesstext (kein Zeilenanfang mit Doppelpunkt-Zeile) zählt nicht.
+  assert.equal(splitDependency('Der Auftrag hängt ab von Zeit und Geld.').dependsOnTitle, null);
 });
 
 test('shortTitle kürzt an einer Wortgrenze mit Auslassungszeichen', () => {
@@ -472,6 +489,39 @@ test('draftRequirements: neuer Auftrag mit kurzem Titel, Schätzung und geprüft
   const progressAgents = find(/SET progress = \$3, progress_agent = \$2/).map((query) => query.values[1]);
   assert.ok(progressAgents.includes('author'));
   assert.ok(progressAgents.includes('bug_reviewer'));
+});
+
+test('draftRequirements: „Hängt ab von“ wird auf einen Auftrag des Projekts aufgelöst und gesetzt', async () => {
+  const { pool, find } = draftPool([
+    [/FROM development_items\s+WHERE project_slug = \$1 AND lower\(btrim\(title\)\)/, [{ id: 'dep-1' }]],
+    [/WITH RECURSIVE chain/, [{ ok: true }]],
+    [/INSERT INTO development_items/, [{ id: 'order-1' }]],
+    [/SELECT title FROM development_items/, [{ title: 'Monorepo-Grundgerüst' }, { title: 'Anderes' }]],
+  ]);
+  const requirement = REQUIREMENT.replace('## Ziel', 'Hängt ab von: Monorepo-Grundgerüst\n## Ziel');
+  const { calls, execute } = authorAndReviewer(requirement);
+  assert.equal(await draftRequirements(pool, options, execute), 1);
+  const authorPrompt = calls[0]!.command.at(-1)!;
+  assert.match(
+    authorPrompt,
+    /## Offene Aufträge des Projekts \(für „Hängt ab von“\)\n- Monorepo-Grundgerüst\n- Anderes/,
+  );
+  assert.match(authorPrompt, /`Hängt ab von: <genauer Titel dieses Auftrags>`/);
+  const [insert] = find(/INSERT INTO development_items/);
+  assert.doesNotMatch(String(insert?.values[1]), /Hängt ab von/, 'Zeile steht nicht in der Beschreibung');
+  const [lookup] = find(/lower\(btrim\(title\)\) = lower\(\$2\)/);
+  assert.deepEqual(lookup?.values, ['p', 'Monorepo-Grundgerüst', 'order-1']);
+  const [saved] = find(/UPDATE development_items SET depends_on = \$2/);
+  assert.deepEqual(saved?.values, ['order-1', 'dep-1']);
+});
+
+test('draftRequirements: unbekannter Titel bei „Hängt ab von“ setzt nichts, der Auftrag entsteht trotzdem', async () => {
+  const { pool, find } = draftPool([[/INSERT INTO development_items/, [{ id: 'order-1' }]]]);
+  const requirement = REQUIREMENT.replace('## Ziel', 'Hängt ab von: Gibt es nicht\n## Ziel');
+  const { execute } = authorAndReviewer(requirement);
+  assert.equal(await draftRequirements(pool, options, execute), 1);
+  assert.equal(find(/INSERT INTO development_items/).length, 1);
+  assert.equal(find(/SET depends_on/).length, 0);
 });
 
 test('draftRequirements: ohne Titel und Schätzung gilt der Ideentitel; ohne Bugs keine Prüfung', async () => {

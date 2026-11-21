@@ -13,8 +13,9 @@ import { buildUpdate } from '../core/validation.js';
 import { isUniqueViolation, withTransaction } from './transaction.js';
 
 /**
- * Spalten eines Auftrags. fixStatus: Die innere Tabelle ist auf bug_id/status/created_at beschränkt, damit
- * failure_bug_id die Spalte der äusseren Zeile meint – mit vollem Alias löste Postgres sie auf die innere auf.
+ * Spalten eines Auftrags. fixStatus (ebenso dependsOnTitle/-Status): Die innere Tabelle ist auf wenige Spalten
+ * beschränkt, damit failure_bug_id bzw. depends_on die Spalte der äusseren Zeile meint – mit vollem Alias löste
+ * Postgres sie auf die innere auf.
  * Funktioniert so mit und ohne Alias der äusseren Abfrage (z. B. `UPDATE development_items d … RETURNING`).
  */
 export const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "testRunId", sprint_id AS "sprintId",
@@ -26,6 +27,9 @@ export const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "tes
   follow_up_of AS "followUpOf",
   (SELECT f.status FROM (SELECT bug_id, status, created_at FROM development_items) f
     WHERE f.bug_id = failure_bug_id ORDER BY f.created_at DESC LIMIT 1) AS "fixStatus",
+  depends_on AS "dependsOn",
+  (SELECT p.title FROM (SELECT id, title FROM development_items) p WHERE p.id = depends_on) AS "dependsOnTitle",
+  (SELECT p.status FROM (SELECT id, status FROM development_items) p WHERE p.id = depends_on) AS "dependsOnStatus",
   removed_from_sprint AS "removedFromSprint", removed_from_sprint_at AS "removedFromSprintAt",
   sprint_rank AS "sprintRank", review_branch AS "reviewBranch", review_since AS "reviewSince",
   review_approved_at AS "reviewApprovedAt", visual_approved_at AS "visualApprovedAt",
@@ -451,4 +455,67 @@ export async function updateOrder(
   );
   const result = await pool.query<DevelopmentRow>(update.sql, update.values);
   return result.rows[0];
+}
+
+/**
+ * Abhängigkeit „Hängt ab von“: Der Auftrag `dependsOn` muss zum selben Projekt gehören, darf nicht der Auftrag selbst
+ * sein und nicht (über seine eigene Abhängigkeit) wieder auf ihn zurückführen – sonst warteten beide ewig.
+ */
+export async function dependencyAllowed(pool: Pool, orderId: string, dependsOn: string): Promise<boolean> {
+  if (orderId === dependsOn) return false;
+  const result = await pool.query<{ ok: boolean }>(
+    `WITH RECURSIVE chain AS (
+       SELECT p.id, p.depends_on, 1 AS depth FROM development_items p WHERE p.id = $2
+       UNION ALL
+       SELECT n.id, n.depends_on, chain.depth + 1 FROM development_items n JOIN chain ON n.id = chain.depends_on
+        WHERE chain.depth < 50
+     )
+     SELECT EXISTS (SELECT 1 FROM development_items d JOIN development_items p ON p.project_slug = d.project_slug
+                     WHERE d.id = $1 AND p.id = $2)
+            AND NOT EXISTS (SELECT 1 FROM chain WHERE chain.id = $1 OR chain.depends_on = $1) AS ok`,
+    [orderId, dependsOn],
+  );
+  return result.rows[0]?.ok === true;
+}
+
+/**
+ * Auftrag des Projekts mit genau diesem Titel (ohne Gross-/Kleinschreibung, Anführungszeichen und Leerraum am Rand),
+ * zuletzt angelegter zuerst; `exceptId` schliesst den eigenen Auftrag aus. null, wenn es keinen gibt.
+ */
+export async function findOrderByTitle(
+  pool: Pool,
+  projectSlug: string,
+  title: string,
+  exceptId: string | null = null,
+): Promise<string | null> {
+  const wanted = title.replace(/^["„“”']+|["„“”']+$/g, '').trim();
+  if (!wanted) return null;
+  const result = await pool.query<{ id: string }>(
+    `SELECT id FROM development_items
+      WHERE project_slug = $1 AND lower(btrim(title)) = lower($2) AND ($3::uuid IS NULL OR id <> $3)
+      ORDER BY created_at DESC LIMIT 1`,
+    [projectSlug, wanted, exceptId],
+  );
+  return result.rows[0]?.id ?? null;
+}
+
+/** Titel der noch nicht erledigten Aufträge eines Projekts (für den Auftragsautor: worauf ein Auftrag aufbauen kann). */
+export async function loadOpenOrderTitles(pool: Pool, projectSlug: string, limit = 40): Promise<string[]> {
+  const result = await pool.query<{ title: string }>(
+    `SELECT title FROM development_items
+      WHERE project_slug = $1 AND kind <> 'express' AND status NOT IN ('${DEVELOPMENT_STATUS.done}', '${DEVELOPMENT_STATUS.rejected}')
+      ORDER BY created_at DESC LIMIT $2`,
+    [projectSlug, limit],
+  );
+  return result.rows.map((row) => row.title);
+}
+
+/** Abhängigkeit eines Auftrags setzen (null löscht sie). Nur Aufträge desselben Projekts, kein Kreis. */
+export async function setDependency(pool: Pool, orderId: string, dependsOn: string | null): Promise<boolean> {
+  if (dependsOn && !(await dependencyAllowed(pool, orderId, dependsOn))) return false;
+  await pool.query(`UPDATE development_items SET depends_on = $2, updated_at = NOW() WHERE id = $1`, [
+    orderId,
+    dependsOn,
+  ]);
+  return true;
 }

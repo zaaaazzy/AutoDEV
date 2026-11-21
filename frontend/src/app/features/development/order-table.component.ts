@@ -36,6 +36,7 @@ import { bulkSelectable, canRetry } from './order-bulk.js';
 import { OrderDetailComponent } from './order-detail.component.js';
 import { OrderService } from './order.service.js';
 import { defined } from '../../../../../src/core/defined.js';
+import { waitsForDependency } from '../../shared/dependency.js';
 
 const PRIORITY_RANK = ['low', 'medium', 'high'];
 
@@ -200,6 +201,15 @@ export class OrderTableComponent {
 
   /** Bei Bugs ersetzt der Käfer das Präfix „Bug:“. */
   protected readonly displayTitle = orderTitle;
+
+  /** Titel des Auftrags, auf den dieser noch wartet („Hängt ab von“), sonst null. */
+  protected waitingFor(item: DevelopmentItem): string | null {
+    const dependency = item.dependsOn
+      ? this.store.data().development.find((other) => other.id === item.dependsOn)
+      : undefined;
+    if (!waitsForDependency(item, dependency)) return null;
+    return dependency?.title ?? item.dependsOnTitle ?? 'einen anderen Auftrag';
+  }
 
   protected toggleOrder(id: string): void {
     const link = this.rowLink();

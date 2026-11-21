@@ -28,6 +28,7 @@ import { OrderApprovalComponent } from './order-approval.component.js';
 import { OrderProposalsComponent } from './order-proposals.component.js';
 import { OrderVisualComponent } from './order-visual.component.js';
 import { needsVisual } from '../../shared/needs-visual.js';
+import { waitsForDependency } from '../../shared/dependency.js';
 import { agentEnds, buildWorkflow } from '../../shared/workflow.js';
 
 /** Texte der Gegenprobe je Testdatei (wie im Testbericht). */
@@ -158,6 +159,20 @@ export class OrderDetailComponent {
   protected readonly previous = computed(() => {
     const id = this.order().followUpOf;
     return id ? (this.data().development.find((item) => item.id === id) ?? null) : null;
+  });
+  /** Auftrag, von dem dieser abhängt („Hängt ab von“), sofern geladen. */
+  protected readonly dependency = computed(() => {
+    const id = this.order().dependsOn;
+    return id ? (this.data().development.find((item) => item.id === id) ?? null) : null;
+  });
+  /** Wartet der Auftrag noch auf seine Abhängigkeit? Der Status kommt aus der Liste, sonst vom Server. */
+  protected readonly waitsForDependency = computed(() => waitsForDependency(this.order(), this.dependency()));
+  /** Auswahl für „Hängt ab von“: andere Aufträge des Projekts, Bugs eingeschlossen, ohne Express-Anfragen. */
+  protected readonly dependencyOptions = computed(() => {
+    const own = this.order().id;
+    return this.data()
+      .development.filter((item) => item.id !== own && item.kind !== 'express' && item.dependsOn !== own)
+      .sort((left, right) => left.title.localeCompare(right.title, 'de'));
   });
 
   protected async createFollowUp(

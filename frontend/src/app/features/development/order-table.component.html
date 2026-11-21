@@ -55,6 +55,13 @@
           >⚡ Express</span
         >
       }
+      @if (waitingFor(item); as dependency) {
+        <span
+          class="dependency-badge"
+          [title]="'Wartet auf „' + dependency + '“ – startet erst, wenn jener erledigt ist'"
+          >⏳ wartet</span
+        >
+      }
     </button>
   </ng-template>
   <ng-template appDataCell="status" let-item>

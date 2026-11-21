@@ -284,6 +284,10 @@ export interface DevelopmentItem extends Estimate {
   counterCheck?: CounterCheck | null;
   /** Folgeauftrag: bezieht sich auf diesen abgeschlossenen Auftrag. */
   followUpOf?: string | null;
+  /** „Hängt ab von“: der Worker startet den Auftrag erst, wenn dieser Auftrag erledigt ist (Titel und Status dazu). */
+  dependsOn?: string | null;
+  dependsOnTitle?: string | null;
+  dependsOnStatus?: DevelopmentStatus | null;
   fixStatus?: string | null;
   /** Name des Sprints, aus dem der Auftrag herausgenommen wurde. */
   /** Reihenfolge im Sprint (Kanban). */

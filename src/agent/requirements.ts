@@ -16,6 +16,7 @@ import { loadProjectContext, loadProjectRules, withProjectContext } from '../cor
 import { isShuttingDown } from '../core/shutdown.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { loadKnownBugs } from '../db/bugs-repository.js';
+import { findOrderByTitle, loadOpenOrderTitles, setDependency } from '../db/development-repository.js';
 import { isUniqueViolation } from '../db/transaction.js';
 import { knownBugLine } from '../core/known-bugs.js';
 import { type ActualReference, loadAuthorReference, referenceSection, splitEstimate } from './estimation.js';
@@ -88,6 +89,25 @@ function permissionRole(role: string, agentId: string | null | undefined, author
   return author.role;
 }
 
+const DEPENDENCY_LINE = /^\s*(?:@@)?H[äa]ngt ab von:\s*(.+)$/im;
+
+/**
+ * Trennt die Zeile „Hängt ab von: <Titel>“ (Auftrag desselben Projekts, der vorher erledigt sein muss) vom
+ * Anforderungstext. „keine“ oder „–“ heisst: keine Abhängigkeit.
+ */
+export function splitDependency(output: string): { dependsOnTitle: string | null; text: string } {
+  const match = DEPENDENCY_LINE.exec(output);
+  if (!match) return { dependsOnTitle: null, text: output };
+  const title = defined(match[1])
+    .replace(/^["„“”']+|["„“”'.]+$/g, '')
+    .trim();
+  const none = !title || /^(?:keine?r?|nichts|-|–|—)$/i.test(title);
+  return {
+    dependsOnTitle: none ? null : title,
+    text: (output.slice(0, match.index) + output.slice(match.index + match[0].length)).trim(),
+  };
+}
+
 export function splitTitle(output: string): { title: string | null; text: string } {
   const match = TITLE_LINE.exec(output);
   if (!match) return { title: null, text: output };
@@ -101,6 +121,9 @@ export function splitTitle(output: string): { title: string | null; text: string
 const FORMAT = [
   `Beginne mit genau einer Zeile \`@@TITEL: <Auftragstitel>\`: höchstens 60 Zeichen, sagt knapp, was entsteht ` +
     '(z. B. „Dunkelmodus für Einstellungen“), ohne Projektname, ohne Begründung, ohne Satzzeichen am Ende.',
+  'Baut der Auftrag zwingend auf einem anderen, noch offenen Auftrag des Projekts auf (z. B. ein Grundgerüst, das er ' +
+    'braucht), folgt als zweite Zeile `Hängt ab von: <genauer Titel dieses Auftrags>` – nur ein Auftrag aus der Liste ' +
+    'der offenen Aufträge, sonst keine solche Zeile. Der Worker startet den Auftrag dann erst, wenn jener erledigt ist.',
   'Schreibe danach die Anforderung als Markdown mit genau diesen Abschnitten:',
   '## Ziel',
   '## Anforderungen (Liste)',
@@ -124,6 +147,8 @@ export function buildRequirementPrompt(
   definitionOfReady: string[] = DEFAULT_DEFINITION_OF_READY,
   /** Ist-Werte erledigter Aufträge derselben Kategorie (lernende Schätzung). */
   reference: ActualReference | null = null,
+  /** Titel der offenen Aufträge des Projekts (mögliche Abhängigkeit „Hängt ab von“). */
+  openOrders: string[] = [],
 ): string {
   return [
     'Du bist der Agent "Auftragsautor" und machst aus einer Idee eine umsetzbare Anforderung für einen Entwicklungsauftrag.',
@@ -140,6 +165,9 @@ export function buildRequirementPrompt(
         ]
       : []),
     FORMAT,
+    ...(openOrders.length
+      ? [`## Offene Aufträge des Projekts (für „Hängt ab von“)\n${openOrders.map((title) => `- ${title}`).join('\n')}`]
+      : []),
     ...(reference ? [referenceSection(reference)] : []),
     `## Definition of Ready (vor der Abgabe prüfen)\n${definitionOfReady.map((item) => `- ${item}`).join('\n')}\n` +
       'Schreibe die Akzeptanzkriterien als Liste mit genau einem prüfbaren Satz je Punkt – der Tester hakt sie einzeln ab.',
@@ -401,6 +429,32 @@ export const REDRAFT_ORDER_SQL = `
   FROM ideation_items i WHERE d.id = $1 AND i.id = d.ideation_id
 `;
 
+/**
+ * „Hängt ab von: <Titel>“ des Auftragsautors auf einen Auftrag desselben Projekts auflösen und setzen. Ein unbekannter
+ * Titel wird nur protokolliert (der Auftrag läuft dann ohne Abhängigkeit); ohne Zeile bleibt eine bestehende
+ * Abhängigkeit, wie sie ist. Fehler halten die Anforderung nicht auf.
+ */
+async function saveDependency(
+  pool: Pool,
+  project: string,
+  orderId: string,
+  dependsOnTitle: string | null,
+): Promise<void> {
+  if (!dependsOnTitle) return;
+  try {
+    const dependsOn = await findOrderByTitle(pool, project, dependsOnTitle, orderId);
+    if (!dependsOn) {
+      console.warn(`[${orderId}] „Hängt ab von: ${dependsOnTitle}“ – kein Auftrag mit diesem Titel im Projekt.`);
+      return;
+    }
+    if (!(await setDependency(pool, orderId, dependsOn))) {
+      console.warn(`[${orderId}] „Hängt ab von: ${dependsOnTitle}“ nicht gesetzt (Kreis oder fremdes Projekt).`);
+    }
+  } catch (error) {
+    logged('requirements')(error);
+  }
+}
+
 /** Turns one requested idea into a backlog order. Sprint assignment stays a manual decision. */
 export async function draftRequirements(
   pool: Pool,
@@ -455,11 +509,13 @@ export async function draftRequirements(
     },
     areaBucket(existing?.description ?? idea.description),
   ).catch(logged('requirements', null));
+  const openOrders = await loadOpenOrderTitles(pool, options.project).catch(logged('requirements', []));
   console.info(`[idea ${idea.id}] Anforderung erstellen`);
   const { exitCode, output: rawOutput } = await runAuthorAgent(
     pool,
     options,
-    (instructions) => buildRequirementPrompt(instructions, idea, existing?.description, definitions.ready, reference),
+    (instructions) =>
+      buildRequirementPrompt(instructions, idea, existing?.description, definitions.ready, reference, openOrders),
     execute,
     'author',
     (message) => void draftProgress(pool, idea.id, 'author', message),
@@ -471,7 +527,8 @@ export async function draftRequirements(
     );
     return 0;
   }
-  const { title: shortened, text } = splitTitle(rawOutput);
+  const { title: shortened, text: titled } = splitTitle(rawOutput);
+  const { dependsOnTitle, text } = splitDependency(titled);
   const { requirement: output, estimate } = splitEstimate(text);
   if (exitCode !== 0 || output.length < MIN_REQUIREMENT_CHARS) {
     await pool.query(
@@ -516,22 +573,28 @@ export async function draftRequirements(
       return 0;
     }
     await pool.query(REDRAFT_ORDER_SQL, [existing.id, output.slice(0, 10_000), risks, projectContext]);
-  } else
-    await pool
-      .query(
+    await saveDependency(pool, options.project, existing.id, dependsOnTitle);
+  } else {
+    const created = await pool
+      .query<{ id: string }>(
         `INSERT INTO development_items (project_slug, ideation_id, title, description, status, priority,
                                     effort_hours, token_estimate, benefit, cost, risks, project_context, estimate_source)
      SELECT i.project_slug, i.id, COALESCE($5, i.title), $2, '${DEVELOPMENT_STATUS.backlog}', i.priority, i.effort_hours, i.token_estimate, i.benefit, i.cost, $3, $4,
             i.estimate_source
        FROM ideation_items i
-      WHERE i.id = $1 AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.ideation_id = i.id)`,
+      WHERE i.id = $1 AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.ideation_id = i.id)
+     RETURNING id`,
         // Neuer Auftrag: kurzer Titel des Auftragsautors; ein bestehender behält seinen (evtl. von Hand gesetzten) Titel.
         [idea.id, output.slice(0, 10_000), risks, projectContext, shortened ?? shortTitle(idea.title, TITLE_MAX)],
       )
       .catch((error: unknown) => {
         // Inzwischen von Hand übernommen (Unique-Index auf ideation_id): Der Auftrag existiert, die Idee ist angenommen.
         if (!isUniqueViolation(error)) throw error;
+        return null;
       });
+    const orderId = created?.rows[0]?.id;
+    if (orderId) await saveDependency(pool, options.project, orderId, dependsOnTitle);
+  }
   await pool.query(
     `UPDATE ideation_items SET status = '${IDEATION_STATUS.accepted}', progress = NULL, progress_agent = NULL,
             agent_note = 'Anforderung vom Agenten erstellt – Auftrag liegt im Backlog.',
