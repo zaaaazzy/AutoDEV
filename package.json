@@ -59,7 +59,7 @@
     "eslint": "^10.13.0",
     "mermaid": "11.17.2",
     "playwright": "1.65.1",
-    "prettier": "^3.9.10",
+    "prettier": "^3.10.1",
     "rxjs": "^7.8.2",
     "tsx": "^4.20.6",
     "typescript": "~6.0.3",
