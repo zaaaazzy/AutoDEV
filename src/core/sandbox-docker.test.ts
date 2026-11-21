@@ -81,7 +81,10 @@ test('Sandbox (Docker): Testbefehl im Gate, der ~/.ssh des Hosts lesen will, sch
       runTestGate(
         execute,
         worktree,
-        [['sh', '-c', `ls ${JSON.stringify(hostSsh)} && cat ${JSON.stringify(hostSsh)}/*`]],
+        {
+          commands: [['sh', '-c', `ls ${JSON.stringify(hostSsh)} && cat ${JSON.stringify(hostSsh)}/*`]],
+          source: 'project',
+        },
         log,
       ),
       /Push abgelehnt/,

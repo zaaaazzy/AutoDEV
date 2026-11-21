@@ -208,7 +208,7 @@ Er hat höhere Rechte als alle anderen, bleibt aber im Projektordner:
 
 **Projektsperre:** Befehle (git, npm, Dienst-Aktionen) des Assistenten, der Agents und des Git-Syncs laufen pro Projektordner nacheinander, nie gleichzeitig. Dateischreibzugriffe sind davon nicht betroffen.
 
-**Tester:** Testbefehle laufen mit dem Zeitlimit des Workers, ohne `DEV_LOG_*`-Variablen, und lassen sich über „Abbrechen“ stoppen. Der Worker überschreibt dabei nie den gespeicherten Projektordner.
+**Tester:** Testbefehle laufen mit dem Zeitlimit des Workers, ohne `DEV_LOG_*`-Variablen, und lassen sich über „Abbrechen“ stoppen. Der Worker überschreibt dabei nie den gespeicherten Projektordner. Ohne hinterlegte Testbefehle gelten die Standardwerte `npm run build` und `npm test`; fehlt im Arbeitsordner die `package.json`, hält der Testlauf sie als übersprungen fest (mit Begründung im Schritt „## Testlauf (Projekttests)“ und unter „Testläufe“) und gilt als bestanden, statt mit `ENOENT` einen Bug anzulegen.
 
 **Projektordner:** Müssen absolut, ohne `..` und spezifisch sein (nicht `/`, `/Users`, `/Users/<name>`, `/Volumes/<Datenträger>`, Systemordner). Mit `DEV_LOG_PROJECT_ROOTS` lassen sie sich zusätzlich auf feste Wurzeln beschränken.
 

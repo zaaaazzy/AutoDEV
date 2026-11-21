@@ -35,6 +35,37 @@ test('Testanfrage: run_id ist vor den Befehlen gesetzt, bei Fehler wird der Lauf
   }
 });
 
+test('Komplettlauf ohne package.json und ohne eigene Testbefehle: Standardbefehle als übersprungen, keine Bugs', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'test-request-nopkg-'));
+  const queries: { sql: string; params: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, params: unknown[] = []) => {
+      queries.push({ sql, params });
+      if (sql.includes("SET status = 'running'")) return { rows: [{ id: 'req-3', scope: 'full' }] };
+      if (sql.includes('test_commands')) return { rows: [{ commands: null }] };
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+  const execute: CommandExecutor = async () => ({ exitCode: 0, durationMs: 0, output: '' });
+  let received: { commands: string[][]; skipped?: boolean[]; skipNote?: string } | undefined;
+  try {
+    await processTestRequest(pool, { project: 'demo', cwd }, execute, async (options) => {
+      received = options;
+      return 'run-3';
+    });
+    assert.ok(received);
+    assert.deepEqual(received.commands, [
+      ['npm', 'run', 'build'],
+      ['npm', 'test'],
+    ]);
+    assert.deepEqual(received.skipped, [true, true]);
+    assert.match(received.skipNote ?? '', /keine package.json im Projekt/);
+    assert.ok(!queries.some((q) => q.sql.includes('INSERT INTO bugs')));
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test('Komplettlauf: Umgebung enthält DB-Zugang und Admin-Ziel, aber keine anderen DEV_LOG_*-Geheimnisse', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'test-request-full-'));
   await writeFile(join(cwd, 'package.json'), JSON.stringify({ scripts: { 'test:full': 'tsx scripts/test-full.ts' } }));

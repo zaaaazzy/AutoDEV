@@ -1,4 +1,5 @@
 import { PHASE_SQL_ORDER } from '../core/workflow-phases.js';
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Pool } from 'pg';
 import { isUuid } from '../core/validation.js';
@@ -200,23 +201,57 @@ export function parseTestCommands(parsed: unknown): string[][] | null {
     : null;
 }
 
-/** Testbefehle des Projekts (Einstellung, sonst DEV_LOG_TEST_COMMANDS, sonst Build und npm test). */
+/** Standard-Testbefehle, wenn weder Projekt noch Umgebung welche vorgeben. */
+export const DEFAULT_TEST_COMMANDS: readonly string[][] = [
+  ['npm', 'run', 'build'],
+  ['npm', 'test'],
+];
+
+/** Herkunft der Testbefehle: Projekteinstellung, DEV_LOG_TEST_COMMANDS oder die Standardwerte. */
+export type TestCommandSource = 'project' | 'env' | 'default';
+
+export interface TestCommandSet {
+  commands: string[][];
+  source: TestCommandSource;
+}
+
+/** Testbefehle des Projekts mit Herkunft (Einstellung, sonst DEV_LOG_TEST_COMMANDS, sonst Build und npm test). */
+export async function loadTestCommandSet(
+  pool: Pool,
+  project: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<TestCommandSet> {
+  const stored = (
+    await pool.query<{ commands: unknown }>('SELECT test_commands AS commands FROM projects WHERE slug = $1', [project])
+  ).rows[0]?.commands;
+  const fromProject = parseTestCommands(stored);
+  if (fromProject) return { commands: fromProject, source: 'project' };
+  const raw = environment.DEV_LOG_TEST_COMMANDS?.trim();
+  const fromEnv = raw ? parseTestCommands(envJson('DEV_LOG_TEST_COMMANDS', raw)) : null;
+  if (fromEnv) return { commands: fromEnv, source: 'env' };
+  return { commands: DEFAULT_TEST_COMMANDS.map((command) => [...command]), source: 'default' };
+}
+
+/** Testbefehle des Projekts ohne Herkunft (siehe loadTestCommandSet). */
 export async function loadTestCommands(
   pool: Pool,
   project: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<string[][]> {
-  const stored = (
-    await pool.query<{ commands: unknown }>('SELECT test_commands AS commands FROM projects WHERE slug = $1', [project])
-  ).rows[0]?.commands;
-  const raw = environment.DEV_LOG_TEST_COMMANDS?.trim();
-  return (
-    parseTestCommands(stored) ??
-    (raw ? parseTestCommands(envJson('DEV_LOG_TEST_COMMANDS', raw)) : null) ?? [
-      ['npm', 'run', 'build'],
-      ['npm', 'test'],
-    ]
-  );
+  return (await loadTestCommandSet(pool, project, environment)).commands;
+}
+
+/** Begründung, wenn die Standard-Testbefehle entfallen; steht als Ausgabe am übersprungenen Schritt. */
+export const NO_PACKAGE_NOTE =
+  'übersprungen – keine package.json im Projekt: Standard-Testbefehle entfallen; eigene Testbefehle unter Projekt → Einstellungen hinterlegen';
+
+/**
+ * Die Standardwerte (`npm run build`, `npm test`) setzen eine package.json im Ordner voraus; ohne sie scheitern sie mit
+ * ENOENT, obwohl nichts kaputt ist (etwa ein reiner Dokumentationsauftrag im frisch angelegten Projekt). Dann entfallen
+ * sie mit Begründung. Vom Nutzer hinterlegte Befehle (Projekt oder Umgebung) laufen immer und scheitern ehrlich.
+ */
+export function skippedTestCommandsNote(set: TestCommandSet, folder: string): string | null {
+  return set.source === 'default' && !existsSync(resolve(folder, 'package.json')) ? NO_PACKAGE_NOTE : null;
 }
 
 /** Testbefehle je Auftrag (Tester-Schritt, mit {tests}/{files}); null = nicht gesetzt, dann gelten die Testbefehle. */
