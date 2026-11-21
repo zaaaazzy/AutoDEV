@@ -15,5 +15,6 @@ if [ -f package-lock.json ]; then
   echo "[review] Abhängigkeiten installieren (npm ci)"
   npm ci --no-audit --no-fund --prefer-offline
 fi
+# Eine Zeile je Befehl, nacheinander; die erste gescheiterte Zeile beendet den Container (-e).
 echo "[review] Start: ${REVIEW_COMMAND}"
-exec sh -c "$REVIEW_COMMAND"
+exec sh -ec "$REVIEW_COMMAND"

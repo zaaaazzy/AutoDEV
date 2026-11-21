@@ -67,6 +67,9 @@
         <div class="sprint-title">
           <h3>{{ sprint.name }}</h3>
           <span class="status" [ngClass]="sprint.status | statusClass">{{ sprint.status | statusLabel }}</span>
+        </div>
+        <!-- Git-Leiste: Branch, Commit, Push und ZIP als gleich große Pills in einer Reihe (auf dem Handy wischbar). -->
+        <div class="sprint-git" role="group" aria-label="Git">
           @if (githubBase(); as repo) {
             <a
               class="gh-link"
@@ -94,31 +97,29 @@
               </a>
             }
           }
-          <span class="git-sync-buttons">
-            <button
+          <button
+            class="button git-button"
+            type="button"
+            (click)="syncGit(sprint.id, 'push')"
+            [disabled]="busy() || gitBusy(sprint)"
+            title="Git Push: Stand committen und nach GitHub pushen"
+          >
+            <app-nav-icon name="git-push" />Push
+          </button>
+          @if (zipUrl(sprint); as zip) {
+            <a
               class="button git-button"
-              type="button"
-              (click)="syncGit(sprint.id, 'push')"
-              [disabled]="busy() || gitBusy(sprint)"
-              title="Git Push: Stand committen und nach GitHub pushen"
+              [href]="zip"
+              download
+              title="Code dieses Sprint-Stands als ZIP von GitHub herunterladen"
             >
-              <app-nav-icon name="git-push" />Push
+              <app-nav-icon name="git-pull" />ZIP
+            </a>
+          } @else {
+            <button class="button git-button" type="button" disabled title="Kein GitHub-Remote im Projekt hinterlegt">
+              <app-nav-icon name="git-pull" />ZIP
             </button>
-            @if (zipUrl(sprint); as zip) {
-              <a
-                class="button git-button"
-                [href]="zip"
-                download
-                title="Code dieses Sprint-Stands als ZIP von GitHub herunterladen"
-              >
-                <app-nav-icon name="git-pull" />ZIP
-              </a>
-            } @else {
-              <button class="button git-button" type="button" disabled title="Kein GitHub-Remote im Projekt hinterlegt">
-                <app-nav-icon name="git-pull" />ZIP
-              </button>
-            }
-          </span>
+          }
         </div>
       </div>
       <p class="sprint-goal">{{ sprint.goal || 'Kein Sprint-Ziel' }}</p>
@@ -145,7 +146,10 @@
             [class.active]="tab() === 'orders'"
             (click)="tab.set('orders')"
           >
-            Aufträge <span class="muted">({{ sprintProgress() }})</span>
+            Aufträge
+            <span class="tab-count" [title]="sprintProgress()"
+              >{{ sprintCounts().done }}/{{ sprintCounts().total }}</span
+            >
           </button>
           <button
             type="button"

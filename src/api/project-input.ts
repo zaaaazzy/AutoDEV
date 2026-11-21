@@ -1,7 +1,15 @@
 // Prüfung der Eingaben für PATCH /projects/:slug: je Einstellungsgruppe eine Funktion, die Spaltenzuweisungen oder den
 // Fehlertext liefert. Die SQL-Anweisung baut src/db/project-repository.ts.
 import { encryptSecret } from '../core/secrets.js';
+import {
+  parseReviewPort,
+  REVIEW_COMMAND_MAX_LENGTH,
+  REVIEW_COMMAND_MAX_LINES,
+  reviewDockerfileError,
+  reviewHealthPathError,
+} from '../core/review-config.js';
 import { parseSandboxMode } from '../core/sandbox.js';
+import { splitShellLine } from '../core/shell-words.js';
 import { REVIEW_MODES } from '../core/status.js';
 import { projectFolderError } from '../core/validation.js';
 import { isValidWorkingHours, type WorkingHours } from '../core/working-hours.js';
@@ -85,6 +93,28 @@ function parseDefinitions(body: Body): Parsed {
   return sets;
 }
 
+/**
+ * Befehlszeilen (eine je Zeile) in Argumente zerlegen – mit Anführungszeichen wie in der Shell, damit
+ * `sh -c "npm run build && npm test"` als drei Argumente ankommt. Fehler nennen Feld und Zeile für die Antwort (400).
+ */
+function splitCommandLines(raw: string, label: string): string[][] | string {
+  const commands: string[][] = [];
+  const rows = raw.split('\n');
+  for (const [index, row] of rows.entries()) {
+    if (!row.trim()) continue;
+    try {
+      commands.push(splitShellLine(row));
+    } catch (error) {
+      return `${label}, Zeile ${index + 1}: ${shellError(error)}`;
+    }
+  }
+  return commands;
+}
+
+function shellError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** Testbefehle (Live schalten) und Testbefehle je Auftrag (Tester-Schritt): ein Befehl pro Zeile. */
 function parseTestCommands(body: Body): Parsed {
   const sets: ProjectAssignment[] = [];
@@ -96,11 +126,9 @@ function parseTestCommands(body: Body): Parsed {
     if (raw === undefined) continue;
     let commands: string[][] | null = null;
     if (typeof raw === 'string' && raw.trim()) {
-      commands = raw
-        .trim()
-        .split('\n')
-        .filter((line) => line.trim())
-        .map((line) => line.trim().split(/\s+/));
+      const parsed = splitCommandLines(raw, label);
+      if (typeof parsed === 'string') return parsed;
+      commands = parsed;
     } else if (raw !== null && raw !== '') {
       return `${label}: ein Befehl pro Zeile, z. B. „npm test“.`;
     }
@@ -111,17 +139,14 @@ function parseTestCommands(body: Body): Parsed {
 
 function parseDeployCommands(body: Body): Parsed {
   if (body.deployCommands === undefined) return [];
-  const commands = typeof body.deployCommands === 'string' ? lines(body.deployCommands, /\n/) : null;
-  if (!commands || commands.length > 10 || commands.some((line) => line.length > 500)) {
+  const raw = typeof body.deployCommands === 'string' ? body.deployCommands : null;
+  const rows = raw === null ? null : lines(raw, /\n/);
+  if (raw === null || !rows || rows.length > 10 || rows.some((line) => line.length > 500)) {
     return 'Deploy-Befehle: höchstens 10 Zeilen, ein Befehl pro Zeile.';
   }
-  return [
-    {
-      column: 'deploy_commands',
-      value: commands.length ? JSON.stringify(commands.map((line) => line.split(/\s+/))) : null,
-      cast: 'jsonb',
-    },
-  ];
+  const commands = splitCommandLines(raw, 'Deploy-Befehle');
+  if (typeof commands === 'string') return commands;
+  return [{ column: 'deploy_commands', value: commands.length ? JSON.stringify(commands) : null, cast: 'jsonb' }];
 }
 
 function parseReviewSettings(body: Body): Parsed {
@@ -132,15 +157,44 @@ function parseReviewSettings(body: Body): Parsed {
     sets.push({ column: 'review_mode', value: body.reviewMode });
   }
   if (body.reviewCommand !== undefined) {
-    const line = typeof body.reviewCommand === 'string' ? body.reviewCommand.trim() : null;
-    if (line === null || line.length > 500) return 'Review-Befehl: ein Befehl, höchstens 500 Zeichen.';
-    sets.push({ column: 'review_command', value: line ? JSON.stringify(line.split(/\s+/)) : null, cast: 'jsonb' });
+    // Eine Zeile je Befehl, als Ganzes gespeichert (kein Wort-Splitting): der Container führt sie unter `sh -e` aus.
+    const commands = body.reviewCommand === null ? [] : lines(body.reviewCommand, /\r?\n/);
+    if (
+      !commands ||
+      commands.length > REVIEW_COMMAND_MAX_LINES ||
+      commands.some((line) => line.length > REVIEW_COMMAND_MAX_LENGTH)
+    ) {
+      return `Review-Befehle: ein Befehl pro Zeile, höchstens ${REVIEW_COMMAND_MAX_LINES} Zeilen mit je bis zu ${REVIEW_COMMAND_MAX_LENGTH} Zeichen.`;
+    }
+    sets.push({ column: 'review_command', value: commands.length ? JSON.stringify(commands) : null, cast: 'jsonb' });
   }
   if (body.reviewUrl !== undefined) {
     const url = typeof body.reviewUrl === 'string' ? body.reviewUrl.trim() : null;
     if (url === null || (url && !/^https?:\/\/\S{1,300}$/.test(url)))
       return 'Review-Adresse: leer lassen oder eine http(s)-Adresse angeben.';
     sets.push({ column: 'review_url', value: url || null });
+  }
+  return sets;
+}
+
+/** Port der App im Container, Health-Pfad und projekteigenes Dockerfile; leer = Standard (4200, „/“, Standard-Image). */
+function parseReviewContainer(body: Body): Parsed {
+  const sets: ProjectAssignment[] = [];
+  if (body.reviewPort !== undefined) {
+    const port = parseReviewPort(body.reviewPort);
+    if (port === undefined) return 'Port der App im Container: 1 bis 65535 oder leer (Standard 4200).';
+    sets.push({ column: 'review_port', value: port });
+  }
+  for (const [field, column, check] of [
+    ['reviewHealthPath', 'review_health_path', reviewHealthPathError],
+    ['reviewDockerfile', 'review_dockerfile', reviewDockerfileError],
+  ] as const) {
+    const raw = body[field];
+    if (raw === undefined) continue;
+    const value = raw === null ? '' : typeof raw === 'string' ? raw.trim() : null;
+    const error = value === null ? 'Ungültige Eingabe.' : check(value);
+    if (error) return error;
+    sets.push({ column, value: value || null });
   }
   return sets;
 }
@@ -286,6 +340,7 @@ const GROUPS: ((body: Body) => Parsed)[] = [
   parseTestCommands,
   parseDeployCommands,
   parseReviewSettings,
+  parseReviewContainer,
   parseTexts,
   parseSprintSettings,
   parseWorkingHours,

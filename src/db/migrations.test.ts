@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import pg from 'pg';
-import { MIGRATIONS, MIGRATION_LOCK, runMigrations, type Migration } from './migrations.js';
+import { MIGRATIONS, MIGRATION_LOCK, REVIEW_CONTAINER_SETTINGS, runMigrations, type Migration } from './migrations.js';
 import { SCHEMA } from './schema.js';
 import { coverageHistory, coverageOverview } from '../api/coverage.js';
 import { COVERAGE_AREA_ALIASES, COVERAGE_AREA_KEYS, coverageAreaKey } from '../core/coverage-areas.js';
@@ -200,8 +200,8 @@ test('Migration 29: Bug-Kategorie auf PostgreSQL – nur die acht Werte, Zustand
       client.query(`INSERT INTO bugs (project_slug, title, category) VALUES ('shop', 'Bereich', 'git-sync')`),
       /bugs_category_check/,
     );
-    // Danach bleibt nur noch die Folgevorschlag-Migration (30) offen.
-    assert.deepEqual(await runMigrations(client), [30]);
+    // Danach bleiben nur noch Folgevorschläge (30) und Review-Container (31) offen.
+    assert.deepEqual(await runMigrations(client), [30, 31]);
   } finally {
     client.release();
     await pool.end();
@@ -535,4 +535,63 @@ test('Migrationen: Restore-Probe kommt per Migration auch in bestehende Datenban
   const migration = MIGRATIONS.find((step) => step.version === 22);
   assert.match(migration?.sql ?? '', /'restore_probe', TRUE, 604800, 'restore_probe'/);
   assert.match(migration?.sql ?? '', /ON CONFLICT \(key\) DO NOTHING/);
+});
+
+test('Migration 31: Review-Spalten per Migration, review_command wird vom Wort-Array zur Zeile', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 31);
+  assert.equal(migration?.name, 'review-container-konfigurierbar');
+  assert.equal(migration?.sql, REVIEW_CONTAINER_SETTINGS);
+  for (const column of ['review_port', 'review_health_path', 'review_dockerfile']) {
+    assert.match(REVIEW_CONTAINER_SETTINGS, new RegExp(`ADD COLUMN IF NOT EXISTS ${column}`));
+    assert.doesNotMatch(SCHEMA, new RegExp(column));
+  }
+  assert.match(REVIEW_CONTAINER_SETTINGS, /review_port BETWEEN 1 AND 65535/);
+  assert.match(REVIEW_CONTAINER_SETTINGS, /string_agg\(word, ' '\)/);
+});
+
+test('Migration 31 auf PostgreSQL: Wort-Array wird eine Zeile, Einzelwort bleibt, Leeres wird NULL, Port geprüft', async (t) => {
+  const admin = await adminPool(t);
+  if (!admin) return;
+  const name = `devlog_migr_review_${process.pid}`;
+  await dropDatabase(admin, name);
+  await admin.query(`CREATE DATABASE ${name}`);
+  const pool = new pg.Pool({ connectionString: databaseUrl(name), max: 1 });
+  const client = await pool.connect();
+  try {
+    await runMigrations(
+      client,
+      MIGRATIONS.filter((step) => step.version <= 30),
+    );
+    const insert = (slug: string, command: string | null) =>
+      client.query(`INSERT INTO projects (slug, name, repository, review_command) VALUES ($1, $1, '/p', $2::jsonb)`, [
+        slug,
+        command,
+      ]);
+    await insert('aideation', JSON.stringify(['sh', 'deploy/review/aideation-review.sh']));
+    await insert('spiel', JSON.stringify(['npm', 'run', 'review']));
+    await insert('einzeln', JSON.stringify(['start.sh']));
+    await insert('leer', JSON.stringify([]));
+    await insert('ohne', null);
+    assert.deepEqual(await runMigrations(client), [31]);
+    const rows = (
+      await client.query<{ slug: string; command: unknown }>(
+        'SELECT slug, review_command AS command FROM projects ORDER BY slug',
+      )
+    ).rows;
+    assert.deepEqual(Object.fromEntries(rows.map((row) => [row.slug, row.command])), {
+      aideation: ['sh deploy/review/aideation-review.sh'],
+      einzeln: ['start.sh'],
+      leer: null,
+      ohne: null,
+      spiel: ['npm run review'],
+    });
+    await client.query(`UPDATE projects SET review_port = 8080, review_health_path = '/health' WHERE slug = 'spiel'`);
+    await assert.rejects(client.query(`UPDATE projects SET review_port = 0 WHERE slug = 'spiel'`), /review_port/);
+    await assert.rejects(client.query(`UPDATE projects SET review_port = 70000 WHERE slug = 'spiel'`), /review_port/);
+  } finally {
+    client.release();
+    await pool.end();
+    await dropDatabase(admin, name);
+    await admin.end();
+  }
 });

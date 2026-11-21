@@ -108,9 +108,14 @@ export const ENVIRONMENT_TODO =
 export const GIT_FOLDER_TODO = 'Arbeitsordner aufräumen (Git)';
 
 /**
- * Arbeitscontainer bzw. Sandbox kaputt (npm-Cache gehört root, Abhängigkeiten nicht installierbar, Befehl fehlt im
+ * Arbeitscontainer bzw. Sandbox kaputt (npm-Cache gehört root, node_modules-Volume nicht vorbereitbar, Befehl fehlt im
  * Image, Container unter dem Lauf erneuert): kein Fehler im Auftrag. Jeder weitere Auftrag des Projekts liefe in dieselbe
  * Wand – Bug-Berichte, Problemanalysen und Wiederholungen kosten dann nur Tokens.
+ *
+ * Nicht dazu gehört eine gescheiterte Installation der Projekt-Abhängigkeiten („Projekt-Abhängigkeiten:“ aus
+ * sandbox-base.ts, z. B. ERESOLVE, „workspace:“-Protokoll, defektes Lockfile): Das ist ein Fehler im package.json des
+ * Projekts, also im Auftrag – mit normalem Bug-Bericht statt Projekt-Pause. Nur wenn in deren Ausgabe ein echtes
+ * Infrastrukturmuster steht (root-eigener Cache), gilt sie weiter als Sandbox-Defekt.
  */
 const SANDBOX_PATTERNS = [
   /^(?:Sandbox|Arbeitscontainer): /m,

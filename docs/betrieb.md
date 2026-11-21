@@ -427,7 +427,7 @@ Beim Anlegen mit dieser Vorlage belegt AIdeation die Projekt-Einstellungen vor (
 |---|---|
 | Testbefehle (Live schalten) | `npm run build`, `npm test`, `npm run test:smoke` |
 | Testbefehle je Auftrag | `npm run typecheck`, `npx vitest run {tests}`, `npm run test:smoke` |
-| Review-Befehl | `npm run review` (baut und liefert im Review-Container auf `REVIEW_FRONTEND_PORT` aus) |
+| Review-Befehle | `npm run review` (baut und liefert im Review-Container auf `REVIEW_FRONTEND_PORT` aus) |
 | Vorschau-Adresse (visuelle Prüfung) | `http://localhost:5180` |
 | Regeln für die Agents | Spiellogik in `src/logic/` getrennt von den Phaser-Szenen, Tests neben der Logik |
 
@@ -449,6 +449,65 @@ ausführen.
 **Linux:** Fehlen Chromium Systembibliotheken (Smoke-Test bricht mit „missing dependencies“ ab), einmalig
 `sudo npx playwright install-deps chromium` ausführen. Liegen die Playwright-Browser an einem eigenen Ort
 (`PLAYWRIGHT_BROWSERS_PATH`), übernehmen die Worker-Installationsskripte die Variable in die Env-Datei des Dienstes.
+
+## Beliebige Anwendung reviewen
+
+„Version ansehen“ (Sprint-Ansicht, Freigabe, Abnahme) startet einen Commit des Projekts in einem Review-Container
+(`src/runner/review-slots.ts`, Hintergrund in `laufzeit.md`, „Review-Container ohne echte Zugänge“). Was dafür nötig
+ist, steht in den Projekt-Einstellungen unter **Review & Deploy**:
+
+| Einstellung | Bedeutung | Leer |
+|---|---|---|
+| Review-Befehle | Ein Befehl pro Zeile, laufen nacheinander (`sh -e`: die erste gescheiterte Zeile beendet den Container). Arbeitsordner ist `/work` mit dem ausgecheckten Stand; liegt dort eine `package-lock.json`, läuft vorher `npm ci`. | kein Review möglich |
+| Port der App im Container | Darauf muss die App lauschen; der Worker mappt ihn auf `127.0.0.1:420<n>` und setzt `REVIEW_FRONTEND_PORT`. | 4200 |
+| Health-Pfad | Antwortet `GET <Adresse><Pfad>` mit Status < 500, gilt der Container als bereit. | `/` |
+| Review-Dockerfile | Pfad relativ zum Projekt; AIdeation baut daraus vor jedem Start ein eigenes Image (Python, Go, …). | Standard-Image: Node.js, Git, Benutzer `node` |
+
+Umgebungsvariablen im Container: `REVIEW_FRONTEND_PORT` (Port der App, siehe oben), `REVIEW_HOST` (`0.0.0.0` – die App
+muss auf allen Adressen lauschen, nicht nur `localhost`), `REVIEW_PUBLIC_URL` (`http://localhost:420<n>`, Adresse im
+Browser), `REVIEW_DATABASE_URL` und `DATABASE_URL` (Kopie der Projektdatenbank bzw. leere Slot-Datenbank), `REVIEW_COMMIT`
+und `REVIEW_LABEL`. Die Container sind nur auf diesem Rechner erreichbar; Zugriff von aussen und Compose-Projekte sind
+nicht vorgesehen.
+
+Drei Muster:
+
+1. **Node-App auf `$REVIEW_FRONTEND_PORT`** (Standard-Image). Die App liest den Port aus der Umgebung und bindet an
+   `$REVIEW_HOST`:
+   ```
+   npm run build
+   node dist/server.js
+   ```
+   AIdeation selbst: `sh deploy/review/aideation-review.sh`; die Phaser-Vorlage: `npm run review`.
+2. **Statisches Frontend** (Vite, Angular, React …), Standard-Image – bauen und ausliefern:
+   ```
+   npx vite build
+   npx vite preview --host $REVIEW_HOST --port $REVIEW_FRONTEND_PORT
+   ```
+   Für Angular entsprechend `npx ng build` und `npx http-server dist/<app>/browser -a $REVIEW_HOST -p $REVIEW_FRONTEND_PORT`
+   (oder ein eigenes Skript). Der Port im Container bleibt 4200, solange der Befehl `$REVIEW_FRONTEND_PORT` benutzt.
+3. **Eigene Laufzeit per Dockerfile** (Python, Go, Java, …). Review-Dockerfile z. B. `deploy/review/Dockerfile`, Port der
+   App im Container z. B. `5000`, Health-Pfad z. B. `/health`. Das Dockerfile muss
+
+   - den Stand nach `/work` kopieren und `WORKDIR /work` setzen (der Build-Kontext ist der gewählte Commit, ohne `.env`),
+   - einen eigenen Benutzer anlegen und mit `USER` setzen (ein Image, das als root läuft, wird abgelehnt),
+   - `sh` enthalten (die Review-Befehle laufen als `sh -e`-Skript in `/work`).
+
+   Beispiel Flask:
+   ```Dockerfile
+   FROM python:3.13-slim
+   RUN useradd --create-home app && mkdir /work && chown app:app /work
+   WORKDIR /work
+   COPY --chown=app:app . .
+   RUN pip install --no-cache-dir -r requirements.txt
+   USER app
+   ```
+   Review-Befehle: `python -m flask run --host $REVIEW_HOST --port $REVIEW_FRONTEND_PORT`. Das Image heisst
+   `aideation-review-<projekt>` und wird vor jedem Start mit Docker-Cache neu gebaut; Abhängigkeiten gehören darum in
+   das Dockerfile, nicht in die Review-Befehle. Fehlt das Dockerfile im gewählten Stand oder scheitert der Build,
+   zeigt der Slot die Ursache.
+
+Desktop-Anwendungen brauchen einen Browser-Modus im Projekt selbst; der Review-Container zeigt nur, was über HTTP
+antwortet.
 
 ## Fehlerbehebung (Betrieb)
 
